@@ -494,6 +494,73 @@ def test_capsys_noglobal(testdir_setup):
     result.assert_outcomes(failed=1)  # this runs as function node obj
 
 
+@pytest.fixture
+def testdir_class(testdir_setup):
+    testdir_setup.makepyfile("""
+    class TestClass:
+        '''docstring'''
+        def test_one(self):
+            x = "this"                        # line 4
+            assert "h" in x
+
+        def test_two(self):
+            x = "hello"                       # line 8
+            assert hasattr(x, 'check')
+    """)
+    return testdir_setup
+
+
+def test_class_simple(testdir_class):
+    pe = testdir_class.spawn_pytest("--break=test_class_simple.py:4")
+    pe.expect(prompt_re)
+    befs = LineMatcher(unansi(pe.before))
+    befs.fnmatch_lines([
+        ">*/test_class_simple.py(4)test_one()",
+        "->*# line 4"
+    ])
+    pe.sendline("c")
+
+
+def test_class_early(testdir_class):
+    # target docstring
+    pe = testdir_class.spawn_pytest("--break=test_class_early.py:2")
+    pe.expect(prompt_re)
+    befs = LineMatcher(unansi(pe.before))
+    befs.fnmatch_lines([
+        ">*/test_class_early.py(4)test_one()",
+        "->*# line 4"
+    ])
+    pe.sendline("c")
+
+
+def test_class_gap(testdir_class):
+    pe = testdir_class.spawn_pytest("--break=test_class_gap.py:6")
+    pe.expect(prompt_re)
+    befs = LineMatcher(unansi(pe.before))
+    befs.fnmatch_lines([
+        ">*/test_class_gap.py(8)test_two()",
+        "->*# line 8"
+    ])
+    pe.sendline("c")
+
+
+# XXX while it's nice that this works, not sure it's expected behavior; should
+# figure out why, clarify intent, and state explicitly somewhere (may need to
+# learn more about collection internals)
+def test_class_gap_named(testdir_class):
+    pe = testdir_class.spawn_pytest(
+        "--break=test_class_gap_named.py:6 "
+        "test_class_gap_named.py::TestClass::test_two"
+    )
+    pe.expect(prompt_re)
+    befs = LineMatcher(unansi(pe.before))
+    befs.fnmatch_lines([
+        ">*/test_class_gap_named.py(8)test_two()",
+        "->*# line 8"
+    ])
+    pe.sendline("c")
+
+
 if __name__ == "__main__":
     # Some print statements only show up when a logfile envvar is present
     #
