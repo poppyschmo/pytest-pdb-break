@@ -4,19 +4,18 @@
 
 ;;; Commentary:
 
-;; Would be nice to just use the provided runner, but can't figure out how to
-;; convert the running proc buffer to a Python inferior cleanly.
+;; This obviously isn't on MELPA, but `straight.el' users can use this recipe:
 ;;
-;; Without this pytest plugin, you could do something like:
+;;   '(:host github :repo "poppyschmo/pytest-pdb-break"
+;;     :files (:defaults "examples/*.el"))
 ;;
-;;   (sit-for 2)
-;;   (python-shell-send-string (format "b %s:%d" file lnum))
-;;   (python-shell-send-string "c")
+;; Note: the completion modifications are useless without pdb++. No idea if
+;; they hold up when summoned by `company-capf'.
 ;;
-;; But this often fails.
+;; TODO:
+;; * Add option to hack PYTHONPATH for environments where the plugin itself
+;;   isn't installed (only useful to users of straight-like package managers)
 ;;
-;; The completion modifications are useless without pdb++. No idea if they
-;; hold up when summoned by `company-capf'.
 
 ;;; Code:
 
@@ -103,13 +102,9 @@ PROC is the buffer's current process."
   "Setup a pytest-pdb-break comint buffer.
 PROC is the buffer's current process."
   (add-to-list 'pytest-pdb-break-processes proc)
-  (unless (advice-member-p #'pytest-pdb-break-buffer-teardown
-                           'python-shell-completion-get-completions)
-    (advice-add 'python-shell-completion-get-completions :around
-                #'pytest-pdb-break-ad-around-get-completions))
+  (advice-add 'python-shell-completion-get-completions :around
+              #'pytest-pdb-break-ad-around-get-completions)
   (with-current-buffer (process-buffer proc)
-    ;; Make pdb++ prompt trigger non-native-completion fallback
-    (setq-local python-shell-prompt-pdb-regexp "[(<]*[Ii]?[Pp]db[+>)]+ ")
     (setq-local python-shell-completion-native-enable nil)
     (add-hook 'kill-buffer-hook (apply-partially
                                  #'pytest-pdb-break-buffer-teardown
@@ -117,6 +112,7 @@ PROC is the buffer's current process."
               nil t)
     (run-hook-with-args 'pytest-pdb-break-after-functions proc)))
 
+;;;###autoload
 (defun pytest-pdb-break-here (lnum node-info root-dir)
   "Drop into pdb after spawning an inferior pytest process, go to LNUM.
 NODE-INFO is a list of pytest node-id components. ROOT-DIR is the
@@ -130,14 +126,14 @@ project/repo's root directory."
          (break (format "--break=%s:%s" file lnum))
          (args (append (cons "-mpytest" pytest-pdb-break-extra-args)
                        (list break argstr)))
+         ;; Make pdb++ prompt trigger non-native-completion fallback
+         (python-shell-prompt-pdb-regexp "[(<]*[Ii]?[Pp]db[+>)]+ ")
          (python-shell-interpreter (or pytest-pdb-break-interpreter
                                        python-shell-interpreter))
          (python-shell-interpreter-args (apply #'mapconcat
                                                (list #'identity args " ")))
-         ;; python-shell-prompt-detect-failure-warning ; suppress startup spam
          (cmd (python-shell-calculate-command))
-         (proc (and (not (bound-and-true-p pytest-pdb-break--dry-run))
-                    (run-python cmd nil t))))
+         (proc (and (not pytest-pdb-break--dry-run) (run-python cmd nil t))))
     (if proc
         (pytest-pdb-break-buffer-setup proc)
       (message "Would've run: %S\nfrom: %S" cmd default-directory))))
