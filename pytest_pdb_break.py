@@ -198,16 +198,9 @@ class PdbBreak:
             else:
                 raise RuntimeError("breakpoint file couldn't be determined")
         lnum = find_breakable_line(self.wanted.file, self.wanted.lnum)
-        locs = (l for l in locs if
-                os.path.samefile(l.file, self.wanted.file) and l.lnum <= lnum)
-        locs = sorted(locs, key=lambda i: i.lnum, reverse=True)
-        self.target = next(iter(locs), None)
+        self.target = get_target(lnum, self.wanted.file, locs)
         if not self.target:
             raise RuntimeError("a valid breakpoint could not be determined")
-        # When lines match, we're already at the breakpoint, so settrace's
-        # callees won't see it.  Another tack would be to forgo calling
-        # ``_set_stopinfo`` after resetting and instead just enter the target
-        # already stopped (this is what --trace does).
         if self.target.lnum == lnum:
             lnum = find_breakable_line(self.wanted.file, lnum + 1)
         if lnum != self.wanted.lnum:
@@ -335,6 +328,16 @@ class PdbBreak:
         yield
 
 
+def get_target(upper, filename, locations):
+    """Return a viable target from a list of item locations."""
+    from operator import attrgetter
+    # Note: this isn't the same as not reversing and taking the last item
+    locs = (l for l in locations if
+            os.path.samefile(l.file, filename) and l.lnum <= upper)
+    locs = sorted(locs, key=attrgetter("lnum"), reverse=True)
+    return locs and locs[0]
+
+
 def find_breakable_line(filename, lineno):
     """Find the next breakable line.
 
@@ -363,6 +366,29 @@ def find_breakable_line(filename, lineno):
 # Tests for this plugin (requires pexpect)
 
 prompt_re = r"\(Pdb[+]*\)\s?"
+
+
+def test_get_target(tmpdir):
+    # XXX this assumes parametrized variants, whether their names are
+    # auto-assigned or not, always appear in the order they'll be called.
+    from pathlib import Path
+    os.chdir(tmpdir)
+    Path("file_a").touch()
+    Path("file_b").touch()
+    Path("file_c").touch()
+
+    items = [BreakLoc(file="file_a", lnum=1, name="test_notfoo"),
+             BreakLoc(file="file_b", lnum=1, name="test_foo"),
+             BreakLoc(file="file_b", lnum=10, name="test_bar[one-1]"),
+             BreakLoc(file="file_b", lnum=10, name="test_bar[two-2]"),
+             BreakLoc(file="file_b", lnum=99, name="test_baz"),
+             BreakLoc(file="file_c", lnum=1, name="test_notbaz")]
+
+    assert get_target(30, "file_b", items) == items[2]
+    assert items[2].name == "test_bar[one-1]"
+    items.reverse()
+    assert get_target(30, "file_b", items) == items[2]
+    assert items[2].name == "test_bar[two-2]"
 
 
 def unansi(byte_string, as_list=True):
@@ -559,65 +585,69 @@ def test_capsys_noglobal(testdir_setup):
 def testdir_class(testdir_setup):
     testdir_setup.makepyfile("""
     class TestClass:
-        '''docstring'''
+        class_attr = 1
+
         def test_one(self):
-            x = "this"                        # line 4
+            '''multi
+            line docstring
+            '''
+            x = "this"                        # line 8
             assert "h" in x
 
         def test_two(self):
-            x = "hello"                       # line 8
+            x = "hello"                       # line 12
             assert hasattr(x, 'check')
     """)
     return testdir_setup
 
 
 def test_class_simple(testdir_class):
-    pe = testdir_class.spawn_pytest("--break=test_class_simple.py:4")
+    pe = testdir_class.spawn_pytest("--break=test_class_simple.py:8")
     pe.expect(prompt_re)
     befs = LineMatcher(unansi(pe.before))
     befs.fnmatch_lines([
-        ">*/test_class_simple.py(4)test_one()",
-        "->*# line 4"
+        ">*/test_class_simple.py(8)test_one()",
+        "->*# line 8"
     ])
     pe.sendline("c")
 
 
 def test_class_early(testdir_class):
-    # target docstring
-    pe = testdir_class.spawn_pytest("--break=test_class_early.py:2")
+    # Target docstring
+    pe = testdir_class.spawn_pytest("--break=test_class_early.py:5")
     pe.expect(prompt_re)
     befs = LineMatcher(unansi(pe.before))
     befs.fnmatch_lines([
-        ">*/test_class_early.py(4)test_one()",
-        "->*# line 4"
+        ">*/test_class_early.py(8)test_one()",
+        "->*# line 8"
     ])
     pe.sendline("c")
 
 
 def test_class_gap(testdir_class):
-    pe = testdir_class.spawn_pytest("--break=test_class_gap.py:6")
+    pe = testdir_class.spawn_pytest("--break=test_class_gap.py:10")
     pe.expect(prompt_re)
     befs = LineMatcher(unansi(pe.before))
     befs.fnmatch_lines([
-        ">*/test_class_gap.py(8)test_two()",
-        "->*# line 8"
+        ">*/test_class_gap.py(12)test_two()",
+        "->*# line 12"
     ])
     pe.sendline("c")
 
 
-# XXX while it's nice that this works, not sure it's expected behavior; should
-# figure out why, clarify intent, and state explicitly somewhere (may need to
-# learn more about collection internals)
 def test_class_gap_named(testdir_class):
+    # XXX while it's nice that this passes, it might not be desirable: if a
+    # requested line precedes the start of the first test item, an error is
+    # raised; but this doesn't apply to intervals between items, as shown here
     pe = testdir_class.spawn_pytest(
-        "--break=test_class_gap_named.py:6 "
+        "--break=test_class_gap_named.py:10 "
         "test_class_gap_named.py::TestClass::test_two"
     )
     pe.expect(prompt_re)
     befs = LineMatcher(unansi(pe.before))
     befs.fnmatch_lines([
-        ">*/test_class_gap_named.py(8)test_two()",
-        "->*# line 8"
+        ">*/test_class_gap_named.py(12)test_two()",
+        "->*# line 12"
     ])
     pe.sendline("c")
 
