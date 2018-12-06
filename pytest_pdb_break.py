@@ -237,17 +237,21 @@ class PdbBreak:
             if event == "line":
                 line = frame.f_lineno
                 if line >= self.wanted.lnum:
-                    self.last_pdb.reset()
-                    self.last_pdb.botframe = frame.f_back
-                    # Make Bdb.stophere() return False
-                    self.last_pdb._set_stopinfo(frame.f_back, None, 0)
-                    # TODO consider recursive case; normally, there's no need
-                    # to re-instrument prior frames because they're all
-                    # internal to pytest.
-                    frame.f_trace = self.last_pdb.trace_dispatch
-                    self.last_pdb.set_break(self.wanted.file, line, True)
-                    sys.settrace(self.last_pdb.trace_dispatch)  # the handoff
-                    return self.last_pdb.dispatch_line(frame)
+                    inst = self.last_pdb
+                    if self.debug:
+                        assert inst.botframe.f_code.co_filename == __file__
+                        assert inst.botframe.f_code.co_name == "runcall_until"
+                        assert inst.stopframe is inst.botframe
+                    # This loop is meant to handle the recursive case;
+                    # otherwise, there's no need to reinstrument "backwards"
+                    # because those frames are internal to pytest.
+                    _frame = frame
+                    while _frame and _frame is not inst.botframe:
+                        _frame.f_trace = inst.trace_dispatch
+                        _frame = _frame.f_back
+                    inst.set_break(self.wanted.file, line, True)
+                    sys.settrace(inst.trace_dispatch)  # handoff
+                    return inst.dispatch_line(frame)
         return self.trace_handoff
 
     def runcall_until(self, *args, **kwargs):
@@ -298,14 +302,9 @@ class PdbBreak:
                            f_back=sys._getframe().f_back)
         from bdb import BdbQuit
         res = None
-        # Traditional approach (would need smarter ``find_breakable_line``)::
-        #
-        #   inst.set_break(self.wanted.file, self.wanted.lnum, True)
-        #   inst.reset()
-        #   inst._set_stopinfo(sys._getframe(), None, -1)
-        #   # Allow ``Pdb.dispatch_call()`` to set ``inst.botframe``
-        #   sys.settrace(inst.trace_dispatch)
-        #
+        inst.reset()
+        inst.botframe = sys._getframe()
+        inst._set_stopinfo(inst.botframe, None, 0)
         sys.settrace(self.trace_handoff)
         try:
             res = func(*args, **kwargs)
