@@ -226,6 +226,30 @@ class PdbBreak:
         """
         self.last_pdb = pdb
 
+    def trace_handoff(self, frame, event, arg):
+        if frame.f_code.co_filename == self.wanted.file:
+            if self.debug:
+                self.prinspect(event=event, frame=frame)
+            if event == "call":
+                name = frame.f_code.co_name
+                if name == self.target.name:
+                    frame.f_trace = self.trace_handoff
+            if event == "line":
+                line = frame.f_lineno
+                if line >= self.wanted.lnum:
+                    self.last_pdb.reset()
+                    self.last_pdb.botframe = frame.f_back
+                    # Make Bdb.stophere() return False
+                    self.last_pdb._set_stopinfo(frame.f_back, None, 0)
+                    # TODO consider recursive case; normally, there's no need
+                    # to re-instrument prior frames because they're all
+                    # internal to pytest.
+                    frame.f_trace = self.last_pdb.trace_dispatch
+                    self.last_pdb.set_break(self.wanted.file, line, True)
+                    sys.settrace(self.last_pdb.trace_dispatch)  # the handoff
+                    return self.last_pdb.dispatch_line(frame)
+        return self.trace_handoff
+
     def runcall_until(self, *args, **kwargs):
         """Run test with args, stopping at location.
 
@@ -266,21 +290,23 @@ class PdbBreak:
             # TODO figure out why resumed state isn't already active
             # Maybe we have to run some hooks?
             capfix._resume()
-        inst.set_break(self.wanted.file, self.wanted.lnum, True)
         if self.debug:
             self.prinspect(this_frame=sys._getframe(),
                            cap_method=self.capman._method,
                            kwargs=kwargs,
                            stdout=type(sys.stdout),
-                           f_back=sys._getframe().f_back,
-                           breaks=inst.breaks)
+                           f_back=sys._getframe().f_back)
         from bdb import BdbQuit
         res = None
-        inst.reset()
-        inst._set_stopinfo(sys._getframe(), None, -1)
-        # ``inst.botframe`` is set to ^^^ for us by dispatch_call, but maybe
-        # nicer to set explicitly here
-        sys.settrace(inst.trace_dispatch)
+        # Traditional approach (would need smarter ``find_breakable_line``)::
+        #
+        #   inst.set_break(self.wanted.file, self.wanted.lnum, True)
+        #   inst.reset()
+        #   inst._set_stopinfo(sys._getframe(), None, -1)
+        #   # Allow ``Pdb.dispatch_call()`` to set ``inst.botframe``
+        #   sys.settrace(inst.trace_dispatch)
+        #
+        sys.settrace(self.trace_handoff)
         try:
             res = func(*args, **kwargs)
         except BdbQuit:
@@ -312,7 +338,11 @@ class PdbBreak:
 
 def find_breakable_line(filename, lineno):
     """Find the next breakable line.
-    Like ``pdb.Pdb.checkline`` but without frame awareness.
+
+    This is like ``pdb.Pdb.checkline`` but without any frame awareness.
+    If ever ditching our kludgy trace function for real breakpoints,
+    we'd need to obtain source intel and also learn exactly where the
+    debugger is willing to break.
     """
     import linecache
     # bdb.canonic without caching or angle-bracket guard
