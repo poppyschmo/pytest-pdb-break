@@ -16,22 +16,25 @@ if sys.version_info < (3, 6):
 
 # Note: if later adding function-based breaks, see ``compat.getlocation``
 class BpLoc(namedtuple("BreakpointLocation", "file lnum name")):
-    """Data object holding filename, line number, test name
-
-    Note: Item node locations are zero-indexed. But pdb breakpoints
-    aren't. And neither are linecache's.
-    """
+    """Data object holding filename, line number, test name."""
     def __new__(cls, *args, **kwargs):
         if len(args) == 1:
             item = args[0]
+            # Should probably just invoke constructor methods directly instead
+            # of playing overload cop, but space is tight in those [list comps]
             if isinstance(item, str):
                 return cls.from_cmd_option_arg_spec(item)
             if hasattr(item, "location"):
-                # FIXME move this to a classmethod for symmetry
-                assert isinstance(item, pytest.Item)
-                file, lnum, name = item.location
-                args = file, lnum + 1, name
+                return cls.from_pytest_item(item)
         return super().__new__(cls, *args, **kwargs)
+
+    @classmethod
+    def from_pytest_item(cls, item):
+        # Note: pytest.Item.location line numbers are zero-indexed, but pdb
+        # breakpoints aren't, and neither are linecache's.
+        assert isinstance(item, pytest.Item)
+        file, lnum, name = item.location
+        return cls(file, lnum + 1, name)
 
     @classmethod
     def from_cmd_option_arg_spec(cls, string):
