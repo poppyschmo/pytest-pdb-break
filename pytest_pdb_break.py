@@ -561,21 +561,15 @@ def test_class_gap_named(testdir_class):
     pe.sendline("c")
 
 
-if __name__ == "__main__":
-    # Some print statements only show up when a logfile envvar is present
-    #
-    # Vim:
-    #   :let $PDBBRK_DEBUG = "1" | let $PDBBRK_LOGFILE = "/dev/pts/7"
-    #
-    # Emacs:
-    #   (progn (setenv "PDBBRK_DEBUG" "1")
-    #          (setenv "PDBBRK_LOGFILE" "/tmp/pdb_break.log"))
-    #
-    if not os.getenv("PDBBRK_DEVELOP"):
-        cmdline = ("pytest", "-p", "pytester", "--noconftest", __file__)
-        if sys.platform.startswith("linux"):
-            sys.stdout.flush()
-            os.execlp("python", sys.executable, "-m", *cmdline)
-        else:
-            raise RuntimeError("The tests above aren't meant to be discovered."
-                               " Try running:\n%s" % " ".join(cmdline))
+if __name__ == "__main__" and not os.getenv("PDBBRK_HACK"):
+    cmdline = ("pytest", "-p", "pytester", "--noconftest", __file__)
+    if sys.platform.startswith("linux"):
+        sys.stdout.flush()
+        os.execlp("python", sys.executable, "-m", *cmdline)
+    else:
+        raise RuntimeError("The tests above aren't meant to be discovered."
+                           " Try running:\n%s" % " ".join(cmdline))
+
+# :let $PDBBRK_DEBUG = "1" | let $PDBBRK_LOGFILE = "/dev/pts/7"
+#
+# (progn (setenv "PDBBRK_DEBUG" "1") (setenv "PDBBRK_LOGFILE" "/dev/pts/7"))
