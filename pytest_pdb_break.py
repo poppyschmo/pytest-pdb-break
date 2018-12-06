@@ -60,41 +60,53 @@ def pytest_configure(config):
 
 # Can't figure out how to use pdb to inspect these hooks, so it's this for now
 class LoggingHelper:
+    # XXX Don't register .close or .shutdown, etc. with any teardown machinery
+    # Warning: some functions eval source code in .LOGDEFS, if defined
     LOGFILE = os.getenv("PDBBRK_LOGFILE")  # TTY devices only
-    LOGDEFS = os.getenv("PDBBRK_LOGYAML")  # Must be abspath
+    LOGDEFS = os.getenv("PDBBRK_LOGYAML")
     HANDLER_NAME = "PDB BREAK (DEBUG)"
     LEVEL = "DEBUG"
     logfile = None
     logdefs = None
 
-    def __init__(self):
+    @classmethod
+    def _module_init(cls):
         import logging
-        self.level = getattr(logging, self.LEVEL)
-        self.logger = self.get_logger(type(self).__name__)
-        self._prinspect_next = {}
-        self.logfile.write("\n")
-        if self.LOGDEFS:
-            self.load_logdefs()
-        self.logfile.flush()
+        assert sys.platform.startswith("linux")
+        cls._prinspect_next = {}
+        if hasattr(cls.logfile, "closed"):
+            assert not cls.logfile.closed
+            return
+        cls.logfile = open(cls.LOGFILE, "w")
+        assert os.isatty(cls.logfile.fileno())
+        cls.logfile.write("\n")
+        if cls.LOGDEFS:
+            cls.load_logdefs()
+        cls.logfile.flush()
+        klass = type("UnifiedLogger", (logging.Logger, cls), {})
+        logging.setLoggerClass(klass)
 
-    def load_logdefs(self):
+    @classmethod
+    def load_logdefs(cls):
+        # Often fails because of syntax errors, so helps to run at import time
         try:
             import yaml
         except ImportError:
             raise UserWarning("No logging defs found")
         else:
-            with open(self.LOGDEFS) as flo:
-                self.logdefs = yaml.load(flo)
-        self.logfile.write("Loaded log defs from {!r}\n".format(self.LOGDEFS))
+            with open(cls.LOGDEFS) as flo:
+                cls.logdefs = yaml.load(flo)
+        cls.logfile.write("Loaded log defs from {!r}\n".format(cls.LOGDEFS))
 
     def _log_as(self, frame, msg, exc_info=None):
         """Log msg, impersonating frame."""
         co = frame.f_code
-        record = self.logger.makeRecord(
-            self.logger.name, self.level, co.co_filename, frame.f_lineno,
+        name = frame.f_locals.get("__lname", self.name)
+        record = self.makeRecord(
+            name, self.level, co.co_filename, frame.f_lineno,
             msg, (), exc_info, co.co_name, None, None
         )
-        self.logger.handle(record)
+        self.handle(record)
 
     def prinspect(self, *args, **kwargs):
         """Print stuff."""
@@ -120,6 +132,7 @@ class LoggingHelper:
                           if isinstance(a, str) else a for a in args)
         if defer:
             kwargs["defer"] = caller
+            caller.f_locals.update(__lname=self.name)
             self._prinspect_next.setdefault(name, {}).update(kwargs)
         else:
             self._log_as(caller, "\n{}".format(pp.pformat(kwargs)))
@@ -149,19 +162,14 @@ class LoggingHelper:
     @classmethod
     def get_logger(cls, name):
         """Return a logger with a TTY handler for cls.LEVEL."""
-        # XXX Don't add logfile.close or logging.shutdown to config.add_cleanup
         if not cls.LOGFILE:
             assert cls.LOGFILE is None
             return
+        if not hasattr(cls, "level"):
+            cls._module_init()
         import logging
-        assert sys.platform.startswith("linux")
-        if hasattr(cls.logfile, "closed"):
-            assert not cls.logfile.closed
-            logfile = cls.logfile
-        else:
-            logfile = cls.logfile = open(cls.LOGFILE, "w")
-            assert os.isatty(logfile.fileno())
-            cls.logfile = logfile
+        assert cls.logfile
+        # Passing "" as name will fetch root logger (wrong class)
         logger = logging.getLogger(name)
         handler = getattr(cls, "_handler", None)
         if handler and handler in logger.handlers:
@@ -169,7 +177,7 @@ class LoggingHelper:
         fmt = ("{dk}[%(asctime)s]{no} {dm}%(name)s"
                ".%(funcName)s:{no} %(message)s")
         clrs = dict(dk="\x1b[38;5;241m", dm="\x1b[38;5;247m", no="\x1b[m")
-        handler = logging.StreamHandler(stream=logfile)
+        handler = logging.StreamHandler(stream=cls.logfile)
         handler.setFormatter(logging.Formatter(fmt.format(**clrs)))
         handler.set_name(cls.HANDLER_NAME)
         handler.setLevel(cls.LEVEL)
@@ -185,38 +193,28 @@ module_logger = LoggingHelper.LOGFILE and LoggingHelper.get_logger("<module>")
 class PdbBreak:
     debug = False
 
-    def __new__(cls, *args, **kwargs):
-        if not LoggingHelper.LOGFILE:
-            return super().__new__(cls)
-        # Manually patch with logging mixins, so MRO stays clean
-        for name, member in LoggingHelper.__dict__.items():
-            if not hasattr(cls, name):
-                setattr(cls, name, member)
-        inst = super().__new__(cls)
-        LoggingHelper.__init__(inst)
-        return inst
-
     def __init__(self, wanted, config):
         config.pluginmanager.register(self, "pdb_break")
         self.capman = config.pluginmanager.getplugin("capturemanager")
         self.config = config
         self.wanted = wanted
         self.target = None
-        if getattr(self, "logger", None):
+        if LoggingHelper.LOGFILE:
+            self._l = LoggingHelper.get_logger("PdbBreak")
             self.debug = True
         self.last_pdb = None
         self.last_func = None
 
     def pytest_internalerror(self, excrepr, excinfo):
         if self.debug:  # already prints to tw w/o cap
-            self.prinspot(1)
+            self._l.prinspot(1)
 
     def pytest_runtestloop(self, session):
         """Find target or raise."""
         if not self.wanted or not any(self.wanted):
             return
         locs = [BreakLoc(i) for i in session.items]
-        self.debug and self.prinspotl(1)
+        self.debug and self._l.prinspotl(1)
         if self.wanted.file:
             # Conversion to abs path on init doesn't guarantee existence
             if not os.path.isfile(self.wanted.file):
@@ -227,7 +225,7 @@ class PdbBreak:
             if len(locs_files) == 1:
                 inferred = os.path.abspath(locs_files.pop())
                 self.wanted = self.wanted._replace(file=inferred)
-                self.debug and self.prinspotl(2)
+                self.debug and self._l.prinspotl(2)
             else:
                 raise RuntimeError("breakpoint file couldn't be determined")
         lnum = find_breakable_line(self.wanted.file, self.wanted.lnum)
@@ -237,9 +235,9 @@ class PdbBreak:
         if self.target.lnum == lnum:
             lnum = find_breakable_line(self.wanted.file, lnum + 1)
         if lnum != self.wanted.lnum:
-            self.debug and self.prinspotl(3)
+            self.debug and self._l.prinspotl(3)
             self.wanted = self.wanted._replace(lnum=lnum)
-        self.debug and self.prinspotl(4)
+        self.debug and self._l.prinspotl(4)
 
     def pytest_enter_pdb(self, config, pdb):
         """Stash pytest-wrapped pdb instance.
@@ -252,7 +250,7 @@ class PdbBreak:
     def trace_handoff(self, frame, event, arg):
         if frame.f_code.co_filename == self.wanted.file:
             if self.debug:
-                self.prinspect(event=event, frame=frame)
+                self._l.prinspect(event=event, frame=frame)
             if event == "call":
                 name = frame.f_code.co_name
                 if name == self.target.name:
@@ -295,9 +293,9 @@ class PdbBreak:
             capfix = (kwargs.keys() & capture_fixtures).pop()
         except KeyError:
             capfix = None
-        self.debug and self.prinspotl("pre_capfix")
+        self.debug and self._l.prinspotl("pre_capfix")
         if capfix:
-            self.debug and self.prinspotl("cap_top")
+            self.debug and self._l.prinspotl("cap_top")
             if capfix == "capsys" and not self.capman.is_globally_capturing():
                 raise RuntimeError("Cannot break inside tests using capsys "
                                    "when global capturing is disabled")
@@ -317,12 +315,12 @@ class PdbBreak:
             # TODO figure out why resumed state isn't already active
             # Maybe we have to run some hooks?
             capfix._resume()
-            self.debug and self.prinspotl("cap_bot")
+            self.debug and self._l.prinspotl("cap_bot")
         from bdb import BdbQuit
         res = None
         inst.reset()
         inst.botframe = sys._getframe()
-        self.debug and self.prinspot("post_capfix")
+        self.debug and self._l.prinspot("post_capfix")
         inst._set_stopinfo(inst.botframe, None, 0)
         sys.settrace(self.trace_handoff)
         try:
@@ -342,7 +340,7 @@ class PdbBreak:
         assert not pyfuncitem._isyieldedfunction()
         # import ctypes; ctypes.string_at(0xffffffff) # gdb breakpoint
         if self.debug:
-            self.prinspot(1)
+            self._l.prinspot(1)
         # Note: seems like nextitem is always None
         if BreakLoc(pyfuncitem) == self.target:
             self.last_func = pyfuncitem.obj
@@ -377,9 +375,7 @@ def find_breakable_line(filename, lineno):
             break
         line = line.strip()
         if not line or line[0] == '#' or line[:3] in ('"""', "'''"):
-            if module_logger:
-                module_logger.debug("lnum: {}, line: {!r}"
-                                    .format(lineno, line))
+            module_logger and module_logger.prinspotl(1)
             lineno += 1
         else:
             break

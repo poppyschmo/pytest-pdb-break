@@ -49,3 +49,8 @@ pytest_pyfunc_call:
     kwargs:
       "loc equals target": BreakLoc(pyfuncitem) == self.target
 
+find_breakable_line:
+  1:
+    args:
+      - lineno
+      - line
