@@ -14,11 +14,14 @@
 ;;   (python-shell-send-string "c")
 ;;
 ;; But this often fails.
-
+;;
+;; The completion modifications are useless without pdb++. No idea if they
+;; hold up when summoned by `company-capf'.
 
 ;;; Code:
+
 (require 'python)
-(require 'elpy nil t)
+;; (require 'elpy nil t)
 
 (defvar-local pytest-pdb-break-extra-args nil
   "List of extra args passed to pytest.
@@ -32,11 +35,36 @@ entry unsets cmd-line options from a project ini:
 (defvar pytest-pdb-break-after-functions nil
   "Abnormal hook for adding a process sentinel, etc.
 Sole arg is the pytest buffer process PROC, which may be nil upon
-failure.")
+failure. Hook is run with process buffer current.")
 
 (defvar pytest-pdb-break--dry-run nil)
 
-(defun pytest-pdb--get-node-id ()
+(defvar pytest-pdb-break-processes nil
+  "List of processes started via `pytest-pdb-break-here'.")
+
+;; XXX pretty sure this is just a workaround; not familiar enough with
+;; python.el to know either way
+;; TODO ask Emacs list if there's not already some built-in means of
+;; handling amputee candidates
+(defun pytest-pdb-break-ad-around-get-completions (orig process import input)
+  "Advice wrapper for ORIG `python-shell-completion-get-completions'.
+If PROCESS belongs to us, prepend INPUT to results. With IMPORT, ignore."
+  (let ((rv (funcall orig process import input)))
+    (if (or import
+            (not (memq process pytest-pdb-break-processes))
+            (null rv)
+            (string= input "")
+            (not (memq ?. (append input nil)))) ; not dotty
+        rv
+      (when (not (cdr rv)) ; |rv| = 1
+        (if (string-match-p "\\.__$" (car rv))
+            (setq rv (funcall orig process import (car rv)))
+          (setq input "")))
+      (when (string-match "^\\(.+\\.\\)[^.]+$" input)
+        (setq input (match-string 1 input)))
+      (mapcar (apply-partially #'concat input) rv))))
+
+(defun pytest-pdb-break--get-node-id ()
   "Return list of node-id components for test at point."
   (let (file test parts)
     (if (fboundp 'elpy-test-at-point)
@@ -61,12 +89,40 @@ failure.")
            (elpy-project-root))
       default-directory))
 
+(defun pytest-pdb-break-buffer-teardown (proc)
+  "Cleanup a pytest-pdb-break comint buffer.
+PROC is the buffer's current process."
+  (setq pytest-pdb-break-processes
+        (seq-filter #'process-live-p
+                    (remq proc pytest-pdb-break-processes)))
+  (unless pytest-pdb-break-processes
+    (advice-remove 'python-shell-completion-get-completions
+                   'pytest-pdb-break-ad-around-get-completions)))
+
+(defun pytest-pdb-break-buffer-setup (proc)
+  "Setup a pytest-pdb-break comint buffer.
+PROC is the buffer's current process."
+  (add-to-list 'pytest-pdb-break-processes proc)
+  (unless (advice-member-p #'pytest-pdb-break-buffer-teardown
+                           'python-shell-completion-get-completions)
+    (advice-add 'python-shell-completion-get-completions :around
+                #'pytest-pdb-break-ad-around-get-completions))
+  (with-current-buffer (process-buffer proc)
+    ;; Make pdb++ prompt trigger non-native-completion fallback
+    (setq-local python-shell-prompt-pdb-regexp "[(<]*[Ii]?[Pp]db[+>)]+ ")
+    (setq-local python-shell-completion-native-enable nil)
+    (add-hook 'kill-buffer-hook (apply-partially
+                                 #'pytest-pdb-break-buffer-teardown
+                                 proc)
+              nil t)
+    (run-hook-with-args 'pytest-pdb-break-after-functions proc)))
+
 (defun pytest-pdb-break-here (lnum node-info root-dir)
   "Drop into pdb after spawning an inferior pytest process, go to LNUM.
 NODE-INFO is a list of pytest node-id components. ROOT-DIR is the
 project/repo's root directory."
   (interactive (list (line-number-at-pos)
-                     (pytest-pdb--get-node-id)
+                     (pytest-pdb-break--get-node-id)
                      (pytest-pdb--get-default-dir)))
   (let* ((default-directory root-dir)
          (file (car node-info))
@@ -82,9 +138,9 @@ project/repo's root directory."
          (cmd (python-shell-calculate-command))
          (proc (and (not (bound-and-true-p pytest-pdb-break--dry-run))
                     (run-python cmd nil t))))
-    (unless proc
-      (message "Would've run: %S\nfrom: %S" cmd default-directory))
-    (run-hook-with-args 'pytest-pdb-break-after-functions proc)))
+    (if proc
+        (pytest-pdb-break-buffer-setup proc)
+      (message "Would've run: %S\nfrom: %S" cmd default-directory))))
 
 
 (provide 'pytest-pdb-break)
