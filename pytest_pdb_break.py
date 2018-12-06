@@ -49,6 +49,8 @@ class BreakLoc(namedtuple("BreakpointLocation", "file lnum name")):
         assert isinstance(item, pytest.Item)
         file, lnum, name = item.location
         file = Path(file)
+        # Comment in ``Config.cwd_relative_nodeid`` says "nodeid's are relative
+        # to the rootpath." Seems this also applies to .location names.
         assert not file.is_absolute()
         file = Path(item.session.config.rootdir) / file
         return cls(file, lnum + 1, name)
@@ -101,7 +103,6 @@ class PdbBreak:
         locs = [BreakLoc(i) for i in session.items]
         self.debug and self._l.prinspotl(1)
         if self.wanted.file:
-            # Conversion to abs path on init doesn't guarantee existence
             curdir = Path().resolve()
             rootdir = Path(session.config.rootdir)
             assert rootdir.is_absolute()
@@ -124,7 +125,7 @@ class PdbBreak:
             else:
                 raise RuntimeError("breakpoint file couldn't be determined")
         lnum = find_breakable_line(self.wanted.file, self.wanted.lnum)
-        self.target = get_target(lnum, self.wanted.file, locs)
+        self.target = get_target(self.wanted.file, lnum, locs)
         if not self.target:
             raise RuntimeError("a valid breakpoint could not be determined")
         if self.target.lnum == lnum:
@@ -243,7 +244,7 @@ class PdbBreak:
         yield
 
 
-def get_target(upper, filename, locations):
+def get_target(filename, upper, locations):
     """Return a viable target from a list of item locations."""
     from operator import attrgetter
     # Note: this isn't the same as not reversing and taking the last item
@@ -292,10 +293,10 @@ def test_get_target():
              BreakLoc(file="file_b", lnum=10, name="test_bar[two-2]"),
              BreakLoc(file="file_b", lnum=99, name="test_baz"),
              BreakLoc(file="file_c", lnum=1, name="test_notbaz")]
-    assert get_target(30, "file_b", items) == items[2]
+    assert get_target("file_b", 30, items) == items[2]
     assert items[2].name == "test_bar[one-1]"
     items.reverse()
-    assert get_target(30, "file_b", items) == items[2]
+    assert get_target("file_b", 30, items) == items[2]
     assert items[2].name == "test_bar[two-2]"
 
 
