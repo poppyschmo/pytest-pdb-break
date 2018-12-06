@@ -3,6 +3,7 @@ import sys
 import pytest
 from functools import namedtuple
 from _pytest.pytester import LineMatcher
+from pathlib import Path
 
 
 try:
@@ -47,12 +48,15 @@ class BreakLoc(namedtuple("BreakpointLocation", "file lnum name")):
         # breakpoints aren't, and neither are linecache's.
         assert isinstance(item, pytest.Item)
         file, lnum, name = item.location
+        file = Path(file)
+        assert not file.is_absolute()
+        file = Path(item.session.config.rootdir) / file
         return cls(file, lnum + 1, name)
 
     @classmethod
     def from_cmd_option_arg_spec(cls, string):
         file, __, lnum = string.rpartition(":")
-        return cls(os.path.abspath(file) if file else None, int(lnum), None)
+        return cls(Path(file) if file else None, int(lnum), None)
 
 
 def pytest_addoption(parser):
@@ -98,13 +102,23 @@ class PdbBreak:
         self.debug and self._l.prinspotl(1)
         if self.wanted.file:
             # Conversion to abs path on init doesn't guarantee existence
-            if not os.path.isfile(self.wanted.file):
-                raise RuntimeError("file '%s' not found" % self.wanted.file)
+            curdir = Path().resolve()
+            rootdir = Path(session.config.rootdir)
+            assert rootdir.is_absolute()
+            try:
+                _f = self.wanted.file.resolve(True)
+            except FileNotFoundError:
+                if curdir.samefile(rootdir):
+                    raise
+                os.chdir(rootdir)
+                _f = self.wanted.file.resolve(True)
+            self.wanted = self.wanted._replace(file=_f)
+            os.chdir(curdir)
         else:
             locs_files = set(l.file for l in locs)
             # If solo, assume good
             if len(locs_files) == 1:
-                inferred = os.path.abspath(locs_files.pop())
+                inferred = locs_files.pop()
                 self.wanted = self.wanted._replace(file=inferred)
                 self.debug and self._l.prinspotl(2)
             else:
@@ -129,8 +143,8 @@ class PdbBreak:
         self.last_pdb = pdb
 
     def trace_handoff(self, frame, event, arg):
-        if frame.f_code.co_filename == self.wanted.file:
-            if self.debug:
+        if frame.f_code.co_filename == str(self.wanted.file):
+            if self.debug:  # ^~~~~ may be a description, e.g., <string>
                 self._l.prinspect(event=event, frame=frame)
             if event == "call":
                 name = frame.f_code.co_name
@@ -151,7 +165,7 @@ class PdbBreak:
                     while _frame and _frame is not inst.botframe:
                         _frame.f_trace = inst.trace_dispatch
                         _frame = _frame.f_back
-                    inst.set_break(self.wanted.file, line, True)
+                    inst.set_break(str(self.wanted.file), line, True)
                     sys.settrace(inst.trace_dispatch)  # handoff
                     return inst.dispatch_line(frame)
         return self.trace_handoff
@@ -233,8 +247,7 @@ def get_target(upper, filename, locations):
     """Return a viable target from a list of item locations."""
     from operator import attrgetter
     # Note: this isn't the same as not reversing and taking the last item
-    locs = (l for l in locations if
-            os.path.samefile(l.file, filename) and l.lnum <= upper)
+    locs = (l for l in locations if l.file == filename and l.lnum <= upper)
     locs = sorted(locs, key=attrgetter("lnum"), reverse=True)
     return locs and locs[0]
 
@@ -250,7 +263,7 @@ def find_breakable_line(filename, lineno):
     import linecache
     # bdb.canonic without caching or angle-bracket guard
     while True:
-        line = linecache.getline(filename, lineno)
+        line = linecache.getline(str(filename), lineno)
         if not line:  # blanks include newlines
             line = None
             break
@@ -270,22 +283,15 @@ def find_breakable_line(filename, lineno):
 prompt_re = r"\(Pdb[+]*\)\s?"
 
 
-def test_get_target(tmpdir):
+def test_get_target():
     # XXX this assumes parametrized variants, whether their names are
     # auto-assigned or not, always appear in the order they'll be called.
-    from pathlib import Path
-    os.chdir(tmpdir)
-    Path("file_a").touch()
-    Path("file_b").touch()
-    Path("file_c").touch()
-
     items = [BreakLoc(file="file_a", lnum=1, name="test_notfoo"),
              BreakLoc(file="file_b", lnum=1, name="test_foo"),
              BreakLoc(file="file_b", lnum=10, name="test_bar[one-1]"),
              BreakLoc(file="file_b", lnum=10, name="test_bar[two-2]"),
              BreakLoc(file="file_b", lnum=99, name="test_baz"),
              BreakLoc(file="file_c", lnum=1, name="test_notbaz")]
-
     assert get_target(30, "file_b", items) == items[2]
     assert items[2].name == "test_bar[one-1]"
     items.reverse()
@@ -329,7 +335,7 @@ def test_invalid_arg(testdir_setup):
     result = td.runpytest("--break=foo:99")
     assert result.ret == 3
     lines = LineMatcher(result.stdout.lines[-5:])
-    lines.fnmatch_lines("INTERNALERROR>*RuntimeError: file '*/foo' not found")
+    lines.fnmatch_lines("INTERNALERROR>*FileNotFoundError*")
 
     # Ambiguous case: no file named, but multiple given
     td.makepyfile(test_otherfile="""
