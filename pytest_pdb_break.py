@@ -165,16 +165,16 @@ class PdbBreak:
         if self.debug:
             self.printone("target: {}".format(self.target))
 
-    @pytest.hookimpl(hookwrapper=True)
-    def pytest_fixture_setup(self, fixturedef, request):
-        # Note: calling resolve_fixture_function raises exc here
-        if self.debug:
-            self.prinspect("fixture_setup", fixturedef.argname,
-                           "fixturedef", "request",
-                           "request.instance",
-                           func=fixturedef.func,
-                           locals=locals())
-        yield
+    # @pytest.hookimpl(hookwrapper=True)
+    # def pytest_fixture_setup(self, fixturedef, request):
+    #     # Note: calling resolve_fixture_function raises exc here
+    #     if self.debug:
+    #         self.prinspect("fixture_setup", fixturedef.argname,
+    #                        "fixturedef", "request",
+    #                        "request.instance",
+    #                        func=fixturedef.func,
+    #                        locals=locals())
+    #     yield
 
     def pytest_enter_pdb(self, config, pdb):
         """Stash pytest-wrapped pdb instance.
@@ -187,26 +187,9 @@ class PdbBreak:
     def runcall_until(self, *args, **kwargs):
         """Run test with args, stopping at location.
 
-        Note: the default ``pytest_pyfunc_call`` in
-        ``_pytest/python.py`` doesn't use the return value.
-
-        Capture states
-        ==============
-
-        Global active::
-            sys.stdout:       <'_pytest.compat.CaptureIO'>
-
-        Capsys active::
-            <Cap[1]>._old:    <_pytest.capture.EncodedFile object at ...>
-            <Cap[1]>.tmpfile: (sys.stdout)
-
-        Capsys suspended::
-            sys.stdout:       <_pytest.capture.EncodedFile object at ...>
-            <Cap[1]>._old:    (sys.stdout)
-            <Cat[1]>.tmpfile: <class '_pytest.compat.CaptureIO'>
-
-        Global suspended::
-            sys.stdout:       <_io.TextIOWrapper name='<stdout>' ...>
+        Exceptions raised inside this function will be reported as test
+        failures. For testing, this means report output is sent to stdout
+        rather than stderr (INTERNALERROR).
         """
         from _pytest.capture import capture_fixtures
         pytest.set_trace(set_break=False)
@@ -214,12 +197,16 @@ class PdbBreak:
         assert self.last_func
         inst = self.last_pdb
         func = self.last_func
+        # XXX maybe only provide context for capsys, ignore others?
         try:
             capfix = (kwargs.keys() & capture_fixtures).pop()
         except KeyError:
             capfix = None
         prevstdout = sys.stdout
         if capfix:
+            if capfix == "capsys" and not self.capman.is_globally_capturing():
+                raise RuntimeError("Cannot break inside tests using capsys "
+                                   "when global capturing is disabled")
             capfix = kwargs[capfix]
 
             def preloop(_inst):
@@ -240,6 +227,7 @@ class PdbBreak:
         if self.debug and self.logfile:
             self.prinspect("runcall_until", func,
                            ("this frame", sys._getframe()),
+                           "self.capman._method",
                            kwargs=kwargs,
                            stdout=type(sys.stdout),
                            prevstdout=prevstdout,
@@ -467,7 +455,8 @@ def test_mark_param(testdir_setup):
     pe.sendline("c")  # If called again, would get timeout error
 
 
-def test_capsys(testdir_setup):
+@pytest.mark.parametrize("cap_method", ["fd", "sys"])
+def test_capsys(testdir_setup, cap_method):
     testdir_setup.makepyfile(r"""
         def test_print(capsys):
             print("foo")
@@ -478,7 +467,8 @@ def test_capsys(testdir_setup):
             capped = capsys.readouterr()
             assert capped.out == "bar\n"
     """)  # raw string \n
-    pe = testdir_setup.spawn_pytest("--break=test_capsys.py:5")
+    pe = testdir_setup.spawn_pytest("--break=test_capsys.py:5 "
+                                    "--capture=%s" % cap_method)
     pe.expect(prompt_re)
     befs = unansi(pe.before)
     assert "foo" not in befs
@@ -489,6 +479,19 @@ def test_capsys(testdir_setup):
     lafts = LineMatcher(afts)
     assert "bar" not in afts
     lafts.fnmatch_lines((".*[[]100%[]]", "*= 1 passed in * seconds =*"))
+
+
+def test_capsys_noglobal(testdir_setup):
+    testdir_setup.makepyfile(r"""
+        def test_print(capsys):
+            print("foo")
+            assert capsys.readouterr() == "foo\n"
+    """)
+    result = testdir_setup.runpytest("--break=test_capsys_noglobal.py:3",
+                                     "--capture=no")
+    lout = LineMatcher(result.stdout.lines)
+    lout.fnmatch_lines("*RuntimeError*capsys*global*")
+    result.assert_outcomes(failed=1)  # this runs as function node obj
 
 
 if __name__ == "__main__":
