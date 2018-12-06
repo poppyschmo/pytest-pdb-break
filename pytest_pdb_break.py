@@ -61,6 +61,7 @@ def pytest_configure(config):
 # Can't figure out how to use pdb to inspect these hooks, so it's this for now
 class LoggingHelper:
     LOGFILE = os.getenv("PDBBRK_LOGFILE")  # TTY devices only
+    logfile = None
     HANDLER_NAME = "PDB BREAK (DEBUG)"
     LEVEL = "DEBUG"
 
@@ -69,8 +70,8 @@ class LoggingHelper:
         self.level = getattr(logging, self.LEVEL)
         self.logger = self.get_logger(type(self).__name__)
         self._prinspect_next = {}
-        self.LOGFILE.write("\n")
-        self.LOGFILE.flush()
+        self.logfile.write("\n")
+        self.logfile.flush()
 
     def _log_as(self, frame, msg, exc_info=None):
         """Log msg, impersonating frame."""
@@ -113,19 +114,19 @@ class LoggingHelper:
     @classmethod
     def get_logger(cls, name):
         """Return a logger with a TTY handler for cls.LEVEL."""
-        # XXX Don't add LOGFILE.close or logging.shutdown to config.add_cleanup
+        # XXX Don't add logfile.close or logging.shutdown to config.add_cleanup
         if not cls.LOGFILE:
             assert cls.LOGFILE is None
             return
         import logging
         assert sys.platform.startswith("linux")
-        if hasattr(cls.LOGFILE, "closed"):
-            assert not cls.LOGFILE.closed
-            logfile = cls.LOGFILE
+        if hasattr(cls.logfile, "closed"):
+            assert not cls.logfile.closed
+            logfile = cls.logfile
         else:
-            logfile = open(cls.LOGFILE, "w")
+            logfile = cls.logfile = open(cls.LOGFILE, "w")
             assert os.isatty(logfile.fileno())
-            cls.LOGFILE = logfile
+            cls.logfile = logfile
         logger = logging.getLogger(name)
         handler = getattr(cls, "_handler", None)
         if handler and handler in logger.handlers:
