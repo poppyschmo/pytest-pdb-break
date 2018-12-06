@@ -348,7 +348,7 @@ def test_invalid_arg(testdir_setup):
     pe.expect(prompt_re)
     befs = LineMatcher(unansi(pe.before))
     befs.fnmatch_lines([
-        ">*/test_otherfile.py(2)test_bar()",
+        "*>*/test_otherfile.py(2)test_bar()",
         "->*assert True"
     ])
     pe.sendline("c")  # requested line is adjusted to something breakable
@@ -374,7 +374,7 @@ def test_two_funcs_simple(testdir_two_funcs):
     pe.expect(prompt_re)
     befs = LineMatcher(unansi(pe.before))
     befs.fnmatch_lines([
-        ">*/test_two_funcs_simple.py(4)test_true_int()",
+        "*>*/test_two_funcs_simple.py(4)test_true_int()",
         "->*# <- line 4",
     ])
     pe.sendline("c")
@@ -385,7 +385,7 @@ def test_two_funcs_comment(testdir_two_funcs):
     pe.expect(prompt_re)
     befs = LineMatcher(unansi(pe.before))
     befs.fnmatch_lines([
-        ">*/test_two_funcs_comment.py(3)test_true_int()",
+        "*>*/test_two_funcs_comment.py(3)test_true_int()",
         "->*somevar = True"
     ])
     pe.sendline("c")
@@ -397,7 +397,7 @@ def test_two_funcs_gap(testdir_two_funcs):
     befs = LineMatcher(unansi(pe.before))
     # Advances to first breakable line in next func
     befs.fnmatch_lines([
-        ">*/test_two_funcs_gap.py(7)test_false_int()",
+        "*>*/test_two_funcs_gap.py(7)test_false_int()",
         "->*isinstance(False, int)"
     ])
     pe.sendline("c")
@@ -418,7 +418,7 @@ def test_one_arg(testdir_setup):
     pe = testdir_setup.spawn_pytest("--break=test_one_arg.py:8")
     pe.expect(prompt_re)
     befs = LineMatcher(unansi(pe.before))
-    befs.fnmatch_lines(">*/test_one_arg.py(8)test_string()")
+    befs.fnmatch_lines("*>*/test_one_arg.py(8)test_string()")
     pe.sendline("c")
 
 
@@ -458,7 +458,7 @@ def test_capsys(testdir_setup, cap_method):
     befs = unansi(pe.before)
     assert "foo" not in befs
     lbefs = LineMatcher(befs)
-    lbefs.fnmatch_lines((">*/test_capsys.py(5)test_print()", "->*# line 5"))
+    lbefs.fnmatch_lines(("*>*/test_capsys.py(5)test_print()", "->*# line 5"))
     pe.sendline("c")
     afts = unansi(pe.read(-1))
     lafts = LineMatcher(afts)
@@ -504,7 +504,7 @@ def test_class_simple(testdir_class):
     pe.expect(prompt_re)
     befs = LineMatcher(unansi(pe.before))
     befs.fnmatch_lines([
-        ">*/test_class_simple.py(8)test_one()",
+        "*>*/test_class_simple.py(8)test_one()",
         "->*# line 8"
     ])
     pe.sendline("c")
@@ -516,7 +516,7 @@ def test_class_early(testdir_class):
     pe.expect(prompt_re)
     befs = LineMatcher(unansi(pe.before))
     befs.fnmatch_lines([
-        ">*/test_class_early.py(8)test_one()",
+        "*>*/test_class_early.py(8)test_one()",
         "->*# line 8"
     ])
     pe.sendline("c")
@@ -527,7 +527,7 @@ def test_class_gap(testdir_class):
     pe.expect(prompt_re)
     befs = LineMatcher(unansi(pe.before))
     befs.fnmatch_lines([
-        ">*/test_class_gap.py(12)test_two()",
+        "*>*/test_class_gap.py(12)test_two()",
         "->*# line 12"
     ])
     pe.sendline("c")
@@ -544,7 +544,7 @@ def test_class_gap_named(testdir_class):
     pe.expect(prompt_re)
     befs = LineMatcher(unansi(pe.before))
     befs.fnmatch_lines([
-        ">*/test_class_gap_named.py(12)test_two()",
+        "*>*/test_class_gap_named.py(12)test_two()",
         "->*# line 12"
     ])
     pe.sendline("c")
