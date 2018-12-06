@@ -1,0 +1,51 @@
+# let $PDBBRK_LOGYAML = expand("%:p")
+# (setenv "PDBBRK_LOGYAML" buffer-file-name)
+
+---
+pytest_internalerror:
+  1:
+    args:
+      - excinfo.type
+      - excinfo.value
+
+pytest_runtestloop:
+  1:
+    args:
+      - self.wanted
+      - locs
+  2:
+    kwargs:
+      "wanted.file": >
+        "'' -> {}".format(self.wanted.file)
+  3:
+    kwargs:
+      "wanted.lnum": >
+        "{} -> {}".format(self.wanted.lnum, lnum)
+  4:
+    args:
+      - self.target
+
+runcall_until:
+  pre_capfix:
+    kwargs:
+      kwargs: kwargs
+  cap_top:
+    kwargs:
+      prevstdout: sys.stdout
+  cap_bot:
+    kwargs:
+      stdout: type(sys.stdout)
+      cap_method: self.capman._method
+  post_capfix:
+    args:
+      - inst.botframe
+
+pytest_pyfunc_call:
+  1:
+    args:
+      - pyfuncitem.name
+      - pyfuncitem.location
+      - pyfuncitem.funcargs
+    kwargs:
+      "loc equals target": BreakLoc(pyfuncitem) == self.target
+
