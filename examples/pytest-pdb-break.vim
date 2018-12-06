@@ -3,8 +3,9 @@ if ! has("nvim")
 	finish
 endif
 
+" Any args are passed on to pytest, for example: :PytestBreakHere -o addopts=
 if exists(':PytestBreakHere') != 2
-	command! PytestBreakHere call <SID>pytest_break_runner(<f-args>)
+	command! -nargs=* PytestBreakHere call <SID>pytest_break_runner(<f-args>)
 endif
 
 function! s:pytest_break_runner(...)
