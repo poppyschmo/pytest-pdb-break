@@ -39,7 +39,7 @@ class BreakLoc(namedtuple("BreakpointLocation", "file lnum name")):
     @classmethod
     def from_cmd_option_arg_spec(cls, string):
         file, __, lnum = string.rpartition(":")
-        return cls(file, int(lnum), None)
+        return cls(os.path.abspath(file) if file else None, int(lnum), None)
 
 
 def pytest_addoption(parser):
@@ -183,13 +183,15 @@ class PdbBreak:
         if self.debug:
             self.prinspool(wanted=self.wanted, locs=locs)
         if self.wanted.file:
+            # Conversion to abs path on init doesn't guarantee existence
             if not os.path.isfile(self.wanted.file):
                 raise RuntimeError("file '%s' not found" % self.wanted.file)
         else:
             locs_files = set(l.file for l in locs)
             # If solo, assume good
             if len(locs_files) == 1:
-                self.wanted = self.wanted._replace(file=locs_files.pop())
+                inferred = os.path.abspath(locs_files.pop())
+                self.wanted = self.wanted._replace(file=inferred)
                 if self.debug:
                     self.prinspool(("wanted.file",
                                     "'' -> {}".format(self.wanted.file)))
@@ -215,17 +217,6 @@ class PdbBreak:
             self.wanted = self.wanted._replace(lnum=lnum)
         if self.debug:
             self.prinspool("self.target")
-
-    # @pytest.hookimpl(hookwrapper=True)
-    # def pytest_fixture_setup(self, fixturedef, request):
-    #     # Note: calling resolve_fixture_function raises exc here
-    #     if self.debug:
-    #         self.prinspect("fixture_setup", fixturedef.argname,
-    #                        "fixturedef", "request",
-    #                        "request.instance",
-    #                        func=fixturedef.func,
-    #                        locals=locals())
-    #     yield
 
     def pytest_enter_pdb(self, config, pdb):
         """Stash pytest-wrapped pdb instance.
@@ -325,7 +316,6 @@ def find_breakable_line(filename, lineno):
     """
     import linecache
     # bdb.canonic without caching or angle-bracket guard
-    filename = os.path.abspath(filename)  # skip normcase for now
     while True:
         line = linecache.getline(filename, lineno)
         if not line:  # blanks include newlines
@@ -354,11 +344,6 @@ def unansi(byte_string, as_list=True):
     out
 
 
-def last_internal_error(result):
-    return next(l for l in reversed(result.stdout.lines[-5:]) if
-                l.startswith("INTERNALERROR"))
-
-
 @pytest.fixture
 def testdir_setup(testdir):
     """Copy this file to testdir basetemp."""
@@ -383,14 +368,15 @@ def test_invalid_arg(testdir_setup):
 
     # No line number (argparse error)
     result = td.runpytest("--break=test_invalid_arg.py")
-    assert "usage" in result.stderr.lines[0]
-    assert "--break" in result.stderr.lines[1]
-    assert "invalid BreakLoc value" in result.stderr.lines[1]
+    assert result.ret == 4
+    lines = LineMatcher(result.stderr.lines)
+    lines.fnmatch_lines(["usage:*", "*--break*invalid BreakLoc value*"])
 
     # Non-existent file
     result = td.runpytest("--break=foo:99")
     assert result.ret == 3
-    assert "RuntimeError: file 'foo' not found" in last_internal_error(result)
+    lines = LineMatcher(result.stdout.lines[-5:])
+    lines.fnmatch_lines("INTERNALERROR>*RuntimeError: file '*/foo' not found")
 
     # Ambiguous case: no file named, but multiple given
     td.makepyfile(test_otherfile="""
@@ -399,19 +385,20 @@ def test_invalid_arg(testdir_setup):
     """)
     result = td.runpytest("--break=1")
     assert result.ret == 3
-    assert ("RuntimeError: breakpoint file couldn't be determined" in
-            last_internal_error(result))
+    lines = LineMatcher(result.stdout.lines[-5:])
+    lines.fnmatch_lines("INTERNALERROR>*RuntimeError: "
+                        "breakpoint file couldn't be determined")
 
     # No file named, but pytest arg names one
     pe = td.spawn_pytest("--break=1 test_otherfile.py")  # <- Two sep args
-    # XXX API is different for these spawning funcs (string)
+    # XXX API call sig is different for these spawning funcs (string)
     pe.expect(prompt_re)
     befs = LineMatcher(unansi(pe.before))
     befs.fnmatch_lines([
         ">*/test_otherfile.py(2)test_bar()",
         "->*assert True"
     ])
-    pe.sendline("c")  # requested line incremented ^^
+    pe.sendline("c")  # requested line is adjusted to something breakable
 
 
 @pytest.fixture
