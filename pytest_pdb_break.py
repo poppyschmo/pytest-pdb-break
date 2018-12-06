@@ -15,7 +15,6 @@ if sys.version_info < (3, 6):
     raise RuntimeError("For now, requires Python 3.6+")
 
 
-# Note: if later adding function-based breaks, see ``compat.getlocation``
 class BreakLoc(namedtuple("BreakpointLocation", "file lnum name")):
     """Data object holding filename, line number, test name."""
     def __new__(cls, *args, **kwargs):
@@ -59,9 +58,105 @@ def pytest_configure(config):
         PdbBreak(wanted, config)
 
 
+# Can't figure out how to use pdb to inspect these hooks, so use this
+# abomination instead.
+class LoggingHelper:
+    LOGFILE = os.getenv("PDBBRK_LOGFILE")  # TTY devices only
+    HANDLER_NAME = "PDB BREAK (DEBUG)"
+    LEVEL = "DEBUG"
+
+    def __init__(self):
+        import logging
+        self.level = getattr(logging, self.LEVEL)
+        self.logger = self.get_logger(type(self).__name__)
+        self._prinspect_next = {}
+        self.LOGFILE.write("\n")
+        self.LOGFILE.flush()
+
+    def _log_as(self, frame, msg, exc_info=None):
+        """Log msg, impersonating frame."""
+        co = frame.f_code
+        record = self.logger.makeRecord(
+            self.logger.name, self.level, co.co_filename, frame.f_lineno,
+            msg, (), exc_info, co.co_name, None, None
+        )
+        self.logger.handle(record)
+
+    def prinspect(self, *args, **kwargs):
+        """Print stuff."""
+        from pprint import PrettyPrinter
+        pp = PrettyPrinter()
+        caller = sys._getframe(1)
+        name = caller.f_code.co_name
+        defer = kwargs.get("defer")
+        if self._prinspect_next:
+            for k in tuple(self._prinspect_next):
+                if not defer or name != k:
+                    v = self._prinspect_next.pop(k)
+                    c = v.pop("defer")
+                    if name == k:
+                        kwargs.update(v)
+                        continue
+                    self._log_as(c, "\n{}".format(pp.pformat(v)))
+        if args:
+            locals = caller.f_locals
+            kwargs.update((a, eval(a, locals)) if isinstance(a, str) else
+                          a for a in args)
+        if defer:
+            kwargs["defer"] = caller
+            self._prinspect_next.setdefault(name, {}).update(kwargs)
+        else:
+            self._log_as(caller, "\n{}".format(pp.pformat(kwargs)))
+
+    from functools import partialmethod
+    prinspool = partialmethod(prinspect, defer=True)
+
+    @classmethod
+    def get_logger(cls, name):
+        """Return a logger with a TTY handler for cls.LEVEL."""
+        # XXX Don't add LOGFILE.close or logging.shutdown to config.add_cleanup
+        if not cls.LOGFILE:
+            assert cls.LOGFILE is None
+            return
+        import logging
+        assert sys.platform.startswith("linux")
+        if hasattr(cls.LOGFILE, "closed"):
+            assert not cls.LOGFILE.closed
+            logfile = cls.LOGFILE
+        else:
+            logfile = open(cls.LOGFILE, "w")
+            assert os.isatty(logfile.fileno())
+            cls.LOGFILE = logfile
+        logger = logging.getLogger(name)
+        handler = getattr(cls, "_handler", None)
+        if handler and handler in logger.handlers:
+            return logger
+        fmt = ("{dk}[%(asctime)s]{no} {dm}%(name)s"
+               ".%(funcName)s:{no} %(message)s")
+        clrs = dict(dk="\x1b[38;5;241m", dm="\x1b[38;5;247m", no="\x1b[m")
+        handler = logging.StreamHandler(stream=logfile)
+        handler.setFormatter(logging.Formatter(fmt.format(**clrs)))
+        handler.set_name(cls.HANDLER_NAME)
+        handler.setLevel(cls.LEVEL)
+        cls._handler = handler
+        logger.addHandler(handler)
+        logger.setLevel(cls.LEVEL)
+        return logger
+
+
 class PdbBreak:
     debug = False
-    logfile = None
+
+    def __new__(cls, *args, **kwargs):
+        if not LoggingHelper.LOGFILE:
+            return super().__new__(cls)
+        # Manually patch with logging mixins, so MRO stays clean
+        for name, member in LoggingHelper.__dict__.items():
+            if not hasattr(cls, name):
+                setattr(cls, name, member)
+        inst = super().__new__(cls)
+        LoggingHelper.__init__(inst)
+        return inst
 
     def __init__(self, wanted, config):
         config.pluginmanager.register(self, "pdb_break")
@@ -69,59 +164,16 @@ class PdbBreak:
         self.config = config
         self.wanted = wanted
         self.target = None
-        self.debug = os.getenv("PDBBRK_DEBUG") and True  # 0/false/off are True
-        if self.debug:
-            logfile = os.getenv("PDBBRK_LOGFILE")
-            if logfile:
-                self.logfmt = "[{}] {} -- {}"
-                if logfile.startswith("/dev"):
-                    logfile = open(logfile, "w")
-                    if sys.platform.startswith("linux"):
-                        assert os.isatty(logfile.fileno())
-                        self.logfmt = "[\x1b[1m{}\x1b[m] {} -- {}"
-                else:
-                    logfile = open(logfile, "a")
-                config.add_cleanup(logfile.close)
-                self.logfile = logfile
-                self.printone()
-            else:
-                self.logfmt = "\x1b[1m{}\x1b[m -- {}"
+        if getattr(self, "logger", None):
+            self.debug = True
         self.last_pdb = None
         self.last_func = None
 
     def pytest_internalerror(self, excrepr, excinfo):
-        if self.debug and self.logfile:  # already prints to tw w/o cap
-            self.prinspect("internalerror", excinfo.type,
+        if self.debug:  # already prints to tw w/o cap
+            self.prinspect(type=excinfo.type,
                            # excrepr=excrepr,
                            value=excinfo.value)
-
-    def printone(self, *args, **kwargs):
-        if self.logfile:
-            print(*args, **kwargs, file=self.logfile, flush=True)
-        else:
-            print(*args, **kwargs)
-
-    def prinspect(self, where, header, *forms, locals=None, **kwforms):
-        """Temporary print statement crutch."""
-        # Can't figure out how to use pdb to inspect these hooks.
-        # And GDB python is currently crocked on my system:
-        # https://bugzilla.redhat.com/show_bug.cgi?id=1639242
-        assert self.capman
-        if self.logfile:
-            from datetime import datetime
-            payload = [self.logfmt.format(datetime.now(), where, header)]
-        else:
-            payload = [self.logfmt.format(where, header)]
-        fmtstr = "{}: {}"
-        payload += [fmtstr.format(*((f, eval(f, locals))
-                                    if isinstance(f, str) else f))
-                    for f in forms] + [fmtstr.format(k, v)
-                                       for k, v in kwforms.items()]
-        if self.logfile:
-            print(*payload, sep="\n", file=self.logfile, flush=True)
-        else:
-            with self.capman.global_and_fixture_disabled():
-                print(*payload, sep="\n")
 
     def pytest_runtestloop(self, session):
         """Find target or raise."""
@@ -129,8 +181,7 @@ class PdbBreak:
             return
         locs = [BreakLoc(i) for i in session.items]
         if self.debug:
-            self.prinspect("runtestloop", session.name,
-                           wanted=self.wanted, locs=locs)
+            self.prinspool(wanted=self.wanted, locs=locs)
         if self.wanted.file:
             if not os.path.isfile(self.wanted.file):
                 raise RuntimeError("file '%s' not found" % self.wanted.file)
@@ -140,8 +191,8 @@ class PdbBreak:
             if len(locs_files) == 1:
                 self.wanted = self.wanted._replace(file=locs_files.pop())
                 if self.debug:
-                    self.printone("wanted.file: '' -> {}"
-                                  .format(self.wanted.file))
+                    self.prinspool(("wanted.file",
+                                    "'' -> {}".format(self.wanted.file)))
             else:
                 raise RuntimeError("breakpoint file couldn't be determined")
         lnum = find_breakable_line(self.wanted.file, self.wanted.lnum)
@@ -159,11 +210,11 @@ class PdbBreak:
             lnum = find_breakable_line(self.wanted.file, lnum + 1)
         if lnum != self.wanted.lnum:
             if self.debug:
-                self.printone("wanted.lnum: {} -> {}"
-                              .format(self.wanted.lnum, lnum))
+                self.prinspool(("wanted.lnum",
+                                "{} -> {}".format(self.wanted.lnum, lnum)))
             self.wanted = self.wanted._replace(lnum=lnum)
         if self.debug:
-            self.printone("target: {}".format(self.target))
+            self.prinspool("self.target")
 
     # @pytest.hookimpl(hookwrapper=True)
     # def pytest_fixture_setup(self, fixturedef, request):
@@ -202,7 +253,8 @@ class PdbBreak:
             capfix = (kwargs.keys() & capture_fixtures).pop()
         except KeyError:
             capfix = None
-        prevstdout = sys.stdout
+        if self.debug:
+            self.prinspool(prevstdout=sys.stdout)
         if capfix:
             if capfix == "capsys" and not self.capman.is_globally_capturing():
                 raise RuntimeError("Cannot break inside tests using capsys "
@@ -224,21 +276,19 @@ class PdbBreak:
             # Maybe we have to run some hooks?
             capfix._resume()
         inst.set_break(self.wanted.file, self.wanted.lnum, True)
-        if self.debug and self.logfile:
-            self.prinspect("runcall_until", func,
-                           ("this frame", sys._getframe()),
-                           "self.capman._method",
+        if self.debug:
+            self.prinspect(this_frame=sys._getframe(),
+                           cap_method=self.capman._method,
                            kwargs=kwargs,
                            stdout=type(sys.stdout),
-                           prevstdout=prevstdout,
                            f_back=sys._getframe().f_back,
-                           breaks=inst.breaks,
-                           locals=locals())
+                           breaks=inst.breaks)
         from bdb import BdbQuit
         res = None
         inst.reset()
         inst._set_stopinfo(sys._getframe(), None, -1)
-        # ``inst.botframe`` is set to ^^^ for us
+        # ``inst.botframe`` is set to ^^^ for us by dispatch_call, but maybe
+        # nicer to set explicitly here
         sys.settrace(inst.trace_dispatch)
         try:
             res = func(*args, **kwargs)
@@ -257,16 +307,11 @@ class PdbBreak:
         assert not pyfuncitem._isyieldedfunction()
         # import ctypes; ctypes.string_at(0xffffffff) # gdb breakpoint
         if self.debug:
-            from inspect import signature
-            self.prinspect("pyfunc_call",
-                           "{}{}".format(pyfuncitem.name,
-                                         signature(pyfuncitem.obj)),
-                           ("loc equals target",
+            self.prinspect(("loc equals target",
                             BreakLoc(pyfuncitem) == self.target),
+                           "pyfuncitem.name",
                            "pyfuncitem.location",
-                           "pyfuncitem.funcargs",
-                           # "pyfuncitem._fixtureinfo",
-                           locals=locals())
+                           "pyfuncitem.funcargs")
         # Note: seems like nextitem is always None
         if BreakLoc(pyfuncitem) == self.target:
             self.last_func = pyfuncitem.obj
@@ -570,6 +615,5 @@ if __name__ == "__main__" and not os.getenv("PDBBRK_HACK"):
         raise RuntimeError("The tests above aren't meant to be discovered."
                            " Try running:\n%s" % " ".join(cmdline))
 
-# :let $PDBBRK_DEBUG = "1" | let $PDBBRK_LOGFILE = "/dev/pts/7"
-#
-# (progn (setenv "PDBBRK_DEBUG" "1") (setenv "PDBBRK_LOGFILE" "/dev/pts/7"))
+# :let $PDBBRK_LOGFILE = "/dev/pts/7"
+# (setenv "PDBBRK_LOGFILE" "/dev/pts/7")
