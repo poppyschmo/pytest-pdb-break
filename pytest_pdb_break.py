@@ -2,6 +2,7 @@ import os
 import sys
 import pytest
 from functools import namedtuple
+from _pytest.pytester import LineMatcher
 
 
 try:
@@ -334,10 +335,11 @@ def test_invalid_arg(testdir_setup):
     pe = td.spawn_pytest("--break=1 test_otherfile.py")  # <- Two sep args
     # XXX API is different for these spawning funcs (string)
     pe.expect(prompt_re)
-    befs = unansi(pe.before)
-    assert befs[-1].lstrip().startswith("->")
-    assert befs[-1].endswith("assert True")
-    assert befs[-2].endswith("/test_otherfile.py(2)test_bar()")
+    befs = LineMatcher(unansi(pe.before))
+    befs.fnmatch_lines([
+        ">*/test_otherfile.py(2)test_bar()",
+        "->*assert True"
+    ])
     pe.sendline("c")  # requested line incremented ^^
 
 
@@ -357,34 +359,36 @@ def testdir_two_funcs(testdir_setup):
 
 
 def test_two_funcs_simple(testdir_two_funcs):
-    # Normal breakpoint
     pe = testdir_two_funcs.spawn_pytest("--break=test_two_funcs_simple.py:4")
     pe.expect(prompt_re)
-    befs = unansi(pe.before)
-    assert befs[-1].lstrip().startswith("->")
-    assert befs[-1].endswith("# <- line 4")
-    assert befs[-2].endswith("/test_two_funcs_simple.py(4)test_true_int()")
+    befs = LineMatcher(unansi(pe.before))
+    befs.fnmatch_lines([
+        ">*/test_two_funcs_simple.py(4)test_true_int()",
+        "->*# <- line 4",
+    ])
     pe.sendline("c")
 
 
 def test_two_funcs_comment(testdir_two_funcs):
-    # Comment
     pe = testdir_two_funcs.spawn_pytest("--break=test_two_funcs_comment.py:2")
     pe.expect(prompt_re)
-    befs = unansi(pe.before)
-    assert befs[-1].endswith("somevar = True")
-    assert befs[-2].endswith("/test_two_funcs_comment.py(3)test_true_int()")
+    befs = LineMatcher(unansi(pe.before))
+    befs.fnmatch_lines([
+        ">*/test_two_funcs_comment.py(3)test_true_int()",
+        "->*somevar = True"
+    ])
     pe.sendline("c")
 
 
 def test_two_funcs_gap(testdir_two_funcs):
-    # Empty line between funcs
     pe = testdir_two_funcs.spawn_pytest("--break=test_two_funcs_gap.py:5")
     pe.expect(prompt_re)
-    befs = unansi(pe.before)
-    assert befs[-1].endswith("isinstance(False, int)")
-    # Advances to first breakable line next func
-    assert befs[-2].endswith("/test_two_funcs_gap.py(7)test_false_int()")
+    befs = LineMatcher(unansi(pe.before))
+    # Advances to first breakable line in next func
+    befs.fnmatch_lines([
+        ">*/test_two_funcs_gap.py(7)test_false_int()",
+        "->*isinstance(False, int)"
+    ])
     pe.sendline("c")
 
 
@@ -402,8 +406,8 @@ def test_one_arg(testdir_setup):
     """)
     pe = testdir_setup.spawn_pytest("--break=test_one_arg.py:8")
     pe.expect(prompt_re)
-    befs = unansi(pe.before)
-    assert befs[-2].endswith("/test_one_arg.py(8)test_string()")
+    befs = LineMatcher(unansi(pe.before))
+    befs.fnmatch_lines(">*/test_one_arg.py(8)test_string()")
     pe.sendline("c")
 
 
