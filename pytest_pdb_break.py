@@ -58,8 +58,7 @@ def pytest_configure(config):
         PdbBreak(wanted, config)
 
 
-# Can't figure out how to use pdb to inspect these hooks, so use this
-# abomination instead.
+# Can't figure out how to use pdb to inspect these hooks, so it's this for now
 class LoggingHelper:
     LOGFILE = os.getenv("PDBBRK_LOGFILE")  # TTY devices only
     HANDLER_NAME = "PDB BREAK (DEBUG)"
@@ -142,6 +141,9 @@ class LoggingHelper:
         logger.addHandler(handler)
         logger.setLevel(cls.LEVEL)
         return logger
+
+
+module_logger = LoggingHelper.LOGFILE and LoggingHelper.get_logger("<module>")
 
 
 class PdbBreak:
@@ -355,6 +357,9 @@ def find_breakable_line(filename, lineno):
             break
         line = line.strip()
         if not line or line[0] == '#' or line[:3] in ('"""', "'''"):
+            if module_logger:
+                module_logger.debug("lnum: {}, line: {!r}"
+                                    .format(lineno, line))
             lineno += 1
         else:
             break
@@ -660,6 +665,3 @@ if __name__ == "__main__" and not os.getenv("PDBBRK_HACK"):
     else:
         raise RuntimeError("The tests above aren't meant to be discovered."
                            " Try running:\n%s" % " ".join(cmdline))
-
-# :let $PDBBRK_LOGFILE = "/dev/pts/7"
-# (setenv "PDBBRK_LOGFILE" "/dev/pts/7")
