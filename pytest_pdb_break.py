@@ -63,8 +63,6 @@ class PdbBreak:
     debug = False
     logfile = None
 
-    # Config.option is an argparse.Namespace mapping proxy, i.e., read only.
-    # So maintain an updatable copy in instance.wanted.
     def __init__(self, wanted, config):
         config.pluginmanager.register(self, "pdb_break")
         self.capman = config.pluginmanager.getplugin("capturemanager")
@@ -178,6 +176,14 @@ class PdbBreak:
                            locals=locals())
         yield
 
+    def pytest_enter_pdb(self, config, pdb):
+        """Stash pytest-wrapped pdb instance.
+
+        This workaround is necessary because ``pytestPDB.set_trace``
+        doesn't return the instance.
+        """
+        self.last_pdb = pdb
+
     def runcall_until(self, *args, **kwargs):
         """Run test with args, stopping at location.
 
@@ -216,11 +222,17 @@ class PdbBreak:
         if capfix:
             capfix = kwargs[capfix]
 
-            def preloop(_inst, *a, **kw):
+            def preloop(_inst):
                 # XXX runs after .setup, but global capture still active?
+                super((type(_inst)), _inst).preloop()
                 self.capman.suspend_global_capture(in_=True)
-            #
+
+            def postloop(_inst):
+                super((type(_inst)), _inst).postloop()
+                capfix._resume()
+
             inst.__dict__["preloop"] = preloop.__get__(inst)
+            inst.__dict__["postloop"] = postloop.__get__(inst)
             # TODO figure out why resumed state isn't already active
             # Maybe we have to run some hooks?
             capfix._resume()
@@ -228,8 +240,8 @@ class PdbBreak:
         if self.debug and self.logfile:
             self.prinspect("runcall_until", func,
                            ("this frame", sys._getframe()),
-                           stdout=type(sys.stdout),
                            kwargs=kwargs,
+                           stdout=type(sys.stdout),
                            prevstdout=prevstdout,
                            f_back=sys._getframe().f_back,
                            breaks=inst.breaks,
@@ -249,13 +261,6 @@ class PdbBreak:
             sys.settrace(None)
             self.last_pdb = self.last_func = None
         return res
-
-    def pytest_enter_pdb(self, config, pdb):
-        """Stash modified/wrapped pdb instance.
-        This workaround is necessary because ``pytestPDB.set_trace``
-        doesn't return the instance.
-        """
-        self.last_pdb = pdb
 
     @pytest.hookimpl(hookwrapper=True)
     def pytest_pyfunc_call(self, pyfuncitem):
@@ -469,6 +474,9 @@ def test_capsys(testdir_setup):
             capped = capsys.readouterr()
             assert capped.out == "foo\n"
             assert True                  # line 5
+            print("bar")
+            capped = capsys.readouterr()
+            assert capped.out == "bar\n"
     """)  # raw string \n
     pe = testdir_setup.spawn_pytest("--break=test_capsys.py:5")
     pe.expect(prompt_re)
@@ -477,6 +485,10 @@ def test_capsys(testdir_setup):
     lbefs = LineMatcher(befs)
     lbefs.fnmatch_lines((">*/test_capsys.py(5)test_print()", "->*# line 5"))
     pe.sendline("c")
+    afts = unansi(pe.read(-1))
+    lafts = LineMatcher(afts)
+    assert "bar" not in afts
+    lafts.fnmatch_lines((".*[[]100%[]]", "*= 1 passed in * seconds =*"))
 
 
 if __name__ == "__main__":
