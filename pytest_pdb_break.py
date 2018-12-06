@@ -42,6 +42,12 @@ class BreakLoc(namedtuple("BreakpointLocation", "file lnum name")):
                 return cls.from_pytest_item(item)
         return super().__new__(cls, *args, **kwargs)
 
+    def __repr__(self):
+        rv = super().__repr__()
+        if module_logger and hasattr(self.file, "parent"):
+            rv = rv.replace(str(self.file.parent), "...")
+        return rv
+
     @classmethod
     def from_pytest_item(cls, item):
         # Note: pytest.Item.location line numbers are zero-indexed, but pdb
@@ -124,16 +130,13 @@ class PdbBreak:
                 self.debug and self._l.prinspotl(2)
             else:
                 raise RuntimeError("breakpoint file couldn't be determined")
-        lnum = find_breakable_line(self.wanted.file, self.wanted.lnum)
-        self.target = get_target(self.wanted.file, lnum, locs)
-        if not self.target:
-            raise RuntimeError("a valid breakpoint could not be determined")
-        if self.target.lnum == lnum:
-            lnum = find_breakable_line(self.wanted.file, lnum + 1)
-        if lnum != self.wanted.lnum:
-            self.debug and self._l.prinspotl(3)
-            self.wanted = self.wanted._replace(lnum=lnum)
-        self.debug and self._l.prinspotl(4)
+        self.targets = get_targets(self.wanted.file, self.wanted.lnum, locs)
+        try:
+            self.target = self.targets.popleft()
+        except IndexError as exc:
+            msg = "a valid breakpoint could not be determined"
+            raise RuntimeError(msg) from exc
+        self.debug and self._l.prinspotl(3)
 
     def pytest_enter_pdb(self, config, pdb):
         """Stash pytest-wrapped pdb instance.
@@ -150,6 +153,8 @@ class PdbBreak:
             if event == "call":
                 name = frame.f_code.co_name
                 if name == self.target.name:
+                    # TODO verify is still correct when f_back is no longer
+                    # runcall_until (e.g., target called itself)
                     frame.f_trace = self.trace_handoff
             if event == "line":
                 line = frame.f_lineno
@@ -167,6 +172,7 @@ class PdbBreak:
                         _frame.f_trace = inst.trace_dispatch
                         _frame = _frame.f_back
                     inst.set_break(str(self.wanted.file), line, True)
+                    self.target = None
                     sys.settrace(inst.trace_dispatch)  # handoff
                     return inst.dispatch_line(frame)
         return self.trace_handoff
@@ -178,10 +184,13 @@ class PdbBreak:
         failures. For testing, this means report output is sent to stdout
         rather than stderr (INTERNALERROR).
         """
+        # If the "request" feature is in play, pyfuncitem.obj will be this
+        # function. Should see if reassigning makes sense.
         from _pytest.capture import capture_fixtures
         pytest.set_trace(set_break=False)
-        assert self.last_pdb
-        assert self.last_func
+        if self.debug:
+            assert self.last_pdb
+            assert self.last_func
         inst = self.last_pdb
         func = self.last_func
         # XXX maybe only provide context for capsys, ignore others?
@@ -231,52 +240,40 @@ class PdbBreak:
 
     @pytest.hookimpl(hookwrapper=True)
     def pytest_pyfunc_call(self, pyfuncitem):
-        assert self.last_pdb is None
-        assert self.last_func is None
-        assert not pyfuncitem._isyieldedfunction()
-        # import ctypes; ctypes.string_at(0xffffffff) # gdb breakpoint
         if self.debug:
+            assert self.last_pdb is None
+            assert self.last_func is None
+            assert not pyfuncitem._isyieldedfunction()
             self._l.prinspot(1)
-        # Note: seems like nextitem is always None
         if BreakLoc(pyfuncitem) == self.target:
             self.last_func = pyfuncitem.obj
             pyfuncitem.obj = self.runcall_until
         yield
+        if pyfuncitem.obj.__func__ is type(self).runcall_until:
+            if self.target and self.targets:
+                self.target = self.targets.popleft()
+            self.debug and self._l.prinspot(2)
 
 
-def get_target(filename, upper, locations):
-    """Return a viable target from a list of item locations."""
+def get_targets(filename, upper, locations):
+    """Return ranked targets from a list of item locations."""
     from operator import attrgetter
-    # Note: this isn't the same as not reversing and taking the last item
-    locs = (l for l in locations if l.file == filename and l.lnum <= upper)
-    locs = sorted(locs, key=attrgetter("lnum"), reverse=True)
-    return locs and locs[0]
-
-
-def find_breakable_line(filename, lineno):
-    """Find the next breakable line.
-
-    This is like ``pdb.Pdb.checkline`` but without any frame awareness.
-    If ever ditching our kludgy trace function for real breakpoints,
-    we'd need to obtain source intel and also learn exactly where the
-    debugger is willing to break.
-    """
-    import linecache
-    # bdb.canonic without caching or angle-bracket guard
-    while True:
-        line = linecache.getline(str(filename), lineno)
-        if not line:  # blanks include newlines
-            line = None
-            break
-        line = line.strip()
-        if not line or line[0] == '#' or line[:3] in ('"""', "'''"):
-            module_logger and module_logger.prinspotl(1)
-            lineno += 1
+    from collections import deque
+    from itertools import groupby
+    neighbors = (l for l in locations if l.file == filename)
+    lnumgetter = attrgetter("lnum")
+    out = []
+    for side, locs in groupby(neighbors, lambda l: l.lnum <= upper):
+        if side:
+            # Note: this isn't the same as not reversing and popping last item
+            locs = sorted(locs, key=lnumgetter, reverse=True)
+            if locs:
+                # Not sure if different arg bindings can affect whether trace
+                # is called, so just include all partialized variants for now
+                out = [l for l in locs if l.lnum == locs[0].lnum] + out
         else:
-            break
-    if line is None:
-        raise RuntimeError("Unable to find a valid breakpoint")
-    return lineno
+            out += sorted(locs, key=lnumgetter)
+    return deque(out)
 
 
 # Tests for this plugin (requires pexpect)
@@ -284,20 +281,21 @@ def find_breakable_line(filename, lineno):
 prompt_re = r"\(Pdb[+]*\)\s?"
 
 
-def test_get_target():
+def test_get_targets():
     # XXX this assumes parametrized variants, whether their names are
     # auto-assigned or not, always appear in the order they'll be called.
     items = [BreakLoc(file="file_a", lnum=1, name="test_notfoo"),
              BreakLoc(file="file_b", lnum=1, name="test_foo"),
              BreakLoc(file="file_b", lnum=10, name="test_bar[one-1]"),
              BreakLoc(file="file_b", lnum=10, name="test_bar[two-2]"),
+             BreakLoc(file="file_b", lnum=10, name="test_bar[three-3]"),
              BreakLoc(file="file_b", lnum=99, name="test_baz"),
              BreakLoc(file="file_c", lnum=1, name="test_notbaz")]
-    assert get_target("file_b", 30, items) == items[2]
+    assert get_targets("file_b", 30, items).popleft() == items[2]
     assert items[2].name == "test_bar[one-1]"
     items.reverse()
-    assert get_target("file_b", 30, items) == items[2]
-    assert items[2].name == "test_bar[two-2]"
+    assert get_targets("file_b", 30, items).popleft() == items[2]
+    assert items[2].name == "test_bar[three-3]"
 
 
 def unansi(byte_string, as_list=True):

@@ -18,12 +18,9 @@ pytest_runtestloop:
       "wanted.file": >
         "'' -> {}".format(self.wanted.file)
   3:
-    kwargs:
-      "wanted.lnum": >
-        "{} -> {}".format(self.wanted.lnum, lnum)
-  4:
     args:
       - self.target
+      - self.targets
 
 runcall_until:
   pre_capfix:
@@ -46,8 +43,13 @@ pytest_pyfunc_call:
       - pyfuncitem.name
       - pyfuncitem.location
       - pyfuncitem.funcargs
+      - self.target
     kwargs:
       "loc equals target": BreakLoc(pyfuncitem) == self.target
+  2:
+    args:
+      - self.target
+      - self.targets
 
 find_breakable_line:
   1:
