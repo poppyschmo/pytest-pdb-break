@@ -14,6 +14,19 @@ except ValueError:
 if sys.version_info < (3, 6):
     raise RuntimeError("For now, requires Python 3.6+")
 
+module_logger = None
+try:
+    from logging_helper import LoggingHelper
+except ImportError:
+    pass
+else:
+    LoggingHelper.LOGFILE = os.getenv("PDBBRK_LOGFILE")
+    if LoggingHelper.LOGFILE:
+        LoggingHelper.LOGDEFS = os.getenv("PDBBRK_LOGYAML")
+        LoggingHelper.HANDLER_NAME = "PDB BREAK (DEBUG)"
+        LoggingHelper.LEVEL = "DEBUG"
+        module_logger = LoggingHelper.get_logger("<module>")
+
 
 class BreakLoc(namedtuple("BreakpointLocation", "file lnum name")):
     """Data object holding filename, line number, test name."""
@@ -58,138 +71,6 @@ def pytest_configure(config):
         PdbBreak(wanted, config)
 
 
-# Can't figure out how to use pdb to inspect these hooks, so it's this for now
-class LoggingHelper:
-    # XXX Don't register .close or .shutdown, etc. with any teardown machinery
-    # Warning: some functions eval source code in .LOGDEFS, if defined
-    LOGFILE = os.getenv("PDBBRK_LOGFILE")  # TTY devices only
-    LOGDEFS = os.getenv("PDBBRK_LOGYAML")
-    HANDLER_NAME = "PDB BREAK (DEBUG)"
-    LEVEL = "DEBUG"
-    logfile = None
-    logdefs = None
-
-    @classmethod
-    def _module_init(cls):
-        import logging
-        assert sys.platform.startswith("linux")
-        cls._prinspect_next = {}
-        if hasattr(cls.logfile, "closed"):
-            assert not cls.logfile.closed
-            return
-        cls.logfile = open(cls.LOGFILE, "w")
-        assert os.isatty(cls.logfile.fileno())
-        cls.logfile.write("\n")
-        if cls.LOGDEFS:
-            cls.load_logdefs()
-        cls.logfile.flush()
-        klass = type("UnifiedLogger", (logging.Logger, cls), {})
-        logging.setLoggerClass(klass)
-
-    @classmethod
-    def load_logdefs(cls):
-        # Often fails because of syntax errors, so helps to run at import time
-        try:
-            import yaml
-        except ImportError:
-            raise UserWarning("No logging defs found")
-        else:
-            with open(cls.LOGDEFS) as flo:
-                cls.logdefs = yaml.load(flo)
-        cls.logfile.write("Loaded log defs from {!r}\n".format(cls.LOGDEFS))
-
-    def _log_as(self, frame, msg, exc_info=None):
-        """Log msg, impersonating frame."""
-        co = frame.f_code
-        name = frame.f_locals.get("__lname", self.name)
-        record = self.makeRecord(
-            name, self.level, co.co_filename, frame.f_lineno,
-            msg, (), exc_info, co.co_name, None, None
-        )
-        self.handle(record)
-
-    def prinspect(self, *args, **kwargs):
-        """Print stuff."""
-        from pprint import PrettyPrinter
-        pp = PrettyPrinter()
-        caller = sys._getframe(1)
-        name = caller.f_code.co_name
-        if name == "prinspot":
-            caller = caller.f_back
-            name = caller.f_code.co_name
-        defer = kwargs.get("defer")
-        if self._prinspect_next:
-            for k in tuple(self._prinspect_next):
-                if not defer or name != k:
-                    v = self._prinspect_next.pop(k)
-                    c = v.pop("defer")
-                    if name == k:
-                        kwargs.update(v)
-                        continue
-                    self._log_as(c, "\n{}".format(pp.pformat(v)))
-        if args:
-            kwargs.update((a, eval(a, caller.f_globals, caller.f_locals))
-                          if isinstance(a, str) else a for a in args)
-        if defer:
-            kwargs["defer"] = caller
-            caller.f_locals.update(__lname=self.name)
-            self._prinspect_next.setdefault(name, {}).update(kwargs)
-        else:
-            self._log_as(caller, "\n{}".format(pp.pformat(kwargs)))
-
-    def prinspot(self, tag, defer=None):
-        """Read in yaml defs, print.
-        This ignores prinspect's iterable arg form. Tag can be an int.
-        """
-        if not self.logdefs:
-            return
-        caller = sys._getframe(1)
-        name = caller.f_code.co_name
-        defs = self.logdefs[name].get(tag)
-        if not defs:
-            return
-        args = defs.get("args", ())
-        kwargs = {k: eval(v, caller.f_globals, caller.f_locals) for
-                  k, v in defs.get("kwargs", {}).items()}
-        if defer:
-            kwargs["defer"] = defer
-        self.prinspect(*args, **kwargs)
-
-    from functools import partialmethod
-    prinspool = partialmethod(prinspect, defer=True)
-    prinspotl = partialmethod(prinspot, defer=True)  # 'l'~~> "line" or "late"
-
-    @classmethod
-    def get_logger(cls, name):
-        """Return a logger with a TTY handler for cls.LEVEL."""
-        if not cls.LOGFILE:
-            assert cls.LOGFILE is None
-            return
-        if not hasattr(cls, "level"):
-            cls._module_init()
-        import logging
-        assert cls.logfile
-        # Passing "" as name will fetch root logger (wrong class)
-        logger = logging.getLogger(name)
-        handler = getattr(cls, "_handler", None)
-        if handler and handler in logger.handlers:
-            return logger
-        fmt = ("{dk}[%(asctime)s]{no} {dm}%(name)s"
-               ".%(funcName)s:{no} %(message)s")
-        clrs = dict(dk="\x1b[38;5;241m", dm="\x1b[38;5;247m", no="\x1b[m")
-        handler = logging.StreamHandler(stream=cls.logfile)
-        handler.setFormatter(logging.Formatter(fmt.format(**clrs)))
-        handler.set_name(cls.HANDLER_NAME)
-        handler.setLevel(cls.LEVEL)
-        cls._handler = handler
-        logger.addHandler(handler)
-        logger.setLevel(cls.LEVEL)
-        return logger
-
-
-module_logger = LoggingHelper.LOGFILE and LoggingHelper.get_logger("<module>")
-
-
 class PdbBreak:
     debug = False
 
@@ -199,7 +80,7 @@ class PdbBreak:
         self.config = config
         self.wanted = wanted
         self.target = None
-        if LoggingHelper.LOGFILE:
+        if module_logger:
             self._l = LoggingHelper.get_logger("PdbBreak")
             self.debug = True
         self.last_pdb = None
@@ -425,11 +306,7 @@ def testdir_setup(testdir):
     """Copy this file to testdir basetemp."""
     from pathlib import PurePath
     fpp = PurePath(__file__)
-    with open(fpp) as flor:
-        with open(os.path.join(testdir.tmpdir, fpp.name), "w") as flow:
-            flow.write(flor.read())
     testdir.makeconftest("""
-        # import pytest
         pytest_plugins = "%s"
     """ % fpp.stem)
     return testdir
@@ -677,7 +554,22 @@ if __name__ == "__main__" and not os.getenv("PDBBRK_HACK"):
     cmdline = ("pytest", "-p", "pytester", "--noconftest", __file__)
     if sys.platform.startswith("linux"):
         sys.stdout.flush()
+        os.environ["PYTHONPATH"] = os.path.dirname(__file__)
         os.execlp("python", sys.executable, "-m", *cmdline)
     else:
         raise RuntimeError("The tests above aren't meant to be discovered."
                            " Try running:\n%s" % " ".join(cmdline))
+
+# Copyright 2018 Jane Soko
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
