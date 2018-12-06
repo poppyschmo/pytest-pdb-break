@@ -183,6 +183,24 @@ class PdbBreak:
 
         Note: the default ``pytest_pyfunc_call`` in
         ``_pytest/python.py`` doesn't use the return value.
+
+        Capture states
+        ==============
+
+        Global active::
+            sys.stdout:       <'_pytest.compat.CaptureIO'>
+
+        Capsys active::
+            <Cap[1]>._old:    <_pytest.capture.EncodedFile object at ...>
+            <Cap[1]>.tmpfile: (sys.stdout)
+
+        Capsys suspended::
+            sys.stdout:       <_pytest.capture.EncodedFile object at ...>
+            <Cap[1]>._old:    (sys.stdout)
+            <Cat[1]>.tmpfile: <class '_pytest.compat.CaptureIO'>
+
+        Global suspended::
+            sys.stdout:       <_io.TextIOWrapper name='<stdout>' ...>
         """
         from _pytest.capture import capture_fixtures
         pytest.set_trace(set_break=False)
@@ -197,38 +215,14 @@ class PdbBreak:
         prevstdout = sys.stdout
         if capfix:
             capfix = kwargs[capfix]
-            #
+
             def preloop(_inst, *a, **kw):
-                # This runs after setup, but global capture not suspended!
-                print("before cap suspend",
-                      "sys.stdout: {}".format(sys.stdout),
-                      "capfix._capture.out._old: {}"
-                      .format(capfix._capture.out._old),
-                      "capfix._capture.out.tmpfile: {}"
-                      .format(capfix._capture.out.tmpfile),
-                      sep="\n",
-                      file=prevstdout)
-                capfix._suspend()  # <- isn't necessary
-                print("after cap suspend",
-                      "sys.stdout: {}".format(sys.stdout),
-                      "capfix._capture.out._old: {}"
-                      .format(capfix._capture.out._old),
-                      "capfix._capture.out.tmpfile: {}"
-                      .format(capfix._capture.out.tmpfile),
-                      sep="\n",
-                      file=prevstdout)
+                # XXX runs after .setup, but global capture still active?
                 self.capman.suspend_global_capture(in_=True)
-                print("after global suspend",
-                      "sys.stdout: {}".format(sys.stdout),
-                      "capfix._capture.out._old: {}"
-                      .format(capfix._capture.out._old),
-                      "capfix._capture.out.tmpfile: {}"
-                      .format(capfix._capture.out.tmpfile),
-                      sep="\n",
-                      file=prevstdout)
             #
             inst.__dict__["preloop"] = preloop.__get__(inst)
-            # TODO figure out why this state isn't already set
+            # TODO figure out why resumed state isn't already active
+            # Maybe we have to run some hooks?
             capfix._resume()
         inst.set_break(self.wanted.file, self.wanted.lnum, True)
         if self.debug and self.logfile:
@@ -282,13 +276,6 @@ class PdbBreak:
                            locals=locals())
         # Note: seems like nextitem is always None
         if BreakLoc(pyfuncitem) == self.target:
-            # Copied from PdbInvoke and PdbTrace in _pytest/debugging.py
-            #
-            # self.capman.suspend_global_capture(in_=True)
-            # out, err = self.capman.read_global_capture()
-            # sys.stdout.write(out)
-            # sys.stdout.write(err)
-            #
             self.last_func = pyfuncitem.obj
             pyfuncitem.obj = self.runcall_until
         yield
@@ -476,16 +463,19 @@ def test_mark_param(testdir_setup):
 
 
 def test_capsys(testdir_setup):
-    testdir_setup.makepyfile("""
+    testdir_setup.makepyfile(r"""
         def test_print(capsys):
             print("foo")
             capped = capsys.readouterr()
-            assert capped.out
-            assert True                                 # line 5
-    """)
+            assert capped.out == "foo\n"
+            assert True                  # line 5
+    """)  # raw string \n
     pe = testdir_setup.spawn_pytest("--break=test_capsys.py:5")
     pe.expect(prompt_re)
-    # befs = unansi(pe.before)
+    befs = unansi(pe.before)
+    assert "foo" not in befs
+    lbefs = LineMatcher(befs)
+    lbefs.fnmatch_lines((">*/test_capsys.py(5)test_print()", "->*# line 5"))
     pe.sendline("c")
 
 
