@@ -15,7 +15,7 @@ if sys.version_info < (3, 6):
 
 
 # Note: if later adding function-based breaks, see ``compat.getlocation``
-class BpLoc(namedtuple("BreakpointLocation", "file lnum name")):
+class BreakLoc(namedtuple("BreakpointLocation", "file lnum name")):
     """Data object holding filename, line number, test name."""
     def __new__(cls, *args, **kwargs):
         if len(args) == 1:
@@ -44,37 +44,35 @@ class BpLoc(namedtuple("BreakpointLocation", "file lnum name")):
 
 def pytest_addoption(parser):
     group = parser.getgroup("pdb")
-    group.addoption("--pdbat",
+    group.addoption("--break",
                     action="store",
                     metavar="<file:lnum>",
-                    dest="usepdbat",
-                    type=BpLoc,
+                    dest="pdb_break",
+                    type=BreakLoc,
                     help="One [<file>:<line-number>] pair, like foo.py:42")
 
 
 def pytest_configure(config):
-    wanted = config.getoption("usepdbat")
-    # Using free-floating hooks instead of a class would mean having to repeat
-    # this check in every definition
+    wanted = config.getoption("pdb_break")
     if wanted:
-        PdbAt(wanted, config)
+        PdbBreak(wanted, config)
 
 
-class PdbAt:
+class PdbBreak:
     debug = False
     logfile = None
 
     # Config.option is an argparse.Namespace mapping proxy, i.e., read only.
     # So maintain an updatable copy in instance.wanted.
     def __init__(self, wanted, config):
-        config.pluginmanager.register(self, "pdbat")
+        config.pluginmanager.register(self, "pdb_break")
         self.capman = config.pluginmanager.getplugin("capturemanager")
         self.config = config
         self.wanted = wanted
         self.target = None
-        self.debug = os.getenv("PDBAT_DEBUG") and True  # 0/false/off are True
+        self.debug = os.getenv("PDBBRK_DEBUG") and True  # 0/false/off are True
         if self.debug:
-            logfile = os.getenv("PDBAT_LOGFILE")
+            logfile = os.getenv("PDBBRK_LOGFILE")
             if logfile:
                 self.logfmt = "[{}] {} -- {}"
                 if logfile.startswith("/dev"):
@@ -130,7 +128,7 @@ class PdbAt:
         """Find target or raise."""
         if not self.wanted or not any(self.wanted):
             return
-        locs = [BpLoc(i) for i in session.items]
+        locs = [BreakLoc(i) for i in session.items]
         if self.debug:
             self.prinspect("runtestloop", session.name,
                            wanted=self.wanted, locs=locs)
@@ -231,13 +229,13 @@ class PdbAt:
                            "{}{}".format(pyfuncitem.name,
                                          signature(pyfuncitem.obj)),
                            ("loc equals target",
-                            BpLoc(pyfuncitem) == self.target),
+                            BreakLoc(pyfuncitem) == self.target),
                            "pyfuncitem.location",
                            "pyfuncitem.funcargs",
                            # "pyfuncitem._fixtureinfo",
                            locals=locals())
         # Note: seems like nextitem is always None
-        if BpLoc(pyfuncitem) == self.target:
+        if BreakLoc(pyfuncitem) == self.target:
             # Copied from PdbInvoke and PdbTrace in _pytest/debugging.py
             self.capman.suspend_global_capture(in_=True)
             out, err = self.capman.read_global_capture()
@@ -312,13 +310,13 @@ def test_invalid_arg(testdir_setup):
     """)
 
     # No line number (argparse error)
-    result = td.runpytest("--pdbat=test_invalid_arg.py")
+    result = td.runpytest("--break=test_invalid_arg.py")
     assert "usage" in result.stderr.lines[0]
-    assert "--pdbat" in result.stderr.lines[1]
-    assert "invalid BpLoc value" in result.stderr.lines[1]
+    assert "--break" in result.stderr.lines[1]
+    assert "invalid BreakLoc value" in result.stderr.lines[1]
 
     # Non-existent file
-    result = td.runpytest("--pdbat=foo:99")
+    result = td.runpytest("--break=foo:99")
     assert result.ret == 3
     assert "RuntimeError: file 'foo' not found" in last_internal_error(result)
 
@@ -327,13 +325,13 @@ def test_invalid_arg(testdir_setup):
         def test_bar():
             assert True
     """)
-    result = td.runpytest("--pdbat=1")
+    result = td.runpytest("--break=1")
     assert result.ret == 3
     assert ("RuntimeError: breakpoint file couldn't be determined" in
             last_internal_error(result))
 
     # No file named, but pytest arg names one
-    pe = td.spawn_pytest("--pdbat=1 test_otherfile.py")  # <- Two sep args
+    pe = td.spawn_pytest("--break=1 test_otherfile.py")  # <- Two sep args
     # XXX API is different for these spawning funcs (string)
     pe.expect(prompt_re)
     befs = unansi(pe.before)
@@ -360,7 +358,7 @@ def testdir_two_funcs(testdir_setup):
 
 def test_two_funcs_simple(testdir_two_funcs):
     # Normal breakpoint
-    pe = testdir_two_funcs.spawn_pytest("--pdbat=test_two_funcs_simple.py:4")
+    pe = testdir_two_funcs.spawn_pytest("--break=test_two_funcs_simple.py:4")
     pe.expect(prompt_re)
     befs = unansi(pe.before)
     assert befs[-1].lstrip().startswith("->")
@@ -371,7 +369,7 @@ def test_two_funcs_simple(testdir_two_funcs):
 
 def test_two_funcs_comment(testdir_two_funcs):
     # Comment
-    pe = testdir_two_funcs.spawn_pytest("--pdbat=test_two_funcs_comment.py:2")
+    pe = testdir_two_funcs.spawn_pytest("--break=test_two_funcs_comment.py:2")
     pe.expect(prompt_re)
     befs = unansi(pe.before)
     assert befs[-1].endswith("somevar = True")
@@ -381,7 +379,7 @@ def test_two_funcs_comment(testdir_two_funcs):
 
 def test_two_funcs_gap(testdir_two_funcs):
     # Empty line between funcs
-    pe = testdir_two_funcs.spawn_pytest("--pdbat=test_two_funcs_gap.py:5")
+    pe = testdir_two_funcs.spawn_pytest("--break=test_two_funcs_gap.py:5")
     pe.expect(prompt_re)
     befs = unansi(pe.before)
     assert befs[-1].endswith("isinstance(False, int)")
@@ -402,7 +400,7 @@ def test_one_arg(testdir_setup):
             assert string                # line 8
 
     """)
-    pe = testdir_setup.spawn_pytest("--pdbat=test_one_arg.py:8")
+    pe = testdir_setup.spawn_pytest("--break=test_one_arg.py:8")
     pe.expect(prompt_re)
     befs = unansi(pe.before)
     assert befs[-2].endswith("/test_one_arg.py(8)test_string()")
@@ -419,7 +417,7 @@ def test_mark_param(testdir_setup):
             print(name)
             assert len(name) > value     # line 6
     """)
-    pe = testdir_setup.spawn_pytest("--pdbat=test_mark_param.py:6 "
+    pe = testdir_setup.spawn_pytest("--break=test_mark_param.py:6 "
                                     "--capture=no")
     pe.expect(prompt_re)
     befs = unansi(pe.before)
@@ -431,13 +429,13 @@ if __name__ == "__main__":
     # Some print statements only show up when a logfile envvar is present
     #
     # Vim:
-    #   :let $PDBAT_DEBUG = "1" | let $PDBAT_LOGFILE = "/dev/pts/7"
+    #   :let $PDBBRK_DEBUG = "1" | let $PDBBRK_LOGFILE = "/dev/pts/7"
     #
     # Emacs:
-    #   (progn (setenv "PDBAT_DEBUG" "1")
-    #          (setenv "PDBAT_LOGFILE" "/tmp/pdbat.log"))
+    #   (progn (setenv "PDBBRK_DEBUG" "1")
+    #          (setenv "PDBBRK_LOGFILE" "/tmp/pdb_break.log"))
     #
-    if not os.getenv("PDBAT_DEVELOP"):
+    if not os.getenv("PDBBRK_DEVELOP"):
         cmdline = ("pytest", "-p", "pytester", "--noconftest", __file__)
         if sys.platform.startswith("linux"):
             sys.stdout.flush()
