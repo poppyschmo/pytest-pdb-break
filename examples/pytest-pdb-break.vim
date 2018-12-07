@@ -1,4 +1,5 @@
 
+" TODO make this work with regular Vim
 if ! has("nvim")
 	finish
 endif
@@ -22,7 +23,7 @@ endfunction
 function! s:pytest_runner(...) abort "{{{
 	let saved_cursor = getcurpos()
 	normal [m
-	let pat = '^\s*\(def\|async def\)\s\(test_\w\+\)(\(.\+\)).*$'
+	let pat = '^\s*\(def\|async def\)\s\(test_\w\+\)(\(.*\)).*$'
 	let groups = matchlist(getline("."), pat)
 	if ! len(groups) || groups[2] == ""
 		call s:report_failed(groups)
