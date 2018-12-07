@@ -4,23 +4,23 @@
 
 ;;; Commentary:
 
-;; This obviously isn't on MELPA, but `straight.el' users can use this recipe:
+;; Installation: no MELPA, but `straight.el' users can use this recipe:
 ;;
 ;;   '(:host github :repo "poppyschmo/pytest-pdb-break"
 ;;     :files (:defaults "examples/*.el"))
 ;;
+;; Usage: `pytest-pdb-break-here'
+;;
 ;; Note: the completion modifications are useless without pdb++. No idea if
 ;; they hold up when summoned by `company-capf'.
 ;;
-;; TODO:
-;; * Add option to hack PYTHONPATH for environments where the plugin itself
-;;   isn't installed (only useful to users of straight-like package managers)
-;;
+;; TODO: ert
 
 ;;; Code:
 
+(require 'find-func)
+(require 'subr-x)
 (require 'python)
-;; (require 'elpy nil t)
 
 (defvar-local pytest-pdb-break-extra-args nil
   "List of extra args passed to pytest.
@@ -30,6 +30,13 @@ entry unsets cmd-line options from a project ini:
 
 (defvar-local pytest-pdb-break-interpreter nil
   "If nil, use `python-shell-interpreter'.")
+
+(defvar-local pytest-pdb-break-has-plugin-alist nil
+  "An alist resembling ((VIRTUAL_ENV . STATE) ...).
+This is set by the main command the first time it's run in a Python
+buffer. STATE is non-nil if the interpreter sees the pytest plugin. When
+no virtual environment is present, the car should be nil and treated as
+a valid key. ")
 
 (defvar pytest-pdb-break-after-functions nil
   "Abnormal hook for adding a process sentinel, etc.
@@ -41,13 +48,11 @@ failure. Hook is run with process buffer current.")
 (defvar pytest-pdb-break-processes nil
   "List of processes started via `pytest-pdb-break-here'.")
 
-;; XXX pretty sure this is just a workaround; not familiar enough with
-;; python.el to know either way
-;; TODO ask Emacs list if there's not already some built-in means of
-;; handling amputee candidates
+;; FIXME only add this wrapper when pdb++ is detected. These amputee
+;; candidates most likely come courtesy of the fancycompleter package.
 (defun pytest-pdb-break-ad-around-get-completions (orig process import input)
   "Advice wrapper for ORIG `python-shell-completion-get-completions'.
-If PROCESS belongs to us, prepend INPUT to results. With IMPORT, ignore."
+If PROCESS is ours, prepend INPUT to results. With IMPORT, ignore."
   (let ((rv (funcall orig process import input)))
     (if (or import
             (not (memq process pytest-pdb-break-processes))
@@ -112,6 +117,49 @@ PROC is the buffer's current process."
               nil t)
     (run-hook-with-args 'pytest-pdb-break-after-functions proc)))
 
+(defun pytest-pdb-break--check-command-p (command)
+  "Run COMMAND in Python, return t if exit code is 0, nil otherwise."
+  (= 0 (call-process python-shell-interpreter nil nil nil "-c" command)))
+
+(defun pytest-pdb-break--getenv (var)
+  "Look up VAR in `process-environment', return nil if unset or empty."
+  (and (setq var (getenv var)) (not (string= var "")) var))
+
+(defun pytest-pdb-break-has-plugin-p (&optional force)
+  "Return non-nil if plugin is loadable.
+With FORCE, always check."
+  (let* ((venv (pytest-pdb-break--getenv "VIRTUAL_ENV"))
+         (entry (assoc venv pytest-pdb-break-has-plugin-alist)))
+    (if (and (not force) entry)
+        (cdr entry)
+      (unless entry
+        (push (setq entry (list venv)) pytest-pdb-break-has-plugin-alist))
+      (setcdr entry
+              (pytest-pdb-break--check-command-p "import pytest-pdb-break")))))
+
+(defun pytest-pdb-break--find-own-repo ()
+  "Return root of plugin repo or nil."
+  (let ((drefd (file-truename (find-library-name "pytest-pdb-break")))
+        root)
+    (if (fboundp 'ffip-project-root)
+        (setq root (let ((default-directory drefd)) (ffip-project-root)))
+      (setq root (file-name-directory drefd)
+            root (and root (directory-file-name root))
+            root (and root (file-name-directory root))))
+    (when (and root (directory-files root 'full "pytest_pdb_break\\.py$"))
+      (file-truename root))))
+
+(defun pytest-pdb-break-add-pythonpath ()
+  "Add plugin root to a copy of `process-environment'.
+Return the latter."
+  (let* ((process-environment (append process-environment nil))
+         (existing (pytest-pdb-break--getenv "PYTHONPATH"))
+         (existing (and existing (parse-colon-path existing)))
+         (found (pytest-pdb-break--find-own-repo)))
+    (when found
+      (setenv "PYTHONPATH" (string-join (cons found existing) ":")))
+    process-environment))
+
 ;;;###autoload
 (defun pytest-pdb-break-here (lnum node-info root-dir)
   "Drop into pdb after spawning an inferior pytest process, go to LNUM.
@@ -124,8 +172,13 @@ project/repo's root directory."
          (file (car node-info))
          (argstr (mapconcat #'identity node-info "::"))
          (break (format "--break=%s:%s" file lnum))
-         (args (append (cons "-mpytest" pytest-pdb-break-extra-args)
-                       (list break argstr)))
+         (installed (pytest-pdb-break-has-plugin-p))
+         (xtra pytest-pdb-break-extra-args)
+         (xtra (if (or installed (member "pytest_pdb_break" xtra))
+                   xtra (append '("-p" "pytest_pdb_break") xtra)))
+         (args (append (cons "-mpytest" xtra) (list break argstr)))
+         (process-environment (if installed process-environment
+                                (pytest-pdb-break-add-pythonpath)))
          ;; Make pdb++ prompt trigger non-native-completion fallback
          (python-shell-prompt-pdb-regexp "[(<]*[Ii]?[Pp]db[+>)]+ ")
          (python-shell-interpreter (or pytest-pdb-break-interpreter
