@@ -1,0 +1,14 @@
+---
+sudo: false
+language: python
+dist: xenial
+install: pip install tox
+
+matrix:
+  include:
+    - python: 3.6
+      env: TOXENV=py36,py36-pdbpp
+    - python: 3.7
+      env: TOXENV=py37,py37-pdbpp
+
+script: tox
