@@ -7,7 +7,7 @@
 ;; Installation: no MELPA, but `straight.el' users can use this recipe:
 ;;
 ;;   '(:host github :repo "poppyschmo/pytest-pdb-break"
-;;     :files (:defaults "examples/*.el"))
+;;     :files (:defaults "emacs/*.el"))
 ;;
 ;; Usage: `pytest-pdb-break-here'
 ;;

@@ -1,17 +1,8 @@
 
-" TODO make this work with regular Vim
-if ! has("nvim")
-	finish
-endif
 
-" Any args are passed on to pytest, for example: :PytestBreakHere -o addopts=
-if exists(':PytestBreakHere') != 2
-	command! -nargs=* PytestBreakHere call <SID>pytest_break_runner(<f-args>)
-endif
-
-function! s:pytest_break_runner(...)
+function! pytest_pdb_break#run(...)
 	let arg = printf("--break=%s:%s", expand('%'),  line('.'))
-	return call("s:pytest_runner", [arg] + a:000)
+	return call("s:runner", [arg] + a:000)
 endfunction
 
 function! s:report_failed(matchgroup)
@@ -20,7 +11,7 @@ function! s:report_failed(matchgroup)
 	echo ' match: ' . string(a:matchgroup)
 endfunction
 
-function! s:pytest_runner(...) abort "{{{
+function! s:runner(...) abort "{{{
 	let saved_cursor = getcurpos()
 	normal [m
 	let pat = '^\s*\(def\|async def\)\s\(test_\w\+\)(\(.*\)).*$'
