@@ -1,66 +1,89 @@
 let s:file = expand('<sfile>')
 
 function! pytest_pdb_break#run(...)
-	let arg = printf("--break=%s:%s", expand('%'), line('.'))
-	return call("s:runner", [arg] + a:000)
+	return call('s:runner', a:000)
 endfunction
 
 function! pytest_pdb_break#toggle(...)
 	let context = s:get_context()
-	let context.found = a:0 ? a:1 : !get(context, 'found', 0)
-	echo 'Plugin injection: '. (context.found ? 'off' : 'on')
+	let context.registered = a:0 ? a:1 : !get(context, 'registered', 0)
+	echo 'Plugin injection: '. (context.registered ? 'off' : 'on')
 endfunction
 
 function! s:get_context() "{{{
-	" Save venv info in buffer-local dict, keyed by python executable;
-	" members are 'found' (always set), 'PP' (when not found), 'job' (id)
+	" Save venv info in buffer-local dict, keyed by python executable
 	if exists('g:pytest_pdb_break_overrides.get_context')
 		return call(g:pytest_pdb_break_overrides.get_context)
 	endif
-	if ! exists('b:pytest_pdb_break_context')
+	if !exists('s:home')
+		let path = fnamemodify(s:file, ':h:p') . ';'
+		let plugin = findfile('pytest_pdb_break.py', path)
+		if plugin == ''
+			throw 'Could not find plugin root above entry in &rtp'
+		endif
+		let s:plugin = fnamemodify(plugin, ':p') " covers the rare './plugin'
+		let s:home = fnamemodify(s:plugin, ':h:p') " no trailing/
+		let s:helper = simplify(s:home . '/get_config_info.py')
+	endif
+	if !exists('b:pytest_pdb_break_context')
 		let b:pytest_pdb_break_context = {}
 	endif
-	let exe = exepath('python')
+	if exists('b:pytest_pdb_break_python_exe')
+		let exe = b:pytest_pdb_break_python_exe
+	else
+		try
+			let shebang = readfile(exepath('pytest'), '', 1)[0]
+			let exe = substitute(shebang, '^!#', '', '')
+		catch /^Vim\%((\a\+)\)\=:E/
+			let exe = ''
+		endtry
+		if !executable(exe)
+			let exe = exepath('python')
+		endif
+	endif
 	if !has_key(b:pytest_pdb_break_context, exe)
-		let b:pytest_pdb_break_context[exe] = {}
+		let b:pytest_pdb_break_context[exe] = {'exe': exe}
 	endif
 	return b:pytest_pdb_break_context[exe]
 endfunction "}}}
 
-function! s:check_plugin(...) "{{{
+function! s:check_plugin(ctx, ...) "{{{
 	if exists('g:pytest_pdb_break_overrides.check_plugin')
-		return call(g:pytest_pdb_break_overrides.check_plugin, a:000)
+		return call(g:pytest_pdb_break_overrides.check_plugin, [a:ctx, a:000])
 	endif
-	let context = a:0 ? a:1 : s:get_context()
-	if !has_key(context, 'found')
-		" TODO allow setting explicitly via some option
-		let job = jobstart(['python', '-c', 'import pytest_pdb_break'])
-		let context.found = jobwait([job], 100)[0] == 0
+	let context = a:ctx
+	if !has_key(context, 'registered')
+		" Heard somewhere that using job control instead of system() can help
+		" with shell-quoting issues. No idea.
+		let jd = {'stdout_buffered': v:true, 'stderr_buffered': v:true}
+		let lines = readfile(s:helper)
+		let jd.id = jobstart([context.exe, '-'] + a:000, jd)
+		let jd.sent = chansend(jd.id, lines)
+		call chanclose(jd.id, 'stdin')
+		let jd.exit = jobwait([jd.id], 1000)[0]
+		if jd.exit
+			let context.helper_rv = jd
+			echo join(jd.stderr, "\n")
+			throw "Error querying pytest"
+		endif
+		call extend(context, json_decode(jd.stdout[0]))
 	endif
-	return context.found
+	return context.registered
 endfunction "}}}
 
-function! s:extend_python_path(...) "{{{
+function! s:extend_python_path(ctx) "{{{
 	" Stash modified copy of PYTHONPATH, should be unset if unneeded
 	if exists('g:pytest_pdb_break_overrides.extend_python_path')
-		return call(g:pytest_pdb_break_overrides.extend_python_path, a:000)
+		return call(g:pytest_pdb_break_overrides.extend_python_path, a:ctx)
 	endif
-	let context = a:0 ? a:1 : s:get_context()
+	let context = a:ctx
 	if has_key(context, 'PP')
 		return context.PP
 	endif
-	let components = expand('$PYTHONPATH')
-	if components == '$PYTHONPATH'
-		let components = []
-	else
-		let components = split(components, ':')
-	endif
-	let found = findfile('pytest_pdb_break.py', fnamemodify(s:file, ':h:p') . ';')
-	if found == ''
-		throw 'Could not find plugin'
-	endif
-	call add(components, fnameescape(fnamemodify(found, ':h')))
-	let context.PP = join(components, ':')
+	let val = expand('$PYTHONPATH')
+	let val = val == '$PYTHONPATH' ? [] : split(val, ':')
+	call add(val, fnameescape(s:home))
+	let context.PP = join(val, ':')
 	return context.PP
 endfunction "}}}
 
@@ -94,16 +117,21 @@ function! s:runner(...) abort "{{{
 		endif
 	endif
 	call setpos('.', saved_cursor)
-	call add(nodeid, expand('%'))
-	let args = a:000 + [join(reverse(nodeid), "::")]
-	let cmd = ['pytest']
+	call add(nodeid, expand('%:p'))
 	let context = s:get_context()
-	if !s:check_plugin(context)
+	let args = []
+	let cmd = [context.exe, '-mpytest']
+	let arg = join(reverse(nodeid), "::")
+	let registered = call('s:check_plugin', [context] + a:000 + [arg])
+	if !registered
 		let preenv = s:extend_python_path(context)
 		let cmd = ['env', printf('PYTHONPATH=%s', preenv)] + cmd
-		let args = ['-p', 'pytest_pdb_break'] + args
+		call extend(args, ['-p', 'pytest_pdb_break'])
 	endif
-	return call('s:split', cmd + args)
+	let opt = printf('--break=%s:%s', expand('%:p'), line('.'))
+	call extend(args, [opt, arg])
+	let context.last = cmd + a:000 + args
+	return call('s:split', context.last)
 endfunction "}}}
 
 function! s:split(...) "{{{
@@ -112,7 +140,7 @@ function! s:split(...) "{{{
 	endif
 	let context = s:get_context()
 	execute ((winwidth(0) + 0.0) / winheight(0) > 2.5) ? 'vnew' : 'new'
-	let context.job = termopen(a:000)
+	let context.job = termopen(a:000, {'cwd': context.rootdir})
 	let @@ = winnr()
 	execute bufwinnr(bufnr('%')) . 'wincmd w'
 	execute @@ . 'wincmd w'
