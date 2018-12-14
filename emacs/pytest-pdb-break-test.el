@@ -266,6 +266,10 @@ created with python3."
      (let* (($venv (pytest-pdb-break-test--get-venv-path ,name))
             ($venvbin (concat $venv "bin/"))
             ($pyexe (concat $venvbin "python"))
+            ;; XXX this is a conceit to prevent this variable from persisting
+            ;; between tests. It may need to be reset manually within tests.
+            pytest-pdb-break-config-info-alist
+            ;;
             pipexe logfile requirements)
        (unless (file-exists-p $venv) ; trailing/ ok
          (setq pipexe (concat $venvbin "pip")
@@ -385,7 +389,8 @@ created with python3."
          (fails (progn
                   (should-not python-shell-process-environment)
                   (should pytest-pdb-break-config-info-alist))
-                "error_invalid_cdr.out"))))))
+                "error_invalid_cdr.out")
+         (should-not pytest-pdb-break-config-info-alist))))))
 
 (ert-deftest pytest-pdb-break-test-get-config-info-unregistered ()
   (cl-macrolet
@@ -399,9 +404,12 @@ created with python3."
             (should (eq (cdr rv) pytest-pdb-break--config-info))
             (should (eq (car rv)
                         (plist-get pytest-pdb-break--config-info :exe)))
+            (should pytest-pdb-break-config-info-alist)
             (should (eq (assoc (car rv) pytest-pdb-break-config-info-alist)
                         rv)))
-          ,after)))
+          ,after
+          ;; Effectively global
+          (setq pytest-pdb-break-config-info-alist nil))))
     (pytest-pdb-break-test-ensure-venv
      'base
      (ert-info ("Set virtual environment root")
@@ -410,12 +418,36 @@ created with python3."
              (unslashed (directory-file-name $venvbin)))
          (rinse-repeat
           (should-not (member unslashed exec-path))
-          (should-not (member unslashed exec-path)))))
+          (progn
+            (should-not (directory-name-p
+                         (plist-get pytest-pdb-break--config-info :rootdir)))
+            (should-not (member unslashed exec-path))))))
      (ert-info ("Set extra `exec-path' items to prepend")
        (let ((python-shell-exec-path (list $venvbin)))
          (rinse-repeat
           (should-not (member $venvbin exec-path))
-          (should-not (member $venvbin exec-path))))))))
+          (progn
+            (should-not (directory-name-p
+                         (plist-get pytest-pdb-break--config-info :rootdir)))
+            (should-not (member $venvbin exec-path))))))
+     (ert-info ("Baseline for \"Don't shell out ...\"")
+       (let ((python-shell-interpreter $pyexe))
+         (rinse-repeat
+          (should-not pytest-pdb-break-config-info-alist)
+          (should (equal pytest-pdb-break--config-info
+                         (list :exe $pyexe
+                               :registered nil
+                               :rootdir (directory-file-name $tmpdir)))))))
+     (ert-info ("Don't shell out when entry exists, even with invalid plist")
+       (let* ((python-shell-interpreter $pyexe)
+              (fake-entry (list $pyexe
+                                :exe $pyexe
+                                :fookey "fooval"
+                                :barkey "barval"))
+              (pytest-pdb-break-config-info-alist (list fake-entry)))
+         (rinse-repeat
+          (should pytest-pdb-break-config-info-alist)
+          (should (equal pytest-pdb-break--config-info (cdr fake-entry)))))))))
 
 
 (provide 'pytest-pdb-break-test)

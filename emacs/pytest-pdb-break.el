@@ -15,9 +15,9 @@
 ;; they hold up when summoned by `company-capf'.
 ;;
 ;; TODO finish tests
-;; TODO use minor mode
+;; TODO detect presence of pdb++
 ;; TODO tramp
-;; TODO add option to inject pdbpp
+;; TODO add option to inject pdb++
 ;; TODO make completion wrapper work in "interactive" command repl
 
 ;;; Code:
@@ -27,29 +27,33 @@
 (require 'subr-x)
 (require 'python)
 
-(defvar-local pytest-pdb-break-extra-args nil
+(defgroup pytest-pdb-break nil
+  "Emacs integration for the pdb-break pytest plugin."
+  :prefix "pytest-pdb-break-"
+  :group 'pytest)
+
+(defcustom pytest-pdb-break-extra-args nil
   "List of extra args passed to pytest.
 May be useful in a `dir-locals-file'. For example, this `python-mode'
 entry unsets cmd-line options from a project ini:
-\(pytest-pdb-break-extra-args \"-o\" \"addopts=\").")
+\(pytest-pdb-break-extra-args \"-o\" \"addopts=\")."
+  :group 'pytest
+  :type 'list)
 
-(defvar-local pytest-pdb-break-alt-interpreter nil
+(defcustom pytest-pdb-break-alt-interpreter nil
   "Path to an alternate Python executable.
 If set, overrides `python-shell-interpreter' when obtaining config info
-and running main command.")
+and running main command."
+  :group 'pytest
+  :type 'list)
 
-(defvar-local pytest-pdb-break-config-info-alist nil
+(defvar pytest-pdb-break-config-info-alist nil
   "An alist with members ((INTERPRETER . PLIST) ...).
 Set by the main command the first time it's invoked in a buffer. PLIST
 is obtained by querying the external config-info helper. Entries are
 retrieved and modified with `python-shell-with-environment' active,
 meaning `python-shell-exec-path', `python-shell-virtualenv-root' etc.,
 all have an effect, unless `pytest-pdb-break-alt-interpreter' is set.")
-
-(defvar pytest-pdb-break-after-functions nil
-  "Abnormal hook for adding a process sentinel, etc.
-Sole arg is the pytest buffer process PROC, which may be nil upon
-failure. Hook is run with process buffer current.")
 
 (defvar pytest-pdb-break--dry-run nil)
 
@@ -153,39 +157,11 @@ If PROCESS is ours, prepend INPUT to results. With IMPORT, ignore."
       (setq parts (list (pop parts) (pop parts))))
     (cons file parts)))
 
-;; TODO verify this is needed even though we're explicitly naming a node id
-;; TODO use root finders from tox, projectile, ggtags, magit, etc.
 (defun pytest-pdb--get-default-dir ()
-  "Maybe return project root, otherwise `default-directory'."
-  (or (and (bound-and-true-p elpy-shell-use-project-root)
-           (fboundp 'elpy-project-root)
-           (elpy-project-root))
-      default-directory))
-
-;; TODO use minor mode instead
-(defun pytest-pdb-break-buffer-teardown (proc)
-  "Cleanup a pytest-pdb-break comint buffer.
-PROC is the buffer's current process."
-  (setq pytest-pdb-break-processes
-        (seq-filter #'process-live-p
-                    (remq proc pytest-pdb-break-processes)))
-  (unless pytest-pdb-break-processes
-    (advice-remove 'python-shell-completion-get-completions
-                   'pytest-pdb-break-ad-around-get-completions)))
-
-(defun pytest-pdb-break-buffer-setup (proc)
-  "Setup a pytest-pdb-break comint buffer.
-PROC is the buffer's current process."
-  (add-to-list 'pytest-pdb-break-processes proc)
-  (advice-add 'python-shell-completion-get-completions :around
-              #'pytest-pdb-break-ad-around-get-completions)
-  (with-current-buffer (process-buffer proc)
-    (setq-local python-shell-completion-native-enable nil)
-    (add-hook 'kill-buffer-hook (apply-partially
-                                 #'pytest-pdb-break-buffer-teardown
-                                 proc)
-              nil t)
-    (run-hook-with-args 'pytest-pdb-break-after-functions proc)))
+  "Return value of :rootdir from the active config-info plist.
+Ensure it has a trailing slash."
+  (cl-assert (member :rootdir pytest-pdb-break--config-info) t)
+  (file-name-directory (plist-get pytest-pdb-break--config-info :rootdir)))
 
 (defun pytest-pdb-break--check-command-p (command)
   "Run COMMAND in Python, return t if exit code is 0, nil otherwise."
@@ -195,7 +171,7 @@ PROC is the buffer's current process."
   "Look up VAR in `process-environment', return nil if unset or empty."
   (and (setq var (getenv var)) (not (string= var "")) var))
 
-(defun pytest-pdb-break-has-plugin-p ()
+(defun pytest-pdb-break--has-plugin-p ()
   "Return non-nil if plugin is loadable."
   ;; Allows bypassing get-info when running the command non-interactively,
   ;; although config-info would still need populating by other means
@@ -214,19 +190,46 @@ Return the latter."
       (setenv "PYTHONPATH" (string-join (cons found existing) ":")))
     process-environment))
 
+(defvar-local pytest-pdb-break--process nil)
+(defvar-local pytest-pdb-break--parent-buffer nil)
+
+(define-minor-mode pytest-pdb-break-mode
+  "A minor mode for Python comint buffers running a pytest PDB session."
+  :group 'pytest-pdb-break
+  (let ((proc (get-buffer-process (current-buffer))))
+    (if pytest-pdb-break-mode
+        (progn
+          (add-to-list 'pytest-pdb-break-processes proc)
+          (advice-add 'python-shell-completion-get-completions :around
+                      #'pytest-pdb-break-ad-around-get-completions)
+          (setq-local python-shell-completion-native-enable nil)
+          (add-hook 'kill-buffer-hook
+                    (apply-partially #'pytest-pdb-break-mode -1) nil t))
+      (setq pytest-pdb-break-processes
+            (seq-filter #'process-live-p
+                        (remq proc pytest-pdb-break-processes)))
+      (unless pytest-pdb-break-processes
+        (advice-remove 'python-shell-completion-get-completions
+                       'pytest-pdb-break-ad-around-get-completions))
+      (when (buffer-live-p pytest-pdb-break--parent-buffer)
+        (with-current-buffer pytest-pdb-break--parent-buffer
+          (setq pytest-pdb-break--process nil))))))
+
 ;;;###autoload
 (defun pytest-pdb-break-here (lnum node-info root-dir)
-  "Drop into pdb after spawning an inferior pytest process, go to LNUM.
-NODE-INFO is a list of pytest node-id components. ROOT-DIR is the
-project/repo's root directory."
-  (interactive (list (line-number-at-pos)
-                     (pytest-pdb-break--get-node-id)
-                     (pytest-pdb--get-default-dir)))
+  "Run pytest on the test at point and break at LNUM.
+NODE-INFO is a list of pytest node-id components. ROOT-DIR is normally a
+project/repo root directory containing a pytest config."
+  (interactive (progn
+                 (pytest-pdb-break-get-config-info)
+                 (list (line-number-at-pos)
+                       (pytest-pdb-break--get-node-id)
+                       (pytest-pdb--get-default-dir))))
   (let* ((default-directory root-dir)
          (file (car node-info))
          (argstr (mapconcat #'identity node-info "::"))
          (break (format "--break=%s:%s" file lnum))
-         (installed (pytest-pdb-break-has-plugin-p))
+         (installed (pytest-pdb-break--has-plugin-p))
          (xtra pytest-pdb-break-extra-args)
          (xtra (if (or installed (member "pytest_pdb_break" xtra))
                    xtra (append '("-p" "pytest_pdb_break") xtra)))
@@ -241,8 +244,14 @@ project/repo's root directory."
                                                (list #'identity args " ")))
          (cmd (python-shell-calculate-command))
          (proc (and (not pytest-pdb-break--dry-run) (run-python cmd nil t))))
-    (if proc
-        (pytest-pdb-break-buffer-setup proc)
+    (if (setq pytest-pdb-break--process proc)
+        ;; Only python- prefixed local vars get cloned in child buffer
+        (progn (let ((parent-buffer (current-buffer)))
+                 (with-current-buffer (process-buffer proc)
+                   (setq pytest-pdb-break--parent-buffer parent-buffer)
+                   (pytest-pdb-break-mode +1))
+                 ;; In case mode hook wants this
+                 (setq pytest-pdb-break--config-info nil)))
       (message "Would've run: %S\nfrom: %S" cmd default-directory))))
 
 
