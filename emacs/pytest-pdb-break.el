@@ -14,7 +14,11 @@
 ;; Note: the completion modifications are useless without pdb++. No idea if
 ;; they hold up when summoned by `company-capf'.
 ;;
-;; TODO: ert
+;; TODO finish tests
+;; TODO use minor mode
+;; TODO tramp
+;; TODO add option to inject pdbpp
+;; TODO make completion wrapper work in "interactive" command repl
 
 ;;; Code:
 
@@ -84,25 +88,34 @@ This is the root path of cloned repo, not a \"lisp\" sub directory."
         (error "Error calling %s: %s" helper (buffer-string))))))
 
 (defvar-local pytest-pdb-break--config-info nil
-  "Active and/or most recent config-info-alist entry.")
+  "Value of active config-info-alist entry.")
 
 (defun pytest-pdb-break-get-config-info (&optional force)
   "Maybe call config-info helper, respecting options and environment.
 With FORCE, always update. Return entry in config-info alist."
   (python-shell-with-environment
-    (let* ((python-shell-interpreter (or pytest-pdb-break-alt-interpreter
-                                         python-shell-interpreter))
-           (pyexe-path (executable-find python-shell-interpreter))
-           (entry (assoc pyexe-path pytest-pdb-break-config-info-alist))
-           result)
-      (unless (and (not force) entry)
-        (setq result (pytest-pdb-break--query-config))
-        (unless entry
-          (push (setq entry (list pyexe-path))
-                pytest-pdb-break-config-info-alist))
-        (setq pytest-pdb-break--config-info
-              (setcdr entry (nconc (list :exe pyexe-path) result))))
-      entry)))
+   (let* ((python-shell-interpreter (or pytest-pdb-break-alt-interpreter
+                                        python-shell-interpreter))
+          (pyexe-path (executable-find python-shell-interpreter))
+          (entry (assoc pyexe-path pytest-pdb-break-config-info-alist))
+          result)
+     (condition-case err
+         (if (and (not force) entry)
+             (if (cdr entry)
+                 (setq pytest-pdb-break--config-info (cdr entry))
+               (pytest-pdb-break-get-config-info 'force))
+           (setq result (pytest-pdb-break--query-config))
+           (unless entry
+             (push (setq entry (list pyexe-path))
+                   pytest-pdb-break-config-info-alist))
+           (setq pytest-pdb-break--config-info
+                 (setcdr entry (nconc (list :exe pyexe-path) result))))
+       (error
+        (when entry
+          (setq pytest-pdb-break-config-info-alist
+                (delete entry pytest-pdb-break-config-info-alist)))
+        (signal (car err) (cdr err))))
+     entry)))
 
 ;; FIXME only add this wrapper when pdb++ is detected. These amputee
 ;; candidates most likely come courtesy of the fancycompleter package.
@@ -149,6 +162,7 @@ If PROCESS is ours, prepend INPUT to results. With IMPORT, ignore."
            (elpy-project-root))
       default-directory))
 
+;; TODO use minor mode instead
 (defun pytest-pdb-break-buffer-teardown (proc)
   "Cleanup a pytest-pdb-break comint buffer.
 PROC is the buffer's current process."
@@ -183,9 +197,12 @@ PROC is the buffer's current process."
 
 (defun pytest-pdb-break-has-plugin-p ()
   "Return non-nil if plugin is loadable."
+  ;; Allows bypassing get-info when running the command non-interactively,
+  ;; although config-info would still need populating by other means
   (cl-assert (member :registered pytest-pdb-break--config-info) t)
   (plist-get pytest-pdb-break--config-info :registered))
 
+;; FIXME use built-in `python-mode' option to handle this
 (defun pytest-pdb-break-add-pythonpath ()
   "Add plugin root to a copy of `process-environment'.
 Return the latter."

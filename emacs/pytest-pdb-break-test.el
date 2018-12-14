@@ -355,21 +355,22 @@ created with python3."
                              python-shell-exec-path
                              python-shell-virtualenv-root
                              ;; ours
-                             pytest-pdb-break--config-info
-                             pytest-pdb-break-config-info-alist))
+                             pytest-pdb-break--config-info))
           (let ((exc (should-error (pytest-pdb-break-get-config-info))))
+            (should (eq 'error (car exc)))
             (should (string-match-p "Error calling" (cadr exc)))
-            (should (string-match-p "ImportError:.*_pytest" (cadr exc)))
             (with-temp-buffer (insert (cadr exc)) (write-file ,logfile)))
           (should-not pytest-pdb-break-config-info-alist)
           (should-not pytest-pdb-break--config-info))))
     (pytest-pdb-break-test-ensure-venv
      'base
      (ert-info ("System Python has no pytest")
-       (fails (should-not python-shell-process-environment)
+       (fails (progn (should-not python-shell-process-environment)
+                     (should-not pytest-pdb-break-config-info-alist))
               "error_no_pytest.out"))
      (ert-info ("Manually set VIRTUAL_ENV")
        (fails (progn (should-not python-shell-process-environment)
+                     (should-not pytest-pdb-break-config-info-alist)
                      (setenv "VIRTUAL_ENV" $venv))
               "error_virtual_env_manual.out"))
      (ert-info ("Set extra env vars to override")
@@ -377,13 +378,21 @@ created with python3."
               (list (format "PATH=%s:%s" $venvbin (getenv "PATH"))
                     (format "VIRTUAL_ENV=%s" $venvbin))))
          (fails (should python-shell-process-environment)
-                "error_proc_env_api.out"))))))
+                "error_proc_env_api.out")))
+     (ert-info ("Invalid cdr for alist entry")
+       (let ((pytest-pdb-break-config-info-alist
+              (list (list (executable-find python-shell-interpreter)))))
+         (fails (progn
+                  (should-not python-shell-process-environment)
+                  (should pytest-pdb-break-config-info-alist))
+                "error_invalid_cdr.out"))))))
 
 (ert-deftest pytest-pdb-break-test-get-config-info-unregistered ()
   (cl-macrolet
       ((rinse-repeat
         (before after)
         `(pytest-pdb-break-test-with-python-buffer
+          (should-not pytest-pdb-break--config-info)
           ,before
           (let ((rv (pytest-pdb-break-get-config-info)))
             (should (= 6 (length pytest-pdb-break--config-info)))
