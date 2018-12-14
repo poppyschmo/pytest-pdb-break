@@ -4,6 +4,8 @@
 ;;
 ;; This leaves around 40M of junk under /tmp/pytest-pdb-break-test/
 
+;;; Code:
+
 (require 'ert)
 (require 'pytest-pdb-break)
 
@@ -64,31 +66,37 @@
   ) ; e-w-c--------- END
 
 (defmacro pytest-pdb-break-test-with-environment (&rest body)
-  ;; Covers PATH, PYTHONPATH, VIRTUAL_ENV
+  "Run BODY in a temporary environment.
+This is for modifying PATH, PYTHONPATH, VIRTUAL_ENV, etc."
   ;; Consider unsetting all known PYTHON* env vars
-  `(let (($orig (sxhash-equal (list process-environment exec-path))))
-     (let ((process-environment (append process-environment nil))
-           (exec-path (append exec-path nil)))
-       ,@body)
-     (should (= $orig (sxhash-equal (list process-environment exec-path))))))
+  (let ((orig (make-symbol "orig")))
+    `(let ((,orig (sxhash-equal (list process-environment exec-path))))
+       (let ((process-environment (append process-environment nil))
+             (exec-path (append exec-path nil)))
+         ,@body)
+       (should (= ,orig (sxhash-equal (list process-environment
+                                            exec-path)))))))
 
 (defmacro pytest-pdb-break-test-with-tmpdir (tail &rest body)
   "Run BODY in a temp directory, clobbering existing files.
 The directory inherits the test's name, minus the feature prefix, with
-an optional TAIL appended. To create a subdir, TAIL should start with a
-dir sep."
+an optional TAIL appended. If TAIL doesn't start with a dir sep (slash),
+the dir name itself is altered (suffixed). To create a subdir, TAIL
+should start with a dir sep."
   (let ((name '(pytest-pdb-break-test--unprefix
-                (ert-test-name (ert-running-test)))))
+                (ert-test-name (ert-running-test))))
+        (tmpdir (make-symbol "tmpdir")))
     (if (stringp tail)
         (setq name `(concat ,name ,tail))
       (push tail body))
-    `(let (($tmpdir (file-name-as-directory
+    `(let ((,tmpdir (file-name-as-directory
                      (concat pytest-pdb-break-test-temp ,name))))
-       (when (file-exists-p $tmpdir) (delete-directory $tmpdir t))
-       (make-directory $tmpdir t)
-       (let ((default-directory $tmpdir)) ,@body))))
+       (when (file-exists-p ,tmpdir) (delete-directory ,tmpdir t))
+       (make-directory ,tmpdir t)
+       (let ((default-directory ,tmpdir)) ,@body))))
 
 (defmacro pytest-pdb-break-test-with-python-buffer (&rest body)
+  "Run BODY in a `python-mode' temp buffer with a temp environment."
   `(pytest-pdb-break-test-with-environment
     (with-temp-buffer
       (let (python-indent-guess-indent-offset)
@@ -170,6 +178,7 @@ options are idiosyncratic and unintuitive."
               (after (should (= (sxhash-equal exec-path) orig))))))))
 
 (defmacro pytest-pdb-break-test-homer-fixture ()
+  "Common assertions for the home-finder."
   '(pytest-pdb-break-test-with-tmpdir
     (should-not pytest-pdb-break--home)
     (should (string= (pytest-pdb-break--homer)
@@ -185,8 +194,8 @@ options are idiosyncratic and unintuitive."
     (pytest-pdb-break-test-homer-fixture)))
 
 (defmacro pytest-pdb-break-test-homer-setup-fixture (subform dir-body info-msg)
-  "Run SUBFORM as this test in an Emacs subprocess.
-DIR-BODY sets up build dir. Spit INFO-MSG."
+  "Run SUBFORM as the calling test in an Emacs ERT subprocess.
+DIR-BODY sets up build dir. INFO-MSG is passed to `ert-info'."
   `(let* ((test-sym (ert-test-name (ert-running-test)))
           (env-var (pytest-pdb-break-test--name-to-envvar test-sym)))
      (if (getenv env-var)
@@ -246,49 +255,56 @@ DIR-BODY sets up build dir. Spit INFO-MSG."
     (self_pdbpp "pdbpp" ,pytest-pdb-break-test-repo-root)))
 
 (defun pytest-pdb-break-test--get-venv-path (name)
+  "Return full path of temp venv given shorthand symbol NAME."
   (cl-assert (symbolp name))
   (cl-assert (assq name pytest-pdb-break-test--requirements))
   (concat pytest-pdb-break-test-temp
           (format ".venv_%s" (symbol-name name)) "/"))
 
 (defun pytest-pdb-break-test--get-requirements (name)
+  "Return requirements for venv named by symbol NAME."
   (cl-assert (symbolp name))
   (cdr (assq name pytest-pdb-break-test--requirements)))
 
 (defmacro pytest-pdb-break-test-ensure-venv (name &rest body)
-  "Run BODY in a temp directory with a modified environment.
+  "Run BODY in a temp directory and temp environment.
 NAME is a venv from --get-requirements Does not modify `PATH' or
 `VIRTUAL_ENV' or `python-shell-interpreter'. Binds `$pyexe', `$venvbin',
-and `$venv'. Doesn't use pip3 or python3 because venvs are all
-created with python3."
-  `(pytest-pdb-break-test-with-tmpdir
-    (pytest-pdb-break-test-with-environment
-     (let* (($venv (pytest-pdb-break-test--get-venv-path ,name))
-            ($venvbin (concat $venv "bin/"))
-            ($pyexe (concat $venvbin "python"))
-            ;; XXX this is a conceit to prevent this variable from persisting
-            ;; between tests. It may need to be reset manually within tests.
-            pytest-pdb-break-config-info-alist
-            ;;
-            pipexe logfile requirements)
-       (unless (file-exists-p $venv) ; trailing/ ok
-         (setq pipexe (concat $venvbin "pip")
-               logfile (concat default-directory "pip.out")
-               requirements (pytest-pdb-break-test--get-requirements ,name))
-         (should (file-name-absolute-p logfile))
-         (should (zerop (call-process "python3" nil (list :file logfile) nil
-                                      "-mvenv" $venv)))
-         (should (file-executable-p pipexe))
-         (should (file-executable-p $pyexe))
-         (should-not (equal (executable-find "pip") pipexe))
-         (should-not (equal (executable-find "python") $pyexe))
-         (unless (eq ,name 'bare)
-           (should (zerop (apply #'call-process pipexe nil
-                                 (list :file logfile) nil
-                                 "install" requirements)))))
-       ,@body))))
+and `$venv'. The latter two have trailing slashes. Doesn't use pip3 or
+python3 because venvs are all created with python3 (not sure if this is
+a sound choice)."
+  (let ((piplog (make-symbol "piplog"))
+        (pipexe (make-symbol "pipexe"))
+        (requirements (make-symbol "requirements")))
+    `(pytest-pdb-break-test-with-tmpdir
+      (pytest-pdb-break-test-with-environment
+       (let* (($venv (pytest-pdb-break-test--get-venv-path ,name))
+              ($venvbin (concat $venv "bin/"))
+              ($pyexe (concat $venvbin "python"))
+              ;; XXX this is a conceit to prevent this variable from persisting
+              ;; between tests. It may need to be reset manually within body.
+              pytest-pdb-break-config-info-alist
+              ;;
+              ,pipexe ,piplog ,requirements)
+         (unless (file-exists-p $venv) ; trailing/ ok
+           (setq ,pipexe  (concat $venvbin "pip")
+                 ,piplog (concat default-directory "pip.out")
+                 ,requirements (pytest-pdb-break-test--get-requirements ,name))
+           (should (file-name-absolute-p ,piplog))
+           (should (zerop (call-process "python3" nil (list :file ,piplog) nil
+                                        "-mvenv" $venv)))
+           (should (file-executable-p ,pipexe ))
+           (should (file-executable-p $pyexe))
+           (should-not (equal (executable-find "pip") ,pipexe ))
+           (should-not (equal (executable-find "python") $pyexe))
+           (unless (eq ,name 'bare)
+             (should (zerop (apply #'call-process ,pipexe  nil
+                                   (list :file ,piplog) nil
+                                   "install" ,requirements)))))
+         ,@body)))))
 
 (defmacro pytest-pdb-break-test--query-wrap (&rest body)
+  "Run BODY with common assertions/bindings for config-info-helper func."
   `(let (($rootdir (directory-file-name default-directory))
          ($rv (gensym)))
      (cl-flet (($callit () (setq $rv (pytest-pdb-break--query-config))))
@@ -437,7 +453,8 @@ created with python3."
           (should (equal pytest-pdb-break--config-info
                          (list :exe $pyexe
                                :registered nil
-                               :rootdir (directory-file-name $tmpdir)))))))
+                               :rootdir (directory-file-name
+                                         default-directory)))))))
      (ert-info ("Don't shell out when entry exists, even with invalid plist")
        (let* ((python-shell-interpreter $pyexe)
               (fake-entry (list $pyexe

@@ -9,16 +9,16 @@
 ;;   '(:host github :repo "poppyschmo/pytest-pdb-break"
 ;;     :files (:defaults "emacs/*.el" (:exclude "emacs/*-test.el")))
 ;;
-;; Usage: `pytest-pdb-break-here'
+;; Usage: with point in some test, run M-x `pytest-pdb-break-here'
 ;;
 ;; Note: the completion modifications are useless without pdb++. No idea if
 ;; they hold up when summoned by `company-capf'.
 ;;
 ;; TODO finish tests
 ;; TODO detect presence of pdb++
+;; TODO make completion wrapper work in "interactive" command repl
 ;; TODO tramp
 ;; TODO add option to inject pdb++
-;; TODO make completion wrapper work in "interactive" command repl
 
 ;;; Code:
 
@@ -121,26 +121,6 @@ With FORCE, always update. Return entry in config-info alist."
         (signal (car err) (cdr err))))
      entry)))
 
-;; FIXME only add this wrapper when pdb++ is detected. These amputee
-;; candidates most likely come courtesy of the fancycompleter package.
-(defun pytest-pdb-break-ad-around-get-completions (orig process import input)
-  "Advice wrapper for ORIG `python-shell-completion-get-completions'.
-If PROCESS is ours, prepend INPUT to results. With IMPORT, ignore."
-  (let ((rv (funcall orig process import input)))
-    (if (or import
-            (not (memq process pytest-pdb-break-processes))
-            (null rv)
-            (string= input "")
-            (not (memq ?. (append input nil)))) ; not dotty
-        rv
-      (when (not (cdr rv)) ; |rv| = 1
-        (if (string-match-p "\\.__$" (car rv))
-            (setq rv (funcall orig process import (car rv)))
-          (setq input "")))
-      (when (string-match "^\\(.+\\.\\)[^.]+$" input)
-        (setq input (match-string 1 input)))
-      (mapcar (apply-partially #'concat input) rv))))
-
 (defun pytest-pdb-break--get-node-id ()
   "Return list of node-id components for test at point."
   (let (file test parts)
@@ -189,6 +169,26 @@ Return the latter."
     (when found
       (setenv "PYTHONPATH" (string-join (cons found existing) ":")))
     process-environment))
+
+;; FIXME only add this wrapper when pdb++ is detected. These amputee
+;; candidates most likely come courtesy of the fancycompleter package.
+(defun pytest-pdb-break-ad-around-get-completions (orig process import input)
+  "Advice wrapper for ORIG `python-shell-completion-get-completions'.
+If PROCESS is ours, prepend INPUT to results. With IMPORT, ignore."
+  (let ((rv (funcall orig process import input)))
+    (if (or import
+            (not (memq process pytest-pdb-break-processes))
+            (null rv)
+            (string= input "")
+            (not (memq ?. (append input nil)))) ; not dotty
+        rv
+      (when (not (cdr rv)) ; |rv| = 1
+        (if (string-match-p "\\.__$" (car rv))
+            (setq rv (funcall orig process import (car rv)))
+          (setq input "")))
+      (when (string-match "^\\(.+\\.\\)[^.]+$" input)
+        (setq input (match-string 1 input)))
+      (mapcar (apply-partially #'concat input) rv))))
 
 (defvar-local pytest-pdb-break--process nil)
 (defvar-local pytest-pdb-break--parent-buffer nil)
@@ -256,9 +256,5 @@ project/repo root directory containing a pytest config."
 
 
 (provide 'pytest-pdb-break)
-
-;; Local Variables:
-;; flycheck-disabled-checkers: nil
-;; End:
 
 ;;; pytest-pdb-break ends here
