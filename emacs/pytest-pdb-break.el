@@ -126,7 +126,7 @@ PROC is the buffer's current process."
   (zerop (call-process python-shell-interpreter nil nil nil "-c" command)))
 
 (defun pytest-pdb-break--query-config ()
-  "Return alist of ((REGISTERED . bool) (ROOTDIR . string))."
+  "Return a plist with items :registered BOOL and :rootdir STRING."
   (let* ((home (or pytest-pdb-break--home (pytest-pdb-break--homer)))
          (helper (concat home "get_config_info.py"))
          (json-object-type 'plist)

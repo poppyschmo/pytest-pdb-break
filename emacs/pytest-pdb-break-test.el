@@ -73,6 +73,40 @@ dir sep."
        (make-directory $tmpdir t)
        (let ((default-directory $tmpdir)) ,@body))))
 
+(ert-deftest pytest-pdb-break-test-upstream-env-updaters ()
+  "Don't rely on upstream interface to copy/restore environment."
+  (cl-macrolet ((both (l x z &rest y)
+                      `(progn
+                         (pytest-pdb-break-test-with-environment
+                          ,x (let (,l) ,@y) ,z)
+                         (pytest-pdb-break-test-with-environment
+                          ,x (python-shell-with-environment ,@y) ,z))))
+    (ert-info ("`py-sh-calc-proc-env' only mutates existing members")
+      ;; Already present
+      (both
+       (process-environment (python-shell-calculate-process-environment))
+       (setenv "FOOVAR" "1")
+       (should (string= (getenv "FOOVAR") "2"))
+       (setenv "FOOVAR" "2") ; body
+       (should (string= (getenv "FOOVAR") "2")))
+      ;; Non-existent
+      (both
+       (process-environment (python-shell-calculate-process-environment))
+       (should-not (getenv "FOOVAR"))
+       (should-not (getenv "FOOVAR"))
+       (setenv "FOOVAR" "1") ; body
+       (should (string= (getenv "FOOVAR") "1"))))
+    (ert-info ("`py-sh-calc-exec-path' doesn't mutate `exec-path' (safe)")
+      ;; Change 3rd elt
+      (let ((orig (sxhash-equal exec-path))
+            (new "/tmp/pytest-pdb-break-test/foo"))
+        (both
+         (exec-path (python-shell-calculate-exec-path))
+         (should-not (string= (caddr exec-path) new)) ; error if not string
+         (should (= (sxhash-equal exec-path) orig))
+         (setcar (cddr exec-path) new) ; body (don't use setf)
+         (should (string= (caddr exec-path) new)))))))
+
 (defmacro pytest-pdb-break-test-homer-fixture ()
   '(pytest-pdb-break-test-with-tmpdir
     (should-not pytest-pdb-break--home)
@@ -190,7 +224,7 @@ created with python3."
 
 (defmacro pytest-pdb-break-test--query-wrap (&rest body)
   `(let (($rootdir (directory-file-name default-directory))
-         ($rv 'sentinel))
+         ($rv (gensym)))
      (cl-flet (($callit () (setq $rv (pytest-pdb-break--query-config))))
        ,@body)
      (should (json-plist-p $rv))
