@@ -125,11 +125,17 @@ PROC is the buffer's current process."
   "Run COMMAND in Python, return t if exit code is 0, nil otherwise."
   (zerop (call-process python-shell-interpreter nil nil nil "-c" command)))
 
-;; (defun pytest-pdb-break--query-config ()
-;;   "Return alist of ((REGISTERED . bool) (ROOTDIR . string))."
-;;   (let ((home (or pytest-pdb-break--home (pytest-pdb-break--homer))))
-;;     home
-;;     ))
+(defun pytest-pdb-break--query-config ()
+  "Return alist of ((REGISTERED . bool) (ROOTDIR . string))."
+  (let* ((home (or pytest-pdb-break--home (pytest-pdb-break--homer)))
+         (helper (concat home "get_config_info.py"))
+         (json-object-type 'plist)
+         json-false)
+    (with-temp-buffer
+      (if (zerop (call-process python-shell-interpreter helper
+                               (current-buffer) nil))
+          (progn (goto-char (point-min)) (json-read))
+        (error "Error calling %s: %s" helper (buffer-string))))))
 
 (defun pytest-pdb-break--getenv (var)
   "Look up VAR in `process-environment', return nil if unset or empty."
@@ -145,7 +151,7 @@ With FORCE, always check."
       (unless entry
         (push (setq entry (list venv)) pytest-pdb-break-has-plugin-alist))
       (setcdr entry
-              (pytest-pdb-break--check-command-p "import pytest-pdb-break")))))
+              (pytest-pdb-break--check-command-p "import pytest_pdb_break")))))
 
 (defun pytest-pdb-break--homer ()
   "Find root pytest-pdb-break directory.

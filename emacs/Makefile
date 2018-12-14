@@ -2,7 +2,7 @@ PROG ?= emacs
 FILE ?= pytest-pdb-break-test.el
 DIR ?= .
 
-export PYTEST_PDB_BREAK_TEST_HOME = $(realpath ../)
+export PYTEST_PDB_BREAK_TEST_REPO_ROOT = $(realpath ../)
 
 .PHONY: batch debug
 
