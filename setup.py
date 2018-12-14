@@ -9,6 +9,7 @@ setup(
     author="Jane Soko",
     author_email="poppyschmo@protonmail.com",
     python_requires=">=3.6",
+    install_requires=["pytest"],
     packages=[],
     py_modules=["pytest_pdb_break"],
     entry_points={"pytest11": ["pytest_pdb_break = pytest_pdb_break"]},
