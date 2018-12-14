@@ -2,18 +2,26 @@ PROG ?= emacs
 FILE ?= pytest-pdb-break-test.el
 DIR ?= .
 
-SELECTOR ?= \`(member ,@pytest-pdb-break-test-tests)
-# ALL = $(shell grep ert-deftest pytest-pdb-break-test.el | cut -d " " -f 2)
-# SELECTOR ?= '(member $(ALL))
+ifdef PAT
+	SELECTOR = "$(PAT)"
+else ifdef SYM
+	SELECTOR = (quote $(SYM))
+else ifdef ALL
+	PAT = 's/^\s*(ert-deftest\s*\([^ ]\+\).*$$/\1/'
+	MEMBERS != grep 'ert-deftest' pytest-pdb-break-test.el | sed $(PAT)
+	SELECTOR = (quote (member $(MEMBERS)))
+else
+	SELECTOR ?= (backquote (member ,@pytest-pdb-break-test-tests))
+endif
 
 export PYTEST_PDB_BREAK_TEST_REPO_ROOT = $(realpath ../)
 
-.PHONY: batch debug
+.PHONY: batch debug dryrun
 
 batch:
 	$(PROG) -Q --batch -L $(DIR) -l $(FILE) \
-		--eval "(ert-run-tests-batch-and-exit $(SELECTOR))"
+		--eval '(ert-run-tests-batch-and-exit $(SELECTOR))'
 
 debug:
 	$(PROG) -Q -L $(DIR) -l $(FILE) \
-		--eval "(ert-run-tests-interactively $(SELECTOR))"
+		--eval '(ert-run-tests-interactively $(SELECTOR))'
