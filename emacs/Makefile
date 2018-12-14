@@ -14,9 +14,19 @@ else
 	SELECTOR ?= (backquote (member ,@pytest-pdb-break-test-tests))
 endif
 
+ifdef VIRTUAL_ENV
+ifeq (x$(VIRTUAL_ENV),$(findstring x$(VIRTUAL_ENV),x$(PATH)))
+	VENV_BINDIR = $(shell printf %s $$PATH | cut -d ":" -f 1)
+	PATH := $(subst $(VENV_BINDIR):,,$(PATH))
+	export PATH
+	unexport VIRTUAL_ENV
+	unexport PYTHONPATH
+endif
+endif
+
 export PYTEST_PDB_BREAK_TEST_REPO_ROOT = $(realpath ../)
 
-.PHONY: batch debug dryrun
+.PHONY: batch debug
 
 batch:
 	$(PROG) -Q --batch -L $(DIR) -l $(FILE) \

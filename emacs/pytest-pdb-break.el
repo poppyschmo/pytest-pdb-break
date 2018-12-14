@@ -36,11 +36,11 @@
   :prefix "pytest-pdb-break-"
   :group 'pytest)
 
-(defcustom pytest-pdb-break-extra-args nil
+(defcustom pytest-pdb-break-extra-opts nil
   "List of extra args passed to pytest.
 May be useful in a `dir-locals-file'. For example, this `python-mode'
 entry unsets cmd-line options from a project ini:
-\(pytest-pdb-break-extra-args \"-o\" \"addopts=\")."
+\(pytest-pdb-break-extra-opts \"-o\" \"addopts=\")."
   :group 'pytest
   :type 'list)
 
@@ -58,8 +58,6 @@ is obtained by querying the external config-info helper. Entries are
 retrieved and modified with `python-shell-with-environment' active,
 meaning `python-shell-exec-path', `python-shell-virtualenv-root' etc.,
 all have an effect, unless `pytest-pdb-break-alt-interpreter' is set.")
-
-(defvar pytest-pdb-break--dry-run nil)
 
 (defvar pytest-pdb-break-processes nil
   "List of processes started via `pytest-pdb-break-here'.")
@@ -141,7 +139,7 @@ With FORCE, always update. Return entry in config-info alist."
       (setq parts (list (pop parts) (pop parts))))
     (cons file parts)))
 
-(defun pytest-pdb--get-default-dir ()
+(defun pytest-pdb--get-rootdir ()
   "Return value of :rootdir from the active config-info plist.
 Ensure it has a trailing slash."
   (cl-assert (member :rootdir pytest-pdb-break--config-info) t)
@@ -151,10 +149,6 @@ Ensure it has a trailing slash."
   "Run COMMAND in Python, return t if exit code is 0, nil otherwise."
   (zerop (call-process python-shell-interpreter nil nil nil "-c" command)))
 
-(defun pytest-pdb-break--getenv (var)
-  "Look up VAR in `process-environment', return nil if unset or empty."
-  (and (setq var (getenv var)) (not (string= var "")) var))
-
 (defun pytest-pdb-break--has-plugin-p ()
   "Return non-nil if plugin is loadable."
   ;; Allows bypassing get-info when running the command non-interactively,
@@ -162,17 +156,19 @@ Ensure it has a trailing slash."
   (cl-assert (member :registered pytest-pdb-break--config-info) t)
   (plist-get pytest-pdb-break--config-info :registered))
 
-;; FIXME use built-in `python-mode' util to handle this
-(defun pytest-pdb-break-add-pythonpath ()
-  "Add plugin root to a copy of `process-environment'.
-Return the latter."
-  (let* ((process-environment (append process-environment nil))
-         (existing (pytest-pdb-break--getenv "PYTHONPATH"))
-         (existing (and existing (parse-colon-path existing)))
-         (found (pytest-pdb-break--homer)))
-    (when found
-      (setenv "PYTHONPATH" (string-join (cons found existing) ":")))
-    process-environment))
+(defun pytest-pdb-break--make-arg-string (lnum node-info installed)
+  "Prepare arg string for `python-shell-make-comint'.
+LNUM and NODE-INFO are as required by the main command. INSTALLED should
+be non-nil if pytest sees the plugin."
+  (let* ((nodeid (mapconcat #'identity node-info "::"))
+         (break (format "--break=%s:%s" (car node-info) lnum))
+         (xtra (append (unless (or installed
+                                   (member "pytest_pdb_break"
+                                           pytest-pdb-break-extra-opts))
+                         '("-p" "pytest_pdb_break"))
+                       pytest-pdb-break-extra-opts))
+         (args (append (cons "-mpytest" xtra) (list break nodeid))))
+    (combine-and-quote-strings args)))
 
 ;; FIXME only add this wrapper when pdb++ is detected. These amputee
 ;; candidates most likely come courtesy of the fancycompleter package.
@@ -219,6 +215,9 @@ If PROCESS is ours, prepend INPUT to results. With IMPORT, ignore."
         (with-current-buffer pytest-pdb-break--parent-buffer
           (setq pytest-pdb-break--process nil))))))
 
+;; FIXME ditch this after tests cover command
+(defvar pytest-pdb-break--dry-run nil)
+
 ;;;###autoload
 (defun pytest-pdb-break-here (lnum node-info root-dir)
   "Run pytest on the test at point and break at LNUM.
@@ -228,24 +227,19 @@ project/repo root directory containing a pytest config."
                  (pytest-pdb-break-get-config-info)
                  (list (line-number-at-pos)
                        (pytest-pdb-break--get-node-id)
-                       (pytest-pdb--get-default-dir))))
+                       (pytest-pdb--get-rootdir))))
   (let* ((default-directory root-dir)
-         (file (car node-info))
-         (argstr (mapconcat #'identity node-info "::"))
-         (break (format "--break=%s:%s" file lnum))
+         (process-environment (append process-environment nil))
          (installed (pytest-pdb-break--has-plugin-p))
-         (xtra pytest-pdb-break-extra-args)
-         (xtra (if (or installed (member "pytest_pdb_break" xtra))
-                   xtra (append '("-p" "pytest_pdb_break") xtra)))
-         (args (append (cons "-mpytest" xtra) (list break argstr)))
-         (process-environment (if installed process-environment
-                                (pytest-pdb-break-add-pythonpath)))
+         (python-shell-extra-pythonpaths
+          (append (unless installed (list pytest-pdb-break--home))
+                  python-shell-extra-pythonpaths))
          ;; Make pdb++ prompt trigger non-native-completion fallback
          (python-shell-prompt-pdb-regexp "[(<]*[Ii]?[Pp]db[+>)]+ ")
          (python-shell-interpreter (or pytest-pdb-break-alt-interpreter
                                        python-shell-interpreter))
-         (python-shell-interpreter-args (apply #'mapconcat
-                                               (list #'identity args " ")))
+         (python-shell-interpreter-args (pytest-pdb-break--make-arg-string
+                                         lnum node-info installed))
          (cmd (python-shell-calculate-command))
          (proc (and (not pytest-pdb-break--dry-run) (run-python cmd nil t))))
     (if (setq pytest-pdb-break--process proc)

@@ -20,7 +20,8 @@
     pytest-pdb-break-test-query-helper-error
     pytest-pdb-break-test-get-config-info-error
     pytest-pdb-break-test-get-config-info-unregistered
-    pytest-pdb-break-test-get-node-id))
+    pytest-pdb-break-test-get-node-id
+    pytest-pdb-break-test-make-arg-string))
 
 (defvar pytest-pdb-break-test-repo-root
   (file-name-as-directory
@@ -45,7 +46,9 @@
   (should (file-exists-p pytest-pdb-break-test-lisp-root))
   (should (file-exists-p pytest-pdb-break-test-pytest-plugin))
   (should (file-exists-p pytest-pdb-break-test-lisp-main))
-  (should (file-exists-p pytest-pdb-break-test-lisp-this)))
+  (should (file-exists-p pytest-pdb-break-test-lisp-this))
+  (should-not (getenv "VIRTUAL_ENV"))
+  (should-not (getenv "PYTHONPATH")))
 
 (eval-when-compile ; BEG
 
@@ -118,13 +121,16 @@ options are idiosyncratic and unintuitive."
                           ,x (let (,b) ,y) ,z)
                          (pytest-pdb-break-test-with-python-buffer
                           ,x (python-shell-with-environment ,y) ,z))))
-    (ert-info ((concat "`python-shell-calculate-process-environment', "
-                       "called by `python-shell-with-environment', "
-                       "only mutates existing environment variables"))
+    ;; For local files, `python-shell-with-environment' calls both
+    ;; `process-environment' and `exec-path' "calculate" funcs.
+    (ert-info ((concat "Changes made via "
+                       "`python-shell-calculate-process-environment' "
+                       "persist for existing environment variables"))
       ;; First two don't use well-knowns (baseline)
       (both "Already present"
             (process-environment (python-shell-calculate-process-environment))
-            (before (setenv "FOOVAR" "1"))
+            (before (should-not (file-remote-p default-directory))
+                    (setenv "FOOVAR" "1"))
             (during (setenv "FOOVAR" "2")
                     (should (string= (getenv "FOOVAR") "2")))
             (after (should (string= (getenv "FOOVAR") "2"))))
@@ -134,6 +140,7 @@ options are idiosyncratic and unintuitive."
             (during (setenv "FOOVAR" "1")
                     (should (string= (getenv "FOOVAR") "1")))
             (after (should-not (getenv "FOOVAR"))))
+      ;; Options offered by `python-mode'
       (let ((python-shell-virtualenv-root "/tmp/pytest-pdb-break-test/foo"))
         (both
          "Setting `python-shell-virtualenv-root' sets VIRTUAL_ENV env var"
@@ -141,6 +148,24 @@ options are idiosyncratic and unintuitive."
          (before (should-not (getenv "VIRTUAL_ENV")))
          (during (should (getenv "VIRTUAL_ENV")))
          (after (should-not (getenv "VIRTUAL_ENV")))))
+      (let* ((newpp (concat pytest-pdb-break-test-repo-root "bar"))
+             (oldpp (concat pytest-pdb-break-test-repo-root "foo"))
+             (fullpp (format "%s:%s" newpp oldpp))
+             (python-shell-extra-pythonpaths (list newpp)))
+        (both
+         "Setting `python-shell-extra-pythonpaths' sets PYTHONPATH"
+         (process-environment (python-shell-calculate-process-environment))
+         (before (should-not (getenv "PYTHONPATH")))
+         (during (should (equal (getenv "PYTHONPATH") newpp)))
+         (after (should-not (getenv "PYTHONPATH"))))
+        (both
+         "Mods to preexisting PYTHONPATH via `extra-pythonpaths' persist"
+         (process-environment (python-shell-calculate-process-environment))
+         (before (should (equal python-shell-extra-pythonpaths (list newpp)))
+                 (should-not (getenv "PYTHONPATH"))
+                 (setenv "PYTHONPATH" oldpp))
+         (during (should (equal (getenv "PYTHONPATH") fullpp)))
+         (after (should (equal (getenv "PYTHONPATH") fullpp)))))
       (let ((python-shell-process-environment '("VIRTUAL_ENV=/tmp/foo"
                                                 "PATH=/tmp/foo:/the/rest")))
         (both
@@ -543,6 +568,33 @@ class TestFoo:
         (should-not (python-info-current-defun))
         (let ((exc (should-error (pytest-pdb-break--get-node-id))))
           (should (equal exc '(error "No test found")))))))))
+
+(ert-deftest pytest-pdb-break-test-make-arg-string ()
+  (let* ((file "/tmp/a.py")
+         (node-info (list file "test_a")))
+    (ert-info ("Plugin present")
+      (should-not pytest-pdb-break-extra-opts)
+      (should (string= (pytest-pdb-break--make-arg-string 9 node-info t)
+                       "-mpytest --break=/tmp/a.py:9 /tmp/a.py::test_a")))
+    (ert-info ("Plugin present, extras")
+      (let* ((pytest-pdb-break-extra-opts '("-p" "no:foo"))
+             (rv (pytest-pdb-break--make-arg-string 9 node-info t))
+             (x "-mpytest -p no:foo --break=/tmp/a.py:9 /tmp/a.py::test_a"))
+        (should (string= rv x))
+        (should (equal pytest-pdb-break-extra-opts '("-p" "no:foo")))))
+    (ert-info ("Plugin missing")
+      (should-not pytest-pdb-break-extra-opts)
+      (should (string= (pytest-pdb-break--make-arg-string 9 node-info nil)
+                       (concat "-mpytest -p pytest_pdb_break "
+                               "--break=/tmp/a.py:9 /tmp/a.py::test_a"))))
+    (ert-info ("Plugin missing, extras overlap")
+      (let* ((pytest-pdb-break-extra-opts '("-p" "pytest_pdb_break"))
+             (rv (pytest-pdb-break--make-arg-string 9 node-info nil)))
+        (should (string= rv (concat
+                             "-mpytest -p pytest_pdb_break "
+                             "--break=/tmp/a.py:9 /tmp/a.py::test_a")))
+        (should (equal pytest-pdb-break-extra-opts
+                       '("-p" "pytest_pdb_break")))))))
 
 (provide 'pytest-pdb-break-test)
 ;;; pytest-pdb-break-test ends here
