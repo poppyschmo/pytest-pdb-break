@@ -29,15 +29,18 @@ May be useful in a `dir-locals-file'. For example, this `python-mode'
 entry unsets cmd-line options from a project ini:
 \(pytest-pdb-break-extra-args \"-o\" \"addopts=\").")
 
-(defvar-local pytest-pdb-break-interpreter nil
-  "If nil, use `python-shell-interpreter'.")
+(defvar-local pytest-pdb-break-alt-interpreter nil
+  "Path to an alternate Python executable.
+If set, overrides `python-shell-interpreter' when obtaining config info
+and running main command.")
 
-(defvar-local pytest-pdb-break-has-plugin-alist nil
-  "An alist resembling ((VIRTUAL_ENV . STATE) ...).
-This is set by the main command the first time it's run in a Python
-buffer. STATE is non-nil if the interpreter sees the pytest plugin. When
-no virtual environment is present, the car should be nil and treated as
-a valid key. ")
+(defvar-local pytest-pdb-break-config-info-alist nil
+  "An alist with members ((INTERPRETER . PLIST) ...).
+Set by the main command the first time it's invoked in a buffer. PLIST
+is obtained by querying the external config-info helper. Entries are
+retrieved and modified with `python-shell-with-environment' active,
+meaning `python-shell-exec-path', `python-shell-virtualenv-root' etc.,
+all have an effect, unless `pytest-pdb-break-alt-interpreter' is set.")
 
 (defvar pytest-pdb-break-after-functions nil
   "Abnormal hook for adding a process sentinel, etc.
@@ -50,7 +53,56 @@ failure. Hook is run with process buffer current.")
   "List of processes started via `pytest-pdb-break-here'.")
 
 (defvar pytest-pdb-break--home nil
-  "Directory path of this project's root.")
+  "Real path of this project's root directory.")
+
+(defun pytest-pdb-break--homer ()
+  "Find the real path of the directory containing this file.
+Store absolute form (with trailing sep) in `pytest-pdb-break--home'.
+This is the root path of cloned repo, not a \"lisp\" sub directory."
+  (let ((drefd (file-truename (find-library-name "pytest-pdb-break")))
+        root)
+    (if (fboundp 'ffip-project-root)
+        (setq root (let ((default-directory drefd))
+                     (file-truename (ffip-project-root))))
+      (setq root (file-name-directory drefd)
+            root (and root (directory-file-name root))
+            root (and root (file-name-directory root))))
+    (if (and root (file-exists-p (concat root "pytest_pdb_break.py")))
+        (setq pytest-pdb-break--home root)
+      (error "Cannot find pytest-pdb-break's home directory"))))
+
+(defun pytest-pdb-break--query-config ()
+  "Return a plist with items :registered BOOL and :rootdir STRING."
+  (let* ((home (or pytest-pdb-break--home (pytest-pdb-break--homer)))
+         (helper (concat home "get_config_info.py"))
+         (json-object-type 'plist)
+         json-false)
+    (with-temp-buffer
+      (if (zerop (call-process python-shell-interpreter helper
+                               (current-buffer) nil))
+          (progn (goto-char (point-min)) (json-read))
+        (error "Error calling %s: %s" helper (buffer-string))))))
+
+(defvar-local pytest-pdb-break--config-info nil
+  "Active and/or most recent config-info-alist entry.")
+
+(defun pytest-pdb-break-get-config-info (&optional force)
+  "Maybe call config-info helper, respecting options and environment.
+With FORCE, always update. Return entry in config-info alist."
+  (python-shell-with-environment
+    (let* ((python-shell-interpreter (or pytest-pdb-break-alt-interpreter
+                                         python-shell-interpreter))
+           (pyexe-path (executable-find python-shell-interpreter))
+           (entry (assoc pyexe-path pytest-pdb-break-config-info-alist))
+           result)
+      (unless (and (not force) entry)
+        (setq result (pytest-pdb-break--query-config))
+        (unless entry
+          (push (setq entry (list pyexe-path))
+                pytest-pdb-break-config-info-alist))
+        (setq pytest-pdb-break--config-info
+              (setcdr entry (nconc (list :exe pyexe-path) result))))
+      entry)))
 
 ;; FIXME only add this wrapper when pdb++ is detected. These amputee
 ;; candidates most likely come courtesy of the fancycompleter package.
@@ -125,49 +177,14 @@ PROC is the buffer's current process."
   "Run COMMAND in Python, return t if exit code is 0, nil otherwise."
   (zerop (call-process python-shell-interpreter nil nil nil "-c" command)))
 
-(defun pytest-pdb-break--query-config ()
-  "Return a plist with items :registered BOOL and :rootdir STRING."
-  (let* ((home (or pytest-pdb-break--home (pytest-pdb-break--homer)))
-         (helper (concat home "get_config_info.py"))
-         (json-object-type 'plist)
-         json-false)
-    (with-temp-buffer
-      (if (zerop (call-process python-shell-interpreter helper
-                               (current-buffer) nil))
-          (progn (goto-char (point-min)) (json-read))
-        (error "Error calling %s: %s" helper (buffer-string))))))
-
 (defun pytest-pdb-break--getenv (var)
   "Look up VAR in `process-environment', return nil if unset or empty."
   (and (setq var (getenv var)) (not (string= var "")) var))
 
-(defun pytest-pdb-break-has-plugin-p (&optional force)
-  "Return non-nil if plugin is loadable.
-With FORCE, always check."
-  (let* ((venv (pytest-pdb-break--getenv "VIRTUAL_ENV"))
-         (entry (assoc venv pytest-pdb-break-has-plugin-alist)))
-    (if (and (not force) entry)
-        (cdr entry)
-      (unless entry
-        (push (setq entry (list venv)) pytest-pdb-break-has-plugin-alist))
-      (setcdr entry
-              (pytest-pdb-break--check-command-p "import pytest_pdb_break")))))
-
-(defun pytest-pdb-break--homer ()
-  "Find root pytest-pdb-break directory.
-Store absolute path (with trailing sep) in `pytest-pdb-break--home'.
-Signal error when not found."
-  (let ((drefd (file-truename (find-library-name "pytest-pdb-break")))
-        root)
-    (if (fboundp 'ffip-project-root)
-        (setq root (let ((default-directory drefd))
-                     (file-truename (ffip-project-root))))
-      (setq root (file-name-directory drefd)
-            root (and root (directory-file-name root))
-            root (and root (file-name-directory root))))
-    (if (and root (file-exists-p (concat root "pytest_pdb_break.py")))
-        (setq pytest-pdb-break--home root)
-      (error "Cannot find pytest-pdb-break's home directory"))))
+(defun pytest-pdb-break-has-plugin-p ()
+  "Return non-nil if plugin is loadable."
+  (cl-assert (member :registered pytest-pdb-break--config-info) t)
+  (plist-get pytest-pdb-break--config-info :registered))
 
 (defun pytest-pdb-break-add-pythonpath ()
   "Add plugin root to a copy of `process-environment'.
@@ -201,7 +218,7 @@ project/repo's root directory."
                                 (pytest-pdb-break-add-pythonpath)))
          ;; Make pdb++ prompt trigger non-native-completion fallback
          (python-shell-prompt-pdb-regexp "[(<]*[Ii]?[Pp]db[+>)]+ ")
-         (python-shell-interpreter (or pytest-pdb-break-interpreter
+         (python-shell-interpreter (or pytest-pdb-break-alt-interpreter
                                        python-shell-interpreter))
          (python-shell-interpreter-args (apply #'mapconcat
                                                (list #'identity args " ")))

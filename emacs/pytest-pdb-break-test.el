@@ -7,6 +7,18 @@
 (require 'ert)
 (require 'pytest-pdb-break)
 
+(defvar pytest-pdb-break-test-tests
+  '(pytest-pdb-break-test-ert-setup
+    pytest-pdb-break-test-upstream-env-updaters
+    pytest-pdb-break-test-homer
+    pytest-pdb-break-test-homer-symlink
+    pytest-pdb-break-test-homer-missing
+    pytest-pdb-break-test-query-helper-unregistered
+    pytest-pdb-break-test-query-helper-registered
+    pytest-pdb-break-test-query-helper-error
+    pytest-pdb-break-test-get-config-info-error
+    pytest-pdb-break-test-get-config-info-unregistered))
+
 (defvar pytest-pdb-break-test-repo-root
   (file-name-as-directory
    (file-truename (getenv "PYTEST_PDB_BREAK_TEST_REPO_ROOT"))))
@@ -24,6 +36,8 @@
   (concat pytest-pdb-break-test-lisp-root "pytest-pdb-break-test.el"))
 
 (ert-deftest pytest-pdb-break-test-ert-setup ()
+  (should-not (seq-difference pytest-pdb-break-test-tests
+                              (mapcar 'ert-test-name (ert-select-tests t t))))
   (should (file-exists-p pytest-pdb-break-test-repo-root))
   (should (file-exists-p pytest-pdb-break-test-lisp-root))
   (should (file-exists-p pytest-pdb-break-test-pytest-plugin))
@@ -73,6 +87,7 @@ dir sep."
        (make-directory $tmpdir t)
        (let ((default-directory $tmpdir)) ,@body))))
 
+;; TODO show `python-shell-process-environment' basically does nothing
 (ert-deftest pytest-pdb-break-test-upstream-env-updaters ()
   "Don't rely on upstream interface to copy/restore environment."
   (cl-macrolet ((both (l x z &rest y)
@@ -95,7 +110,14 @@ dir sep."
        (should-not (getenv "FOOVAR"))
        (should-not (getenv "FOOVAR"))
        (setenv "FOOVAR" "1") ; body
-       (should (string= (getenv "FOOVAR") "1"))))
+       (should (string= (getenv "FOOVAR") "1")))
+      ;; Sets virtual env
+      (let ((python-shell-virtualenv-root "/tmp/pytest-pdb-break-test/foo"))
+        (both
+         (process-environment (python-shell-calculate-process-environment))
+         (should-not (getenv "VIRTUAL_ENV"))
+         (should-not (getenv "VIRTUAL_ENV"))
+         (should (getenv "VIRTUAL_ENV")))))
     (ert-info ("`py-sh-calc-exec-path' doesn't mutate `exec-path' (safe)")
       ;; Change 3rd elt
       (let ((orig (sxhash-equal exec-path))
@@ -105,7 +127,16 @@ dir sep."
          (should-not (string= (caddr exec-path) new)) ; error if not string
          (should (= (sxhash-equal exec-path) orig))
          (setcar (cddr exec-path) new) ; body (don't use setf)
-         (should (string= (caddr exec-path) new)))))))
+         (should (string= (caddr exec-path) new)))))
+    (ert-info ("`py-sh-calc-exec-path' and `python-shell-virtualenv-root'")
+      (let ((python-shell-virtualenv-root "/tmp/pytest-pdb-break-test/foo")
+            (binned  "/tmp/pytest-pdb-break-test/foo/bin"))
+        (both
+         (exec-path (python-shell-calculate-exec-path))
+         (should-not (member binned exec-path))
+         (should-not (member binned exec-path))
+         ;; No trailing/
+         (should (string= binned (car exec-path))))))))
 
 (defmacro pytest-pdb-break-test-homer-fixture ()
   '(pytest-pdb-break-test-with-tmpdir
@@ -282,6 +313,78 @@ created with python3."
          (with-temp-buffer
            (insert (cadr exc))
            (write-file "error.out")))))))
+
+(defmacro pytest-pdb-break-test-with-python-buffer (&rest body)
+  `(pytest-pdb-break-test-with-environment
+    (with-temp-buffer
+      (let (python-indent-guess-indent-offset)
+        (python-mode))
+      ,@body)))
+
+(ert-deftest pytest-pdb-break-test-get-config-info-error ()
+  (cl-macrolet
+      ((fails
+        (setup logfile)
+        `(pytest-pdb-break-test-with-python-buffer
+          ,setup
+          (should (cl-notany python-shell-extra-pythonpaths
+                             python-shell-exec-path
+                             python-shell-virtualenv-root
+                             ;; ours
+                             pytest-pdb-break--config-info
+                             pytest-pdb-break-config-info-alist))
+          (let ((exc (should-error (pytest-pdb-break-get-config-info))))
+            (should (string-match-p "Error calling" (cadr exc)))
+            (should (string-match-p "ImportError:.*_pytest" (cadr exc)))
+            (with-temp-buffer (insert (cadr exc)) (write-file ,logfile)))
+          (should-not pytest-pdb-break-config-info-alist)
+          (should-not pytest-pdb-break--config-info))))
+    (pytest-pdb-break-test-ensure-venv
+     'base
+     (ert-info ("System Python has no pytest")
+       (fails (should-not python-shell-process-environment)
+              "error_no_pytest.out"))
+     (ert-info ("Manually set VIRTUAL_ENV")
+       (fails (progn (should-not python-shell-process-environment)
+                     (setenv "VIRTUAL_ENV" $venv))
+              "error_virtual_env_manual.out"))
+     (ert-info ("Set extra env vars to override")
+       (let ((python-shell-process-environment
+              (list (format "PATH=%s:%s" $venvbin (getenv "PATH"))
+                    (format "VIRTUAL_ENV=%s" $venvbin))))
+         (fails (should python-shell-process-environment)
+                "error_proc_env_api.out"))))))
+
+(ert-deftest pytest-pdb-break-test-get-config-info-unregistered ()
+  (cl-macrolet
+      ((rinse-repeat
+        (before after)
+        `(pytest-pdb-break-test-with-python-buffer
+          ,before
+          (let ((rv (pytest-pdb-break-get-config-info)))
+            (should (= 6 (length pytest-pdb-break--config-info)))
+            (should (eq (cdr rv) pytest-pdb-break--config-info))
+            (should (eq (car rv)
+                        (plist-get pytest-pdb-break--config-info :exe)))
+            (should (eq (assoc (car rv) pytest-pdb-break-config-info-alist)
+                        rv)))
+          ,after)))
+    (pytest-pdb-break-test-ensure-venv
+     'base
+     (ert-info ("Set virtual environment root")
+       ;; See upstream test above re -= slash
+       (let ((python-shell-virtualenv-root $venv)
+             (unslashed (directory-file-name $venvbin)))
+         (rinse-repeat
+          (should-not (member unslashed exec-path))
+          (should-not (member unslashed exec-path)))))
+     (ert-info ("Set extra `exec-path' items to prepend")
+       (let ((python-shell-exec-path (list $venvbin)))
+         (rinse-repeat
+          (should-not (member $venvbin exec-path))
+          (should-not (member $venvbin exec-path)))))
+     )))
+
 
 (provide 'pytest-pdb-break-test)
 ;;; pytest-pdb-break-test ends here
