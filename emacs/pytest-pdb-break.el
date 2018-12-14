@@ -7,7 +7,7 @@
 ;; Installation: no MELPA, but `straight.el' users can use this recipe:
 ;;
 ;;   '(:host github :repo "poppyschmo/pytest-pdb-break"
-;;     :files (:defaults "emacs/*.el"))
+;;     :files (:defaults "emacs/*.el" (:exclude "emacs/*-test.el")))
 ;;
 ;; Usage: `pytest-pdb-break-here'
 ;;
@@ -19,6 +19,7 @@
 ;;; Code:
 
 (require 'find-func)
+(require 'json)
 (require 'subr-x)
 (require 'python)
 
@@ -47,6 +48,9 @@ failure. Hook is run with process buffer current.")
 
 (defvar pytest-pdb-break-processes nil
   "List of processes started via `pytest-pdb-break-here'.")
+
+(defvar pytest-pdb-break--home nil
+  "Directory path of this project's root.")
 
 ;; FIXME only add this wrapper when pdb++ is detected. These amputee
 ;; candidates most likely come courtesy of the fancycompleter package.
@@ -119,7 +123,13 @@ PROC is the buffer's current process."
 
 (defun pytest-pdb-break--check-command-p (command)
   "Run COMMAND in Python, return t if exit code is 0, nil otherwise."
-  (= 0 (call-process python-shell-interpreter nil nil nil "-c" command)))
+  (zerop (call-process python-shell-interpreter nil nil nil "-c" command)))
+
+;; (defun pytest-pdb-break--query-config ()
+;;   "Return alist of ((REGISTERED . bool) (ROOTDIR . string))."
+;;   (let ((home (or pytest-pdb-break--home (pytest-pdb-break--homer))))
+;;     home
+;;     ))
 
 (defun pytest-pdb-break--getenv (var)
   "Look up VAR in `process-environment', return nil if unset or empty."
@@ -137,17 +147,21 @@ With FORCE, always check."
       (setcdr entry
               (pytest-pdb-break--check-command-p "import pytest-pdb-break")))))
 
-(defun pytest-pdb-break--find-own-repo ()
-  "Return root of plugin repo or nil."
+(defun pytest-pdb-break--homer ()
+  "Find root pytest-pdb-break directory.
+Store absolute path (with trailing sep) in `pytest-pdb-break--home'.
+Signal error when not found."
   (let ((drefd (file-truename (find-library-name "pytest-pdb-break")))
         root)
     (if (fboundp 'ffip-project-root)
-        (setq root (let ((default-directory drefd)) (ffip-project-root)))
+        (setq root (let ((default-directory drefd))
+                     (file-truename (ffip-project-root))))
       (setq root (file-name-directory drefd)
             root (and root (directory-file-name root))
             root (and root (file-name-directory root))))
-    (when (and root (directory-files root 'full "pytest_pdb_break\\.py$"))
-      (file-truename root))))
+    (if (and root (file-exists-p (concat root "pytest_pdb_break.py")))
+        (setq pytest-pdb-break--home root)
+      (error "Cannot find pytest-pdb-break's home directory"))))
 
 (defun pytest-pdb-break-add-pythonpath ()
   "Add plugin root to a copy of `process-environment'.
@@ -155,7 +169,7 @@ Return the latter."
   (let* ((process-environment (append process-environment nil))
          (existing (pytest-pdb-break--getenv "PYTHONPATH"))
          (existing (and existing (parse-colon-path existing)))
-         (found (pytest-pdb-break--find-own-repo)))
+         (found (pytest-pdb-break--homer)))
     (when found
       (setenv "PYTHONPATH" (string-join (cons found existing) ":")))
     process-environment))
