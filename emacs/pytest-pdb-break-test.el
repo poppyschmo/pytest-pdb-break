@@ -2,7 +2,7 @@
 
 ;;; Commentary:
 ;;
-;; This leaves around 30M of junk under /tmp/pytest-pdb-break-test/
+;; This leaves around 40M of junk under /tmp/pytest-pdb-break-test/
 
 (require 'ert)
 (require 'pytest-pdb-break)
@@ -65,6 +65,7 @@
 
 (defmacro pytest-pdb-break-test-with-environment (&rest body)
   ;; Covers PATH, PYTHONPATH, VIRTUAL_ENV
+  ;; Consider unsetting all known PYTHON* env vars
   `(let (($orig (sxhash-equal (list process-environment exec-path))))
      (let ((process-environment (append process-environment nil))
            (exec-path (append exec-path nil)))
@@ -87,56 +88,86 @@ dir sep."
        (make-directory $tmpdir t)
        (let ((default-directory $tmpdir)) ,@body))))
 
-;; TODO show `python-shell-process-environment' basically does nothing
+(defmacro pytest-pdb-break-test-with-python-buffer (&rest body)
+  `(pytest-pdb-break-test-with-environment
+    (with-temp-buffer
+      (let (python-indent-guess-indent-offset)
+        (python-mode))
+      ,@body)))
+
 (ert-deftest pytest-pdb-break-test-upstream-env-updaters ()
-  "Don't rely on upstream interface to copy/restore environment."
-  (cl-macrolet ((both (l x z &rest y)
-                      `(progn
-                         (pytest-pdb-break-test-with-environment
-                          ,x (let (,l) ,@y) ,z)
-                         (pytest-pdb-break-test-with-environment
-                          ,x (python-shell-with-environment ,@y) ,z))))
-    (ert-info ("`py-sh-calc-proc-env' only mutates existing members")
-      ;; Already present
-      (both
-       (process-environment (python-shell-calculate-process-environment))
-       (setenv "FOOVAR" "1")
-       (should (string= (getenv "FOOVAR") "2"))
-       (setenv "FOOVAR" "2") ; body
-       (should (string= (getenv "FOOVAR") "2")))
-      ;; Non-existent
-      (both
-       (process-environment (python-shell-calculate-process-environment))
-       (should-not (getenv "FOOVAR"))
-       (should-not (getenv "FOOVAR"))
-       (setenv "FOOVAR" "1") ; body
-       (should (string= (getenv "FOOVAR") "1")))
-      ;; Sets virtual env
+  "Describe expected behavior of built-in `python-mode' interface.
+Show that it doesn't restore environment to previous state. Certain
+options are idiosyncratic and unintuitive."
+  (cl-macrolet ((before (&rest rest) `(ert-info ("Before") ,@rest))
+                (during (&rest rest) `(ert-info ("During") ,@rest))
+                (after (&rest rest) `(ert-info ("After") ,@rest))
+                (both (m b x y z)
+                      `(ert-info (,m)
+                         (pytest-pdb-break-test-with-python-buffer
+                          ,x (let (,b) ,y) ,z)
+                         (pytest-pdb-break-test-with-python-buffer
+                          ,x (python-shell-with-environment ,y) ,z))))
+    (ert-info ((concat "`python-shell-calculate-process-environment', "
+                       "called by `python-shell-with-environment', "
+                       "only mutates existing environment variables"))
+      ;; First two don't use well-knowns (baseline)
+      (both "Already present"
+            (process-environment (python-shell-calculate-process-environment))
+            (before (setenv "FOOVAR" "1"))
+            (during (setenv "FOOVAR" "2")
+                    (should (string= (getenv "FOOVAR") "2")))
+            (after (should (string= (getenv "FOOVAR") "2"))))
+      (both "Non-existent"
+            (process-environment (python-shell-calculate-process-environment))
+            (before (should-not (getenv "FOOVAR")))
+            (during (setenv "FOOVAR" "1")
+                    (should (string= (getenv "FOOVAR") "1")))
+            (after (should-not (getenv "FOOVAR"))))
       (let ((python-shell-virtualenv-root "/tmp/pytest-pdb-break-test/foo"))
         (both
+         "Setting `python-shell-virtualenv-root' sets VIRTUAL_ENV env var"
          (process-environment (python-shell-calculate-process-environment))
-         (should-not (getenv "VIRTUAL_ENV"))
-         (should-not (getenv "VIRTUAL_ENV"))
-         (should (getenv "VIRTUAL_ENV")))))
+         (before (should-not (getenv "VIRTUAL_ENV")))
+         (during (should (getenv "VIRTUAL_ENV")))
+         (after (should-not (getenv "VIRTUAL_ENV")))))
+      (let ((python-shell-process-environment '("VIRTUAL_ENV=/tmp/foo"
+                                                "PATH=/tmp/foo:/the/rest")))
+        (both
+         "Only mutates PATH because it's present already in env"
+         (process-environment (python-shell-calculate-process-environment))
+         (before (should-not (getenv "VIRTUAL_ENV"))
+                 (should (getenv "PATH"))) ; obvious but affirsm claim
+         (during (should (string= (getenv "PATH") "/tmp/foo:/the/rest"))
+                 (should (string= (getenv "VIRTUAL_ENV") "/tmp/foo")))
+         (after (should-not (getenv "VIRTUAL_ENV"))
+                (should (string= (getenv "PATH") "/tmp/foo:/the/rest"))))))
     (ert-info ("`py-sh-calc-exec-path' doesn't mutate `exec-path' (safe)")
-      ;; Change 3rd elt
       (let ((orig (sxhash-equal exec-path))
             (new "/tmp/pytest-pdb-break-test/foo"))
-        (both
-         (exec-path (python-shell-calculate-exec-path))
-         (should-not (string= (caddr exec-path) new)) ; error if not string
-         (should (= (sxhash-equal exec-path) orig))
-         (setcar (cddr exec-path) new) ; body (don't use setf)
-         (should (string= (caddr exec-path) new)))))
-    (ert-info ("`py-sh-calc-exec-path' and `python-shell-virtualenv-root'")
+        (both "Arbitrary changes to `exec-path' only present during interim"
+              (exec-path (python-shell-calculate-exec-path))
+              (before (should-not (string= (caddr exec-path) new)))
+              (during (setcar (cddr exec-path) new) ; don't use setf in test
+                      (should (string= (caddr exec-path) new)))
+              (after (should (= (sxhash-equal exec-path) orig)))))
       (let ((python-shell-virtualenv-root "/tmp/pytest-pdb-break-test/foo")
             (binned  "/tmp/pytest-pdb-break-test/foo/bin"))
-        (both
-         (exec-path (python-shell-calculate-exec-path))
-         (should-not (member binned exec-path))
-         (should-not (member binned exec-path))
-         ;; No trailing/
-         (should (string= binned (car exec-path))))))))
+        (both "Sets VIRTUAL_ENV env var from `python-shell-virtualenv-root'"
+              (exec-path (python-shell-calculate-exec-path))
+              (should-not (member binned exec-path))
+              (during (should (string= binned (car exec-path))))
+              (should-not (member binned exec-path))))
+      (let ((python-shell-process-environment '("VIRTUAL_ENV=/tmp/foo"
+                                                "PATH=/tmp/foo:/the/rest"))
+            (orig (sxhash-equal exec-path)))
+        (should-not (member "/tmp/foo" exec-path))
+        (should-not (member "/tmp/foo/" exec-path))
+        (both "Env vars not added to `exec-path'"
+              (exec-path (python-shell-calculate-exec-path))
+              (before (should (= (sxhash-equal exec-path) orig)))
+              (during (should (= (sxhash-equal exec-path) orig)))
+              (after (should (= (sxhash-equal exec-path) orig))))))))
 
 (defmacro pytest-pdb-break-test-homer-fixture ()
   '(pytest-pdb-break-test-with-tmpdir
@@ -314,13 +345,6 @@ created with python3."
            (insert (cadr exc))
            (write-file "error.out")))))))
 
-(defmacro pytest-pdb-break-test-with-python-buffer (&rest body)
-  `(pytest-pdb-break-test-with-environment
-    (with-temp-buffer
-      (let (python-indent-guess-indent-offset)
-        (python-mode))
-      ,@body)))
-
 (ert-deftest pytest-pdb-break-test-get-config-info-error ()
   (cl-macrolet
       ((fails
@@ -382,8 +406,7 @@ created with python3."
        (let ((python-shell-exec-path (list $venvbin)))
          (rinse-repeat
           (should-not (member $venvbin exec-path))
-          (should-not (member $venvbin exec-path)))))
-     )))
+          (should-not (member $venvbin exec-path))))))))
 
 
 (provide 'pytest-pdb-break-test)
