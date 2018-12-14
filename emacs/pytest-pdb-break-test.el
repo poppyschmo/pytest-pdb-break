@@ -19,7 +19,8 @@
     pytest-pdb-break-test-query-helper-registered
     pytest-pdb-break-test-query-helper-error
     pytest-pdb-break-test-get-config-info-error
-    pytest-pdb-break-test-get-config-info-unregistered))
+    pytest-pdb-break-test-get-config-info-unregistered
+    pytest-pdb-break-test-get-node-id))
 
 (defvar pytest-pdb-break-test-repo-root
   (file-name-as-directory
@@ -38,8 +39,8 @@
   (concat pytest-pdb-break-test-lisp-root "pytest-pdb-break-test.el"))
 
 (ert-deftest pytest-pdb-break-test-ert-setup ()
-  (should-not (seq-difference pytest-pdb-break-test-tests
-                              (mapcar 'ert-test-name (ert-select-tests t t))))
+  (should (seq-set-equal-p (mapcar 'ert-test-name (ert-select-tests t t))
+                           pytest-pdb-break-test-tests))
   (should (file-exists-p pytest-pdb-break-test-repo-root))
   (should (file-exists-p pytest-pdb-break-test-lisp-root))
   (should (file-exists-p pytest-pdb-break-test-pytest-plugin))
@@ -96,7 +97,8 @@ should start with a dir sep."
        (let ((default-directory ,tmpdir)) ,@body))))
 
 (defmacro pytest-pdb-break-test-with-python-buffer (&rest body)
-  "Run BODY in a `python-mode' temp buffer with a temp environment."
+  "Run BODY in a `python-mode' temp buffer with a temp environment.
+Note: this does *not* create and cd to a temp dir."
   `(pytest-pdb-break-test-with-environment
     (with-temp-buffer
       (let (python-indent-guess-indent-offset)
@@ -466,6 +468,81 @@ a sound choice)."
           (should pytest-pdb-break-config-info-alist)
           (should (equal pytest-pdb-break--config-info (cdr fake-entry)))))))))
 
+(defvar pytest-pdb-break-test--get-node-id-sources
+  '("
+def test_foo():
+    somevar = 1
+    assert True
+
+def may_be_a_test():
+    pass
+
+def something_else():
+    assert 1
+"
+    "
+class TestFoo:
+    def test_foo(self):
+        assert True
+
+    def test_bar(self):
+        somevar = True
+        # comment
+        assert somevar
+"))
+
+(ert-deftest pytest-pdb-break-test-get-node-id ()
+  ;; For now, assume Elpy branch is infallible, and just test ours
+  (let ((source-one (nth 0 pytest-pdb-break-test--get-node-id-sources))
+        (source-two (nth 1 pytest-pdb-break-test--get-node-id-sources))
+        case-fold-search)
+    (pytest-pdb-break-test-with-tmpdir
+     (pytest-pdb-break-test-with-python-buffer
+      (should-not (fboundp 'elpy-test-at-point))
+      (insert source-one)
+      (write-file "s1.py") ; doesn't filter based on file name
+      (ert-info ("Simple Python func, no docstring, comments")
+        (should (equal buffer-file-name (expand-file-name "s1.py")))
+        (should (and (goto-char (point-min))
+                     (search-forward "assert True")
+                     (goto-char (match-beginning 0))))
+        (should (equal (python-info-current-defun)
+                       "test_foo"))
+        (should (equal (pytest-pdb-break--get-node-id)
+                       (list buffer-file-name "test_foo"))))
+      (ert-info ("Match pattern is liberal")
+        (should (and (goto-char (point-min))
+                     (search-forward "pass")
+                     (goto-char (match-beginning 0))))
+        (should (equal (pytest-pdb-break--get-node-id)
+                       (list buffer-file-name "may_be_a_test"))))
+      (ert-info ("Rejects funcs without 'test' in name")
+        (should (and (goto-char (point-min))
+                     (search-forward "assert 1")
+                     (goto-char (match-beginning 0))))
+        (should (equal (python-info-current-defun) "something_else"))
+        (let ((exc (should-error (pytest-pdb-break--get-node-id))))
+          (should (equal exc '(error "No test found"))))))
+     (pytest-pdb-break-test-with-python-buffer
+      (insert source-two)
+      (write-file "s2.py")
+      (ert-info ("Simple Python class, two methods")
+        (should (and (goto-char (point-min))
+                     (search-forward "# comment")
+                     (goto-char (match-beginning 0))))
+        (should (equal (python-info-current-defun)
+                       "TestFoo.test_bar"))
+        (should (equal (pytest-pdb-break--get-node-id)
+                       (list buffer-file-name "TestFoo" "test_bar"))))
+      (ert-info ("Space between raises error")
+        (should (and (goto-char (point-min))
+                     (search-forward "assert True")
+                     (progn (end-of-line)
+                            (forward-char 1)
+                            (looking-at-p "\n"))))
+        (should-not (python-info-current-defun))
+        (let ((exc (should-error (pytest-pdb-break--get-node-id))))
+          (should (equal exc '(error "No test found")))))))))
 
 (provide 'pytest-pdb-break-test)
 ;;; pytest-pdb-break-test ends here

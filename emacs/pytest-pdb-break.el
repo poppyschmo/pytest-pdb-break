@@ -1,5 +1,9 @@
-;;; pytest-pdb-break.el ---- integration demo -*- lexical-binding: t -*-
+;;; pytest-pdb-break.el --- pytest-pdb-break runner -*- lexical-binding: t -*-
 
+;; Author: Jane Soko <poppyschmo@protonmail.com>
+;; URL: https://github.com/poppyschmo/pytest-pdb-break/emacs
+;; Version: 0.0.1
+;; Keywords: python testing
 ;; Package-Requires: ((emacs "26"))
 
 ;;; Commentary:
@@ -98,28 +102,28 @@ This is the root path of cloned repo, not a \"lisp\" sub directory."
   "Maybe call config-info helper, respecting options and environment.
 With FORCE, always update. Return entry in config-info alist."
   (python-shell-with-environment
-   (let* ((python-shell-interpreter (or pytest-pdb-break-alt-interpreter
-                                        python-shell-interpreter))
-          (pyexe-path (executable-find python-shell-interpreter))
-          (entry (assoc pyexe-path pytest-pdb-break-config-info-alist))
-          result)
-     (condition-case err
-         (if (and (not force) entry)
-             (if (cdr entry)
-                 (setq pytest-pdb-break--config-info (cdr entry))
-               (pytest-pdb-break-get-config-info 'force))
-           (setq result (pytest-pdb-break--query-config))
-           (unless entry
-             (push (setq entry (list pyexe-path))
-                   pytest-pdb-break-config-info-alist))
-           (setq pytest-pdb-break--config-info
-                 (setcdr entry (nconc (list :exe pyexe-path) result))))
-       (error
-        (when entry
-          (setq pytest-pdb-break-config-info-alist
-                (delete entry pytest-pdb-break-config-info-alist)))
-        (signal (car err) (cdr err))))
-     entry)))
+    (let* ((python-shell-interpreter (or pytest-pdb-break-alt-interpreter
+                                         python-shell-interpreter))
+           (pyexe-path (executable-find python-shell-interpreter))
+           (entry (assoc pyexe-path pytest-pdb-break-config-info-alist))
+           result)
+      (condition-case err
+          (if (and (not force) entry)
+              (if (cdr entry)
+                  (setq pytest-pdb-break--config-info (cdr entry))
+                (pytest-pdb-break-get-config-info 'force))
+            (setq result (pytest-pdb-break--query-config))
+            (unless entry
+              (push (setq entry (list pyexe-path))
+                    pytest-pdb-break-config-info-alist))
+            (setq pytest-pdb-break--config-info
+                  (setcdr entry (nconc (list :exe pyexe-path) result))))
+        (error
+         (when entry
+           (setq pytest-pdb-break-config-info-alist
+                 (delete entry pytest-pdb-break-config-info-alist)))
+         (signal (car err) (cdr err))))
+      entry)))
 
 (defun pytest-pdb-break--get-node-id ()
   "Return list of node-id components for test at point."
@@ -130,7 +134,7 @@ With FORCE, always update. Return entry in config-info alist."
                 test (nth 3 four)))
       (setq file buffer-file-name
             test (python-info-current-defun)))
-    (unless (and test (string-match "[Tt]est" test))
+    (unless (and test (string-match-p "\\<[Tt]est" test))
       (error "No test found"))
     (setq parts (split-string test "\\."))
     (when (caddr parts)
@@ -158,7 +162,7 @@ Ensure it has a trailing slash."
   (cl-assert (member :registered pytest-pdb-break--config-info) t)
   (plist-get pytest-pdb-break--config-info :registered))
 
-;; FIXME use built-in `python-mode' option to handle this
+;; FIXME use built-in `python-mode' util to handle this
 (defun pytest-pdb-break-add-pythonpath ()
   "Add plugin root to a copy of `process-environment'.
 Return the latter."
