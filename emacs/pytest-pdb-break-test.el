@@ -21,7 +21,8 @@
     pytest-pdb-break-test-get-config-info-error
     pytest-pdb-break-test-get-config-info-unregistered
     pytest-pdb-break-test-get-node-id
-    pytest-pdb-break-test-make-arg-string))
+    pytest-pdb-break-test-make-arg-string
+    pytest-pdb-break-test-minor-mode))
 
 (defvar pytest-pdb-break-test-repo-root
   (file-name-as-directory
@@ -595,6 +596,87 @@ class TestFoo:
                              "--break=/tmp/a.py:9 /tmp/a.py::test_a")))
         (should (equal pytest-pdb-break-extra-opts
                        '("-p" "pytest_pdb_break")))))))
+
+(ert-deftest pytest-pdb-break-test-minor-mode ()
+  ;; Eval: (compile "make PAT=minor-mode")
+  (should-not pytest-pdb-break-processes)
+  (should-not (buffer-live-p nil)) ; reminder (no error)
+  (should-not (process-live-p nil))
+  (cl-macrolet ((inside (&rest rest) `(ert-info ("Inside") ,@rest))
+                (outside (&rest rest) `(ert-info ("Outside") ,@rest))
+                (rip (x &optional y)
+                     `(pytest-pdb-break-test-with-environment
+                       (let (proc)
+                         (with-temp-buffer
+                           (setq proc (start-process "sleeper" (current-buffer)
+                                                     "sleep" "3"))
+                           (set-process-query-on-exit-flag proc nil) ; crutch
+                           ,x)
+                         ,y)
+                       (setq pytest-pdb-break-processes nil))))
+    (ert-info ("Error when buffer has no process")
+      (with-temp-buffer
+        (let ((exc (should-error (pytest-pdb-break-mode +1))))
+          (should (string-match-p "No live process associated" (cadr exc)))))
+      (should-not pytest-pdb-break-processes))
+    (ert-info ("Error when process is dead")
+      (rip (inside (should (eq proc (get-buffer-process (current-buffer))))
+                   (kill-process proc)
+                   (while (process-live-p proc) (sleep-for 0.01))
+                   (should proc)
+                   (should-not (get-buffer-process (current-buffer)))
+                   (let ((exc (should-error (pytest-pdb-break-mode +1))))
+                     (should (string-match-p "No live process" (cadr exc)))))
+           (outside (should-not pytest-pdb-break-processes))))
+    (ert-info ("Normal, no *--proc var")
+      (rip (inside (should-not pytest-pdb-break--process)
+                   (pytest-pdb-break-mode +1)
+                   (should (memq proc pytest-pdb-break-processes))
+                   (should (advice-member-p
+                            'pytest-pdb-break-ad-around-get-completions
+                            #'python-shell-completion-get-completions))
+                   (should (local-variable-p 'kill-buffer-hook))
+                   (should-not (eq t (car kill-buffer-hook))))
+           (outside (should-not (advice-member-p
+                                 'pytest-pdb-break-ad-around-get-completions
+                                 #'python-shell-completion-get-completions))
+                    (should-not pytest-pdb-break-processes)
+                    (should-not (local-variable-p
+                                 'pytest-pdb-break--config-info)))))
+    (ert-info ("Normal, with *--proc, parbuf prop")
+      (let ((parbuf (current-buffer)))
+        (should-not (local-variable-p 'pytest-pdb-break--config-info))
+        (rip (inside (setq pytest-pdb-break--process proc
+                           pytest-pdb-break--parent-buffer parbuf)
+                     (should (local-variable-p 'pytest-pdb-break--process))
+                     (pytest-pdb-break-mode +1))
+             (outside (should-not pytest-pdb-break-processes)
+                      (should (local-variable-p
+                               'pytest-pdb-break--config-info))))))
+    (ert-info ("Deactivation behavior")
+      (let ((s1 (start-process "s1" (current-buffer) "sleep" "3")))
+        (set-process-query-on-exit-flag s1 nil)
+        (rip (inside (pytest-pdb-break-mode +1)
+                     (let ((t1 (start-process "t1" (current-buffer) "true")))
+                       (nconc pytest-pdb-break-processes (list s1 t1))
+                       (while (process-live-p t1) (sleep-for 0.001))
+                       (should (seq-set-equal-p pytest-pdb-break-processes
+                                                (list proc s1 t1))))
+                     (pytest-pdb-break-mode -1)
+                     (should (seq-set-equal-p pytest-pdb-break-processes
+                                              (list s1))))
+             (outside (kill-process s1)
+                      (should-not pytest-pdb-break--process)
+                      (should (advice-member-p
+                               'pytest-pdb-break-ad-around-get-completions
+                               #'python-shell-completion-get-completions))
+                      (pytest-pdb-break-mode -1)
+                      (should (process-live-p proc))
+                      (should-not (advice-member-p
+                                   'pytest-pdb-break-ad-around-get-completions
+                                   #'python-shell-completion-get-completions))
+                      (should-not (local-variable-p 'kill-buffer-hook))
+                      (kill-process proc)))))))
 
 (provide 'pytest-pdb-break-test)
 ;;; pytest-pdb-break-test ends here

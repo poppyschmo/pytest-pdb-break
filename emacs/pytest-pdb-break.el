@@ -1,7 +1,7 @@
 ;;; pytest-pdb-break.el --- pytest-pdb-break runner -*- lexical-binding: t -*-
 
 ;; Author: Jane Soko <poppyschmo@protonmail.com>
-;; URL: https://github.com/poppyschmo/pytest-pdb-break/emacs
+;; URL: https://github.com/poppyschmo/pytest-pdb-break
 ;; Version: 0.0.1
 ;; Keywords: python testing
 ;; Package-Requires: ((emacs "26"))
@@ -96,32 +96,33 @@ This is the root path of cloned repo, not a \"lisp\" sub directory."
 (defvar-local pytest-pdb-break--config-info nil
   "Value of active config-info-alist entry.")
 
+;; TODO pass node-id and extra args to query-config
 (defun pytest-pdb-break-get-config-info (&optional force)
   "Maybe call config-info helper, respecting options and environment.
 With FORCE, always update. Return entry in config-info alist."
   (python-shell-with-environment
-    (let* ((python-shell-interpreter (or pytest-pdb-break-alt-interpreter
-                                         python-shell-interpreter))
-           (pyexe-path (executable-find python-shell-interpreter))
-           (entry (assoc pyexe-path pytest-pdb-break-config-info-alist))
-           result)
-      (condition-case err
-          (if (and (not force) entry)
-              (if (cdr entry)
-                  (setq pytest-pdb-break--config-info (cdr entry))
-                (pytest-pdb-break-get-config-info 'force))
-            (setq result (pytest-pdb-break--query-config))
-            (unless entry
-              (push (setq entry (list pyexe-path))
-                    pytest-pdb-break-config-info-alist))
-            (setq pytest-pdb-break--config-info
-                  (setcdr entry (nconc (list :exe pyexe-path) result))))
-        (error
-         (when entry
-           (setq pytest-pdb-break-config-info-alist
-                 (delete entry pytest-pdb-break-config-info-alist)))
-         (signal (car err) (cdr err))))
-      entry)))
+   (let* ((python-shell-interpreter (or pytest-pdb-break-alt-interpreter
+                                        python-shell-interpreter))
+          (pyexe-path (executable-find python-shell-interpreter))
+          (entry (assoc pyexe-path pytest-pdb-break-config-info-alist))
+          result)
+     (condition-case err
+         (if (and (not force) entry)
+             (if (cdr entry)
+                 (setq pytest-pdb-break--config-info (cdr entry))
+               (pytest-pdb-break-get-config-info 'force))
+           (setq result (pytest-pdb-break--query-config))
+           (unless entry
+             (push (setq entry (list pyexe-path))
+                   pytest-pdb-break-config-info-alist))
+           (setq pytest-pdb-break--config-info
+                 (setcdr entry (nconc (list :exe pyexe-path) result))))
+       (error
+        (when entry
+          (setq pytest-pdb-break-config-info-alist
+                (delete entry pytest-pdb-break-config-info-alist)))
+        (signal (car err) (cdr err))))
+     entry)))
 
 (defun pytest-pdb-break--get-node-id ()
   "Return list of node-id components for test at point."
@@ -196,27 +197,29 @@ If PROCESS is ours, prepend INPUT to results. With IMPORT, ignore."
 (define-minor-mode pytest-pdb-break-mode
   "A minor mode for Python comint buffers running a pytest PDB session."
   :group 'pytest-pdb-break
-  (let ((proc (get-buffer-process (current-buffer))))
+  :after-hook (when (buffer-live-p pytest-pdb-break--parent-buffer)
+                (with-current-buffer pytest-pdb-break--parent-buffer
+                  (setq pytest-pdb-break--config-info nil)))
+  (let ((proc (or pytest-pdb-break--process
+                  (get-buffer-process (current-buffer)))))
     (if pytest-pdb-break-mode
         (progn
+          (unless proc
+            (error "No live process associated with %S" (current-buffer)))
           (add-to-list 'pytest-pdb-break-processes proc)
           (advice-add 'python-shell-completion-get-completions :around
                       #'pytest-pdb-break-ad-around-get-completions)
           (setq-local python-shell-completion-native-enable nil)
           (add-hook 'kill-buffer-hook
-                    (apply-partially #'pytest-pdb-break-mode -1) nil t))
+                    (lambda nil (pytest-pdb-break-mode -1))
+                    nil t))
+      ;; Forget proc even if it's still running
       (setq pytest-pdb-break-processes
-            (seq-filter #'process-live-p
+            (seq-filter #'process-live-p ; proc may be nil
                         (remq proc pytest-pdb-break-processes)))
       (unless pytest-pdb-break-processes
         (advice-remove 'python-shell-completion-get-completions
-                       'pytest-pdb-break-ad-around-get-completions))
-      (when (buffer-live-p pytest-pdb-break--parent-buffer)
-        (with-current-buffer pytest-pdb-break--parent-buffer
-          (setq pytest-pdb-break--process nil))))))
-
-;; FIXME ditch this after tests cover command
-(defvar pytest-pdb-break--dry-run nil)
+                       'pytest-pdb-break-ad-around-get-completions)))))
 
 ;;;###autoload
 (defun pytest-pdb-break-here (lnum node-info root-dir)
@@ -240,17 +243,13 @@ project/repo root directory containing a pytest config."
                                        python-shell-interpreter))
          (python-shell-interpreter-args (pytest-pdb-break--make-arg-string
                                          lnum node-info installed))
-         (cmd (python-shell-calculate-command))
-         (proc (and (not pytest-pdb-break--dry-run) (run-python cmd nil t))))
-    (if (setq pytest-pdb-break--process proc)
-        ;; Only python- prefixed local vars get cloned in child buffer
-        (progn (let ((parent-buffer (current-buffer)))
-                 (with-current-buffer (process-buffer proc)
-                   (setq pytest-pdb-break--parent-buffer parent-buffer)
-                   (pytest-pdb-break-mode +1))
-                 ;; In case mode hook wants this
-                 (setq pytest-pdb-break--config-info nil)))
-      (message "Would've run: %S\nfrom: %S" cmd default-directory))))
+         (proc (run-python nil nil t))
+         (parbuf (current-buffer)))
+    ;; Only python- prefixed local vars get cloned in child buffer
+    (with-current-buffer (process-buffer proc)
+      (setq pytest-pdb-break--process proc
+            pytest-pdb-break--parent-buffer parbuf)
+      (pytest-pdb-break-mode +1))))
 
 
 (provide 'pytest-pdb-break)
