@@ -81,48 +81,55 @@ This is the root path of cloned repo, not a \"lisp\" sub directory."
         (setq pytest-pdb-break--home root)
       (error "Cannot find pytest-pdb-break's home directory"))))
 
-(defun pytest-pdb-break--query-config ()
-  "Return a plist with items :registered BOOL and :rootdir STRING."
+(defun pytest-pdb-break--query-config (&rest args)
+  "Return a plist with items :registered BOOL and :rootdir STRING.
+Include any ARGS when calling external helper."
   (let* ((home (or pytest-pdb-break--home (pytest-pdb-break--homer)))
          (helper (concat home "get_config_info.py"))
          (json-object-type 'plist)
          json-false)
     (with-temp-buffer
-      (if (zerop (call-process python-shell-interpreter helper
-                               (current-buffer) nil))
+      (if (zerop (apply #'call-process
+                        (append (list python-shell-interpreter helper
+                                      (current-buffer) nil)
+                                (and args (cons "-" args)))))
           (progn (goto-char (point-min)) (json-read))
         (error "Error calling %s: %s" helper (buffer-string))))))
 
 (defvar-local pytest-pdb-break--config-info nil
   "Value of active config-info-alist entry.")
 
-;; TODO pass node-id and extra args to query-config
-(defun pytest-pdb-break-get-config-info (&optional force)
+(defun pytest-pdb-break-get-config-info (&optional node-id-parts force)
   "Maybe call config-info helper, respecting options and environment.
+Include `pytest-pdb-break-extra-opts', if any, along with NODE-ID-PARTS.
 With FORCE, always update. Return entry in config-info alist."
   (python-shell-with-environment
-   (let* ((python-shell-interpreter (or pytest-pdb-break-alt-interpreter
-                                        python-shell-interpreter))
-          (pyexe-path (executable-find python-shell-interpreter))
-          (entry (assoc pyexe-path pytest-pdb-break-config-info-alist))
-          result)
-     (condition-case err
-         (if (and (not force) entry)
-             (if (cdr entry)
-                 (setq pytest-pdb-break--config-info (cdr entry))
-               (pytest-pdb-break-get-config-info 'force))
-           (setq result (pytest-pdb-break--query-config))
-           (unless entry
-             (push (setq entry (list pyexe-path))
-                   pytest-pdb-break-config-info-alist))
-           (setq pytest-pdb-break--config-info
-                 (setcdr entry (nconc (list :exe pyexe-path) result))))
-       (error
-        (when entry
-          (setq pytest-pdb-break-config-info-alist
-                (delete entry pytest-pdb-break-config-info-alist)))
-        (signal (car err) (cdr err))))
-     entry)))
+    (let* ((python-shell-interpreter (or pytest-pdb-break-alt-interpreter
+                                         python-shell-interpreter))
+           (pyexe-path (executable-find python-shell-interpreter))
+           (entry (assoc pyexe-path pytest-pdb-break-config-info-alist))
+           result)
+      (condition-case err
+          (if (and (not force) entry)
+              (if (cdr entry)
+                  (setq pytest-pdb-break--config-info (cdr entry))
+                (pytest-pdb-break-get-config-info node-id-parts 'force))
+            (let ((args (append pytest-pdb-break-extra-opts
+                                (and node-id-parts
+                                     (list (mapconcat #'identity
+                                                      node-id-parts "::"))))))
+              (setq result (apply #'pytest-pdb-break--query-config args)))
+            (unless entry
+              (push (setq entry (list pyexe-path))
+                    pytest-pdb-break-config-info-alist))
+            (setq pytest-pdb-break--config-info
+                  (setcdr entry (nconc (list :exe pyexe-path) result))))
+        (error
+         (when entry
+           (setq pytest-pdb-break-config-info-alist
+                 (delete entry pytest-pdb-break-config-info-alist)))
+         (signal (car err) (cdr err))))
+      entry)))
 
 (defun pytest-pdb-break--get-node-id ()
   "Return list of node-id components for test at point."
@@ -157,12 +164,12 @@ Ensure it has a trailing slash."
   (cl-assert (member :registered pytest-pdb-break--config-info) t)
   (plist-get pytest-pdb-break--config-info :registered))
 
-(defun pytest-pdb-break--make-arg-string (lnum node-info installed)
+(defun pytest-pdb-break--make-arg-string (line-no node-id-parts installed)
   "Prepare arg string for `python-shell-make-comint'.
-LNUM and NODE-INFO are as required by the main command. INSTALLED should
-be non-nil if pytest sees the plugin."
-  (let* ((nodeid (mapconcat #'identity node-info "::"))
-         (break (format "--break=%s:%s" (car node-info) lnum))
+LINE-NO and NODE-ID-PARTS are as required by the main command. INSTALLED
+should be non-nil if pytest sees the plugin."
+  (let* ((nodeid (mapconcat #'identity node-id-parts "::"))
+         (break (format "--break=%s:%s" (car node-id-parts) line-no))
          (xtra (append (unless (or installed
                                    (member "pytest_pdb_break"
                                            pytest-pdb-break-extra-opts))
@@ -222,14 +229,14 @@ If PROCESS is ours, prepend INPUT to results. With IMPORT, ignore."
                        'pytest-pdb-break-ad-around-get-completions)))))
 
 ;;;###autoload
-(defun pytest-pdb-break-here (lnum node-info root-dir)
-  "Run pytest on the test at point and break at LNUM.
-NODE-INFO is a list of pytest node-id components. ROOT-DIR is normally a
-project/repo root directory containing a pytest config."
-  (interactive (progn
-                 (pytest-pdb-break-get-config-info)
+(defun pytest-pdb-break-here (line-no node-id-parts root-dir)
+  "Run pytest on the test at point and break at LINE-NO.
+NODE-ID-PARTS is a list of pytest node-id components. ROOT-DIR is
+normally a project/repo root directory containing a pytest config."
+  (interactive (let ((node-id-parts (pytest-pdb-break--get-node-id)))
+                 (pytest-pdb-break-get-config-info node-id-parts)
                  (list (line-number-at-pos)
-                       (pytest-pdb-break--get-node-id)
+                       node-id-parts
                        (pytest-pdb--get-rootdir))))
   (let* ((default-directory root-dir)
          (process-environment (append process-environment nil))
@@ -242,7 +249,7 @@ project/repo root directory containing a pytest config."
          (python-shell-interpreter (or pytest-pdb-break-alt-interpreter
                                        python-shell-interpreter))
          (python-shell-interpreter-args (pytest-pdb-break--make-arg-string
-                                         lnum node-info installed))
+                                         line-no node-id-parts installed))
          (proc (run-python nil nil t))
          (parbuf (current-buffer)))
     ;; Only python- prefixed local vars get cloned in child buffer
