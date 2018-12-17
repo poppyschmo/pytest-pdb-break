@@ -29,6 +29,9 @@ else:
         module_logger = LoggingHelper.get_logger("<module>")
 
 
+pytestPDB = pytest.set_trace.__self__
+
+
 class BreakLoc(namedtuple("BreakpointLocation", "file lnum name")):
     """Data object holding filename, line number, test name."""
     def __new__(cls, *args, **kwargs):
@@ -138,13 +141,10 @@ class PdbBreak:
             raise RuntimeError(msg) from exc
         self.debug and self._l.prinspotl(3)
 
-    def pytest_enter_pdb(self, config, pdb):
-        """Stash pytest-wrapped pdb instance.
-
-        This workaround is necessary because ``pytestPDB.set_trace``
-        doesn't return the instance.
-        """
-        self.last_pdb = pdb
+    if not hasattr(pytestPDB, "_init_pdb"):
+        def pytest_enter_pdb(self, config, pdb):
+            """Stash pytest-wrapped pdb instance."""
+            self.last_pdb = pdb
 
     def trace_handoff(self, frame, event, arg):
         if frame.f_code.co_filename == str(self.wanted.file):
@@ -187,11 +187,13 @@ class PdbBreak:
         # If the "request" feature is in play, pyfuncitem.obj will be this
         # function. Should see if reassigning makes sense.
         from _pytest.capture import capture_fixtures
-        pytest.set_trace(set_break=False)
-        if self.debug:
-            assert self.last_pdb
-            assert self.last_func
-        inst = self.last_pdb
+        if hasattr(self, "pytest_enter_pdb"):
+            pytestPDB.set_trace(set_break=False)
+            if self.debug:
+                assert self.last_pdb
+            inst = self.last_pdb
+        else:
+            inst = self.last_pdb = pytestPDB._init_pdb()
         func = self.last_func
         # XXX maybe only provide context for capsys, ignore others?
         try:

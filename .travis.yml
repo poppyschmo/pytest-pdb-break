@@ -9,6 +9,6 @@ matrix:
     - python: 3.6
       env: TOXENV=py36,py36-pdbpp
     - python: 3.7
-      env: TOXENV=py37,py37-pdbpp
+      env: TOXENV=py37,py37-pdbpp,features
 
 script: tox
