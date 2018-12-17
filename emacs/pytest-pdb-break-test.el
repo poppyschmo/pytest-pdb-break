@@ -668,7 +668,7 @@ class TestFoo:
                        (let (proc)
                          (with-temp-buffer
                            (setq proc (start-process "sleeper" (current-buffer)
-                                                     "sleep" "10"))
+                                                     "sleep" "60"))
                            (set-process-query-on-exit-flag proc nil) ; crutch
                            ,x)
                          ,y)
@@ -713,7 +713,7 @@ class TestFoo:
                       (should (local-variable-p
                                'pytest-pdb-break--config-info))))))
     (ert-info ("Deactivation behavior")
-      (let ((s1 (start-process "s1" (current-buffer) "sleep" "5")))
+      (let ((s1 (start-process "s1" (current-buffer) "sleep" "30")))
         (set-process-query-on-exit-flag s1 nil)
         (rip (inside (pytest-pdb-break-mode +1)
                      (let ((t1 (start-process "t1" (current-buffer) "true")))
