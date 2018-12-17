@@ -665,14 +665,14 @@ class TestFoo:
                 (outside (&rest rest) `(ert-info ("Outside") ,@rest))
                 (rip (x &optional y)
                      `(pytest-pdb-break-test-with-environment
-                       (let (proc)
+                       (let (pytest-pdb-break-processes
+                             proc)
                          (with-temp-buffer
                            (setq proc (start-process "sleeper" (current-buffer)
-                                                     "sleep" "60"))
+                                                     "sleep" "20"))
                            (set-process-query-on-exit-flag proc nil) ; crutch
                            ,x)
-                         ,y)
-                       (setq pytest-pdb-break-processes nil))))
+                         ,y))))
     (ert-info ("Error when buffer has no process")
       (with-temp-buffer
         (let ((exc (should-error (pytest-pdb-break-mode +1))))
@@ -713,17 +713,17 @@ class TestFoo:
                       (should (local-variable-p
                                'pytest-pdb-break--config-info))))))
     (ert-info ("Deactivation behavior")
-      (let ((s1 (start-process "s1" (current-buffer) "sleep" "30")))
+      (let ((s1 (start-process "s1" (current-buffer) "sleep" "20")))
         (set-process-query-on-exit-flag s1 nil)
         (rip (inside (pytest-pdb-break-mode +1)
                      (let ((t1 (start-process "t1" (current-buffer) "true")))
-                       (nconc pytest-pdb-break-processes (list s1 t1))
+                       (setq pytest-pdb-break-processes
+                             (nconc pytest-pdb-break-processes (list s1 t1)))
                        (while (process-live-p t1) (sleep-for 0.001))
                        (should (seq-set-equal-p pytest-pdb-break-processes
                                                 (list proc s1 t1))))
                      (pytest-pdb-break-mode -1)
-                     (should (seq-set-equal-p pytest-pdb-break-processes
-                                              (list s1))))
+                     (should (equal pytest-pdb-break-processes (list s1))))
              (outside (kill-process s1)
                       (should-not pytest-pdb-break--process)
                       (should (advice-member-p
