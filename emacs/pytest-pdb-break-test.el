@@ -24,7 +24,8 @@
     pytest-pdb-break-test-get-config-info-registered
     pytest-pdb-break-test-get-node-id
     pytest-pdb-break-test-make-arg-string
-    pytest-pdb-break-test-minor-mode))
+    pytest-pdb-break-test-minor-mode
+    pytest-pdb-break-test-main-command))
 
 (defvar pytest-pdb-break-test-repo-root
   (file-name-as-directory
@@ -572,7 +573,8 @@ class TestFoo:
         somevar = True
         # comment
         assert somevar
-"))
+")
+  "The first line (1) is a single newline char.")
 
 (ert-deftest pytest-pdb-break-test-get-node-id ()
   ;; For now, assume Elpy branch is infallible, and just test ours
@@ -734,6 +736,60 @@ class TestFoo:
                                    #'python-shell-completion-get-completions))
                       (should-not (local-variable-p 'kill-buffer-hook))
                       (kill-process proc)))))))
+
+;; TODO find the proper built-in way to do this
+(defun pytest-pdb-break-test--expect-timeout (pattern &optional max-secs)
+  "Dumb waiter. Wait MAX-SECS for PATTERN before process mark."
+  (let ((st (float-time))
+        (max-secs (or max-secs 5))
+        found)
+    (while (and (< (- (float-time) st) max-secs)
+                (not (setq found (looking-back pattern nil))))
+      (sleep-for 0.01))
+    found))
+
+(ert-deftest pytest-pdb-break-test-main-command ()
+  ;; Eval: (compile "make PAT=main-command")
+  (pytest-pdb-break-test-ensure-venv
+   'base
+   (let ((sample-source (nth 1 pytest-pdb-break-test--get-node-id-sources))
+         (python-shell-interpreter $pyexe)
+         (pytest-pdb-break-config-info-alist
+          (append pytest-pdb-break-config-info-alist nil))
+         (pytest-pdb-break-processes (append pytest-pdb-break-processes nil))
+         (start-dir default-directory)
+         case-fold-search)
+     (pytest-pdb-break-test-with-python-buffer
+      (insert sample-source)
+      (write-file "test_class.py")
+      (should (and (goto-char (point-min))
+                   (search-forward "assert True")
+                   (goto-char (match-beginning 0))))
+      (call-interactively 'pytest-pdb-break-here)
+      (should (get-buffer "*pytest-PDB[test_class.py]*"))
+      (with-current-buffer "*pytest-PDB[test_class.py]*"
+        (unwind-protect
+            (progn
+              (should (eq major-mode 'inferior-python-mode))
+              (should pytest-pdb-break-mode)
+              (should pytest-pdb-break--process)
+              (should pytest-pdb-break--parent-buffer)
+              (should (equal (buffer-name pytest-pdb-break--parent-buffer)
+                             "test_class.py"))
+              (should (pytest-pdb-break-test--expect-timeout "(Pdb) "))
+              (should (save-excursion
+                        (search-backward-regexp ">.*\\.py(4)test_foo()\n"
+                                                (point-min) t)))
+              (comint-send-string pytest-pdb-break--process "c\n")
+              (should (pytest-pdb-break-test--expect-timeout "finished\n.*"))
+              (let ((cap (buffer-string)))
+                (with-temp-buffer
+                  (insert cap)
+                  (write-file (expand-file-name "cap.out" start-dir)))))
+          (when (process-live-p pytest-pdb-break--process)
+            (set-process-query-on-exit-flag pytest-pdb-break--process nil)
+            (kill-process pytest-pdb-break--process))
+          (kill-buffer)))))))
 
 (provide 'pytest-pdb-break-test)
 ;;; pytest-pdb-break-test ends here

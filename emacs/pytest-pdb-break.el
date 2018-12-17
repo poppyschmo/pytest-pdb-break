@@ -250,7 +250,8 @@ normally a project/repo root directory containing a pytest config."
                                        python-shell-interpreter))
          (python-shell-interpreter-args (pytest-pdb-break--make-arg-string
                                          line-no node-id-parts installed))
-         (proc (run-python nil nil t))
+         (python-shell-buffer-name "pytest-PDB")
+         (proc (run-python nil 'dedicated 'show))
          (parbuf (current-buffer)))
     ;; Only python- prefixed local vars get cloned in child buffer
     (with-current-buffer (process-buffer proc)
