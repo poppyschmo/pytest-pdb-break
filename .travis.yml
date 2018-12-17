@@ -1,14 +1,25 @@
 ---
 sudo: false
 language: python
-dist: xenial
-install: pip install tox
+before_install: deactivate
 
-matrix:
+jobs:
   include:
-    - python: 3.6
-      env: TOXENV=py36,py36-pdbpp
-    - python: 3.7
-      env: TOXENV=py37,py37-pdbpp,features
-
-script: tox
+    - name: tox
+      dist: xenial
+      python: 3.7
+      install:
+        - pyenv shell 3.6 3.7
+        - pip install tox
+      script: tox
+    - name: emacs
+      dist: trusty
+      python: 3.6
+      install:
+        - pyenv shell 3.6
+        - git clone https://github.com/rejeep/evm.git $HOME/.evm
+        - export PATH="$HOME/.evm/bin:$PATH"
+        - evm config path /tmp
+        - evm install $EVM_EMACS --use --skip
+      env: EVM_EMACS=emacs-26.1-travis
+      script: emacs --version && cd emacs && make
