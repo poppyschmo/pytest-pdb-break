@@ -669,9 +669,11 @@ class TestFoo:
                              proc)
                          (with-temp-buffer
                            (setq proc (start-process "sleeper" (current-buffer)
-                                                     "sleep" "20"))
-                           (set-process-query-on-exit-flag proc nil) ; crutch
+                                                     "sleep" "60"))
+                           (should (process-buffer proc)) ; proc dies w. buffer
+                           (set-process-query-on-exit-flag proc nil)
                            ,x)
+                         (while (process-live-p proc) (sleep-for 0.01))
                          ,y))))
     (ert-info ("Error when buffer has no process")
       (with-temp-buffer
@@ -713,7 +715,7 @@ class TestFoo:
                       (should (local-variable-p
                                'pytest-pdb-break--config-info))))))
     (ert-info ("Deactivation behavior")
-      (let ((s1 (start-process "s1" (current-buffer) "sleep" "20")))
+      (let ((s1 (start-process "s1" (current-buffer) "sleep" "30")))
         (set-process-query-on-exit-flag s1 nil)
         (rip (inside (pytest-pdb-break-mode +1)
                      (let ((t1 (start-process "t1" (current-buffer) "true")))
@@ -730,12 +732,10 @@ class TestFoo:
                                'pytest-pdb-break-ad-around-get-completions
                                #'python-shell-completion-get-completions))
                       (pytest-pdb-break-mode -1)
-                      (should (process-live-p proc))
                       (should-not (advice-member-p
                                    'pytest-pdb-break-ad-around-get-completions
                                    #'python-shell-completion-get-completions))
-                      (should-not (local-variable-p 'kill-buffer-hook))
-                      (kill-process proc)))))))
+                      (should-not (local-variable-p 'kill-buffer-hook))))))))
 
 ;; TODO find the proper built-in way to do this
 (defun pytest-pdb-break-test--expect-timeout (pattern &optional max-secs)
