@@ -688,7 +688,10 @@ class TestFoo:
                            (set-process-query-on-exit-flag proc nil)
                            ,x)
                          (while (process-live-p proc) (sleep-for 0.01))
-                         ,y))))
+                         ,y)))
+                (adchk () '(advice-member-p
+                            'pytest-pdb-break-ad-around-get-completions
+                            #'python-shell-completion-get-completions)))
     (ert-info ("Error when buffer has no process")
       (with-temp-buffer
         (let ((exc (should-error (pytest-pdb-break-mode +1))))
@@ -706,14 +709,10 @@ class TestFoo:
     (ert-info ("Normal, no *--proc var")
       (rip (inside (pytest-pdb-break-mode +1)
                    (should (memq proc pytest-pdb-break-processes))
-                   (should (advice-member-p
-                            'pytest-pdb-break-ad-around-get-completions
-                            #'python-shell-completion-get-completions))
+                   (should (adchk))
                    (should (local-variable-p 'kill-buffer-hook))
                    (should-not (eq t (car kill-buffer-hook))))
-           (outside (should-not (advice-member-p
-                                 'pytest-pdb-break-ad-around-get-completions
-                                 #'python-shell-completion-get-completions))
+           (outside (should-not (adchk))
                     (should-not pytest-pdb-break-processes)
                     (should-not (local-variable-p
                                  'pytest-pdb-break--config-info)))))
@@ -742,13 +741,9 @@ class TestFoo:
                      (should (equal pytest-pdb-break-processes (list s1))))
              (outside (kill-process s1)
                       (should-not pytest-pdb-break--process)
-                      (should (advice-member-p
-                               'pytest-pdb-break-ad-around-get-completions
-                               #'python-shell-completion-get-completions))
+                      (should (adchk))
                       (pytest-pdb-break-mode -1)
-                      (should-not (advice-member-p
-                                   'pytest-pdb-break-ad-around-get-completions
-                                   #'python-shell-completion-get-completions))
+                      (should-not (adchk))
                       (should-not (local-variable-p 'kill-buffer-hook))))))))
 
 ;; TODO find the proper built-in way to do this

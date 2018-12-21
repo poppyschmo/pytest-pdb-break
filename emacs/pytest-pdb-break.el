@@ -4,7 +4,7 @@
 ;; URL: https://github.com/poppyschmo/pytest-pdb-break
 ;; Version: 0.0.1
 ;; Keywords: python testing
-;; Package-Requires: ((emacs "26"))
+;; Package-Requires: ((emacs "25"))
 
 ;;; Commentary:
 
@@ -18,9 +18,9 @@
 ;; Note: the completion modifications are useless without pdb++. No idea if
 ;; they hold up when summoned by `company-capf'.
 ;;
-;; TODO finish tests
+;; TODO add tests for completion
 ;; TODO detect presence of pdb++
-;; TODO make completion wrapper work in "interactive" command repl
+;; TODO make completion wrapper work in "interactive" REPL
 ;; TODO tramp
 ;; TODO add option to inject pdb++
 
@@ -246,6 +246,7 @@ normally a project/repo root directory containing a pytest config."
                   python-shell-extra-pythonpaths))
          ;; Make pdb++ prompt trigger non-native-completion fallback
          (python-shell-prompt-pdb-regexp "[(<]*[Ii]?[Pp]db[+>)]+ ")
+         ;; XXX warning in 25.x: Making ... local to ... while let-bound!
          (python-shell-interpreter (or pytest-pdb-break-alt-interpreter
                                        python-shell-interpreter))
          (python-shell-interpreter-args (pytest-pdb-break--make-arg-string
