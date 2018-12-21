@@ -677,8 +677,10 @@ class TestFoo:
                 (outside (&rest rest) `(ert-info ("Outside") ,@rest))
                 (rip (x &optional y)
                      `(pytest-pdb-break-test-with-environment
-                       (let (pytest-pdb-break-processes
-                             proc)
+                       (should-not pytest-pdb-break-processes)
+                       (should-not pytest-pdb-break--parent-buffer)
+                       (should-not pytest-pdb-break--process)
+                       (let (proc)
                          (with-temp-buffer
                            (setq proc (start-process "sleeper" (current-buffer)
                                                      "sleep" "60"))
@@ -702,8 +704,7 @@ class TestFoo:
                      (should (string-match-p "No live process" (cadr exc)))))
            (outside (should-not pytest-pdb-break-processes))))
     (ert-info ("Normal, no *--proc var")
-      (rip (inside (should-not pytest-pdb-break--process)
-                   (pytest-pdb-break-mode +1)
+      (rip (inside (pytest-pdb-break-mode +1)
                    (should (memq proc pytest-pdb-break-processes))
                    (should (advice-member-p
                             'pytest-pdb-break-ad-around-get-completions
@@ -729,7 +730,8 @@ class TestFoo:
     (ert-info ("Deactivation behavior")
       (let ((s1 (start-process "s1" (current-buffer) "sleep" "30")))
         (set-process-query-on-exit-flag s1 nil)
-        (rip (inside (pytest-pdb-break-mode +1)
+        (rip (inside (setq pytest-pdb-break--process proc) ; else latest picked
+                     (pytest-pdb-break-mode +1)
                      (let ((t1 (start-process "t1" (current-buffer) "true")))
                        (setq pytest-pdb-break-processes
                              (nconc pytest-pdb-break-processes (list s1 t1)))

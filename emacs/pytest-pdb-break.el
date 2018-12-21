@@ -211,7 +211,7 @@ If PROCESS is ours, prepend INPUT to results. With IMPORT, ignore."
                   (get-buffer-process (current-buffer)))))
     (if pytest-pdb-break-mode
         (progn
-          (unless proc
+          (unless (process-live-p proc)
             (error "No live process associated with %S" (current-buffer)))
           (cl-pushnew proc pytest-pdb-break-processes)
           (advice-add 'python-shell-completion-get-completions :around
