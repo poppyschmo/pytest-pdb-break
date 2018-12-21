@@ -56,8 +56,20 @@
 
 (eval-when-compile ; BEG
 
+  (unless (fboundp 'seq-set-equal-p) ; 25
+    (defalias 'seq-set-equal-p (lambda (p q)
+                                 (not (cl-set-exclusive-or p q)))))
+
+  (unless (fboundp 'caddr) ; 25
+    (defalias 'caddr (apply-partially #'nth 2)))
+
+  (unless (fboundp 'sxhash-equal) ; 25
+    (defalias 'sxhash-equal 'sxhash))
+
   (defvar pytest-pdb-break-test-temp
-    (file-name-as-directory (concat (temporary-file-directory)
+    (file-name-as-directory (concat (if (fboundp 'temporary-file-directory)
+                                        (temporary-file-directory)
+                                      temporary-file-directory) ; 25
                                     "pytest-pdb-break-test")))
 
   (defun pytest-pdb-break-test--unprefix (name)
@@ -337,7 +349,7 @@ a sound choice)."
 (defmacro pytest-pdb-break-test--query-wrap (&rest body)
   "Run BODY with common assertions/bindings for config-info-helper func."
   `(let (($rootdir (directory-file-name default-directory))
-         ($rv (gensym)))
+         ($rv (cl-gensym)))
      (cl-flet (($callit () (setq $rv (pytest-pdb-break--query-config))))
        ,@body)
      (should (json-plist-p $rv))
