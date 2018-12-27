@@ -96,6 +96,7 @@ function! s:get_node_id(...) abort "{{{
 endfunction "}}}
 
 function! s:query_helper(ctx, ...) abort "{{{
+	" https://docs.pytest.org/en/latest/customize.html#finding-the-rootdir
 	if s:is_custom('query_helper')
 		return call(g:pytest_pdb_break_overrides.query_helper, [a:ctx] + a:000)
 	endif
@@ -110,7 +111,14 @@ function! s:query_helper(ctx, ...) abort "{{{
 		echohl WarningMsg | echo 'Problem calling helper' | echohl None
 		echo 'path: '. s:helper
 		echo 'cmdline: '. string(cmdline)
-		echo 'exc: '. v:exception
+		" Truncation often lops off final exc (most recent call last)
+		if exists('result') && stridx(v:exception, result) == -1
+					\ && v:exception =~# 'E474.*Traceback'
+			echo 'exc: '. matchstr(v:exception, '.*\zeTraceback')
+			echo result
+		else
+			echo 'exc: '. v:exception
+		endif
 		echoerr 'HelperError'
 	endtry
 endfunction "}}}

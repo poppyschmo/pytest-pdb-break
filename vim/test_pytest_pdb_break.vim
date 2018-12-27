@@ -23,6 +23,7 @@ let s:errors = []
 
 call assert_equal(expand('%:p:h') . '/autoload/pytest_pdb_break.vim',
 			\ s:s.get('file'))
+execute 'cd '. s:temphome
 
 
 " Utils -----------------------------------------------------------------------
@@ -81,16 +82,21 @@ function s:runfail(test_func, ...) "{{{
 endfunction "}}}
 
 function s:pybuf(name) "{{{
-	let tempname = s:temphome . '/' . a:name . '.py'
-	call delete(tempname)
-	call assert_true(exists('*s:'. a:name))
+	let tempname = s:temphome . '/' . a:name
+	if a:name =~# '^test_'
+		call delete(tempname, 'rf')
+		call mkdir(tempname)
+	endif
 	let Func = funcref('s:'. a:name)
-	execute 'edit '. tempname
+	execute 'cd '. tempname
+	let scratchbuf = tempname . '/source.py'
+	execute 'edit '. scratchbuf
+	call assert_true(exists('*s:'. a:name))
 	call assert_equal('python', &filetype)
 	call assert_false(exists('b:pytest_pdb_break_context'))
 	call assert_false(exists('b:pytest_pdb_break_python_exe'))
 	function! s:_pybuf_handler() closure
-		execute bufnr(tempname) .'bdelete!'
+		execute 'bdelete!'. scratchbuf
 		call assert_false(bufloaded(tempname))
 		call assert_equal(s:this_buffer, bufname('%'))
 	endfunction
@@ -98,45 +104,64 @@ function s:pybuf(name) "{{{
 endfunction "}}}
 
 function s:capture(func, ...) "{{{
+	" ... => [logfile name][mode]
 	let rv = v:null
+	let extra = []
 	redir => output
 	try
 		silent exec 'let rv = a:func()'
+	catch /.*/
+		let extra += [v:exception]
 	finally
 		redir END
-		let outlines = ['<<< '. string(a:func)] + split(output, "\n")
-		let outname = a:0 && type(a:1) == 1 ? a:1 : bufname('%') . '.log'
-		let mode = a:0 == 2 ? a:2 : ''
+		let outlines = ['<<< '. string(a:func)] + split(output, "\n") + extra
+		let outname = a:0 && type(a:1) == 1 ?
+					\ a:1 : bufname('%') =~# 'source\.py$' ?
+					\ 'log' : fnamemodify(bufname('%'), ':r') . '.log'
+		let mode = a:0 == 2 ? a:2 : 'a'
 		call writefile(outlines, outname, mode)
 	endtry
-	return rv
+	return [rv, output] " exc not included but maybe should be
+endfunction "}}}
+
+function s:write_src(src) "{{{
+	if bufname('%') !~# '^'. s:temphome
+		throw 'Cannot write '. bufname('%')
+	endif
+	normal! dG
+	call append(0, a:src)
+	normal! dG
+	call assert_equal(a:src[-1], getline('$'))
+	silent write
 endfunction "}}}
 
 function s:test_fail(ecode)
 	throw 'Should be '. a:ecode
 endfunction
-call assert_equal(101, s:runfail(funcref('s:test_fail', [101]),
-			\ v:null, v:true))
+call assert_equal(101, s:runfail(funcref('s:test_fail', [101]), v:null, v:true))
 call assert_equal(['Should be 101'], s:errors)
 let s:errors = []
-call assert_equal(102, s:runfail(function('acos', [-1]),
-			\ funcref('s:test_fail', [102]),
-			\ v:true))
+call assert_equal(102, s:runfail(
+			\ function('acos', [-1]), funcref('s:test_fail', [102]), v:true
+			\ ))
 call assert_equal(['Should be 102'], s:errors)
 let s:errors = []
-call s:runfail(function('assert_true', [v:true])) " No v:errors
+call s:runfail(function('assert_true', [v:true])) " No file-scope v:errors yet
 
-function s:test_fake()
+function s:test_utils()
 	call assert_true(v:false)
 endfunction
 " Exit code matches len(v:errors)
 call assert_equal(1, s:capture(
-			\ funcref('s:runfail', [funcref('s:test_fake'), v:null, v:true]),
-			\ s:temphome . '/test_fake.log'))
-call assert_true(len(s:errors) == 1 && s:errors[0] =~# 'test_fake.*line 1')
-call assert_true(len(v:errors) == 1 && v:errors[0] =~# 'test_fake.*line 1')
+			\ funcref('s:runfail', [funcref('s:test_utils'), v:null, v:true]),
+			\ s:temphome . '/test_utils.log', ''
+			\ )[0])
+let s:_soon = len(s:errors) == 1 && s:errors[0] =~# 'test_utils.*line 1'
+			\ && len(v:errors) == 1 && v:errors[0] =~# 'test_utils.*line 1'
 let s:errors = []
 let v:errors = []
+call assert_true(s:_soon)
+unlet s:_soon
 
 
 " is_custom -------------------------------------------------------------------
@@ -206,23 +231,6 @@ call assert_equal(s:g._orig.get_context, s:g.get_context)
 
 " get_node_id -----------------------------------------------------------------
 
-function s:get_python_jump_prev() "{{{
-	" Hijack built-in [m
-	redir => l:cap
-	silent! scriptnames
-	redir END
-	let pat = '\zs\d\+\ze: *' . $VIMRUNTIME . '/ftplugin/python.vim'
-	let mstr = matchstr(l:cap, pat)
-	let funcname = '<SNR>'. mstr .'_Python_jump'
-	" Original b:prev pattern escapes <bar> because it's used in a mapping
-	let args = ['n', '\v^\s*(class|def|async def)>', 'Wb']
-	return funcref(funcname, args)
-endfunction "}}}
-
-let g:pytest_pdb_break_overrides.get_node_id = {-> a:000}
-call assert_equal([1, 2, 3], s:g._orig.get_node_id(1, 2, 3))
-let s:g.get_node_id = s:g._orig.get_node_id
-
 let s:src_two_funcs = [
 			\ 'def test_first():',
 			\ '    varone = True',
@@ -237,14 +245,41 @@ let s:src_two_funcs = [
 			\ '    assert vartwo',
 			\ ]
 
+let s:src_one_class = [
+			\ 'class TestBed:',
+			\ '    def test_one(self):',
+			\ '        varone = 1',
+			\ '        assert varone',
+			\ '',
+			\ '    @deco',
+			\ '    def test_two(self, request):',
+			\ '        vartwo = 2',
+			\ '        assert vartwo',
+			\ ]
+
+function s:_get_python_jump_prev() "{{{
+	" Hijack built-in [m
+	redir => l:cap
+	silent! scriptnames
+	redir END
+	let pat = '\zs\d\+\ze: *' . $VIMRUNTIME . '/ftplugin/python.vim'
+	let mstr = matchstr(l:cap, pat)
+	let funcname = '<SNR>'. mstr .'_Python_jump'
+	" Original b:prev pattern escapes <bar> because it's used in a mapping
+	let args = ['n', '\v^\s*(class|def|async def)>', 'Wb']
+	return funcref(funcname, args)
+endfunction "}}}
+
 function s:test_get_node_id_two_funcs() "{{{
+	" Override
+	let g:pytest_pdb_break_overrides.get_node_id = {-> a:000}
+	call assert_equal([1, 2, 3], s:g._orig.get_node_id(1, 2, 3))
+	let s:g.get_node_id = s:g._orig.get_node_id
+	" Setup
 	let buf = bufname('%')
 	call assert_true(buf =~# '^/')
-	let s:python_jump_prev = s:get_python_jump_prev()
-	call append(0, s:src_two_funcs)
-	normal! dG
-	call assert_equal('    assert vartwo', getline('$'))
-	silent write
+	let s:python_jump_prev = s:_get_python_jump_prev()
+	call s:write_src(s:src_two_funcs)
 	" Baseline
 	call cursor(1, 1)
 	let pos = searchpos('varone')
@@ -279,33 +314,15 @@ function s:test_get_node_id_two_funcs() "{{{
 	call assert_equal([buf, 'test_last'], rv)
 	" No match
 	call cursor(ext_pos)
-	let rv = s:capture(funcref(s:g._orig.get_node_id, [1]))
+	let rv = s:capture(funcref(s:g._orig.get_node_id, [1]))[0]
 	call assert_equal(-1, rv)
 	call assert_equal(ext_pos, getpos('.')[1:2])
 endfunction "}}}
 
-call s:pybuf('test_get_node_id_two_funcs')
-
-let s:src_one_class = [
-			\ 'class TestBed:',
-			\ '    def test_one(self):',
-			\ '        varone = 1',
-			\ '        assert varone',
-			\ '',
-			\ '    @deco',
-			\ '    def test_two(self, request):',
-			\ '        vartwo = 2',
-			\ '        assert vartwo',
-			\ ]
-
 function s:test_get_node_id_one_class() "{{{
 	let buf = bufname('%')
 	call assert_true(buf =~# '^/')
-	let s:python_jump_prev = s:get_python_jump_prev()
-	call append(0, s:src_one_class)
-	normal! dG
-	call assert_equal('        assert vartwo', getline('$'))
-	silent write
+	call s:write_src(s:src_one_class)
 	" Baseline
 	call cursor(1, 1)
 	let pos = searchpos('varone')
@@ -332,8 +349,78 @@ function s:test_get_node_id_one_class() "{{{
 	call assert_equal(buf .'::TestBed::test_one', rv)
 endfunction "}}}
 
+call s:pybuf('test_get_node_id_two_funcs')
 call s:pybuf('test_get_node_id_one_class')
 call assert_equal(s:g._orig.get_node_id, s:g.get_node_id)
+
+
+" query_helper ----------------------------------------------------------------
+
+function s:test_query_helper() "{{{
+	let g:pytest_pdb_break_overrides.query_helper = {-> a:000}
+	call assert_equal([{'a': 1}, 2, 3], s:g._orig.query_helper({'a': 1}, 2, 3))
+	let s:g.query_helper = s:g._orig.query_helper
+	" ERROR - no pytest (unrealistic since get_context() uses shebang)
+	call assert_true(filereadable(s:s.get('helper')))
+	let ctx = {'exe': s:tempdir . '/.venv_bare/bin/python'}
+	call assert_equal(ctx.exe, exepath(ctx.exe), 'exepath mismatch')
+	let [__, out] = s:capture(funcref(s:g.query_helper, [ctx]))
+	call assert_match('Traceback.*ModuleNotFoundError', out)
+	call assert_equal({'exe': s:tempdir . '/.venv_bare/bin/python'}, ctx)
+	" Has pytest
+	let ctx = {'exe': s:tempdir . '/.venv_base/bin/python'}
+	call s:g.query_helper(ctx)
+	call assert_false(ctx.registered)
+	call assert_equal(getcwd(), ctx.rootdir)
+	call assert_equal(s:tempdir . '/.venv_base/bin/python', ctx.exe)
+	" ERROR - Bad option
+	let ctx = {'exe': s:tempdir . '/.venv_base/bin/python'}
+	let [__, out] = s:capture(funcref(s:g.query_helper, [ctx, '--fake']))
+	call assert_match('unrecognized arguments', out)
+	call assert_equal({'exe': s:tempdir . '/.venv_base/bin/python'}, ctx)
+	" Node-id - nonexistent/unsaved file
+	call assert_false(filereadable(bufname('%')))
+	let ctx = {'exe': s:tempdir . '/.venv_base/bin/python'}
+	call s:g.query_helper(ctx, bufname('%'))
+	call assert_false(ctx.registered)
+	call assert_equal(getcwd(), ctx.rootdir)
+	" Node-id - nonexistent/unsaved file and unknown func
+	let ctx = {'exe': s:tempdir . '/.venv_base/bin/python'}
+	call s:g.query_helper(ctx, bufname('%') .'::test_fake')
+	call assert_false(ctx.registered)
+	call assert_equal(getcwd(), ctx.rootdir)
+	" Node-id - real file, unknown func
+	call s:write_src(s:src_two_funcs)
+	let ctx = {'exe': s:tempdir . '/.venv_base/bin/python'}
+	call s:g.query_helper(ctx, bufname('%') .'::test_fake')
+	call assert_false(ctx.registered)
+	call assert_equal(getcwd(), ctx.rootdir)
+	" Node-id - real file, real func
+	let ctx = {'exe': s:tempdir . '/.venv_base/bin/python'}
+	call s:g.query_helper(ctx, bufname('%') .'::test_first')
+	call assert_false(ctx.registered)
+	call assert_equal(getcwd(), ctx.rootdir)
+	" Alt rootdir (empty, not ancestor of CWD or node-id path)
+	let ctx = {'exe': s:tempdir . '/.venv_base/bin/python'}
+	let altroot = s:temphome .'/test_get_context'
+	call s:g.query_helper(ctx, '--rootdir='. altroot, bufname('%'))
+	call assert_false(ctx.registered)
+	call assert_equal(altroot, ctx.rootdir)
+	" Has plugin
+	let ctx = {'exe': s:tempdir . '/.venv_self/bin/python'}
+	call s:g.query_helper(ctx, bufname('%') .'::test_fake')
+	call assert_true(ctx.registered)
+	call assert_equal(getcwd(), ctx.rootdir)
+	" With ini
+	call writefile(['[pytest]', 'addopts = -v'], 'pytest.ini')
+	let ctx = {'exe': s:tempdir . '/.venv_self/bin/python'}
+	call s:g.query_helper(ctx, bufname('%') .'::test_fake')
+	call assert_true(ctx.registered)
+	call assert_equal(getcwd(), ctx.rootdir)
+endfunction "}}}
+
+call s:pybuf('test_query_helper')
+call assert_equal(s:g._orig.query_helper, s:g.query_helper)
 
 
 quitall!
