@@ -15,17 +15,17 @@ endif
 let s:temphome = s:tempdir .'/vim'
 call mkdir(s:temphome, 'p')
 
-let g:pytest_pdb_break_testing = 1
+let g:pytest_pdb_break_testing = {}
 let s:g = g:pytest_pdb_break_overrides
 let s:g.runner = {-> matchstr(expand('<sfile>'), '<SNR>\zs\d\+\ze_call.*$')}
 let s:pfx = printf('<SNR>%s_', pytest_pdb_break#run())
 let s:this_buffer = bufname('%')
-let s:s = s:g._s
-let s:o = s:g._orig
+let s:s = g:pytest_pdb_break_testing.s
+let s:o = g:pytest_pdb_break_testing.o
 let s:errors = []
 
 if expand('%:p:h') . '/autoload/pytest_pdb_break.vim' != s:s.get('file')
-	cquit!
+	cquit! " bad &rtp or cwd or s:pfx
 endif
 execute 'cd '. s:temphome
 

@@ -194,9 +194,9 @@ let s:defuncs = {'get_context': funcref('s:get_context'),
 				\ 'split': funcref('s:split')}
 
 if exists('g:pytest_pdb_break_testing')
-	let g:pytest_pdb_break_overrides._s = {
+	let g:pytest_pdb_break_testing.s = {
 				\ 'exists': {e -> exists(e)},
 				\ 'get': {v -> eval('s:'. v)}
 				\ }
-	let g:pytest_pdb_break_overrides._orig = copy(s:defuncs)
+	let g:pytest_pdb_break_testing.o = copy(s:defuncs)
 endif
