@@ -1,3 +1,5 @@
+scriptencoding utf-8
+
 if !has('unix')
 	127cquit!
 endif
@@ -14,13 +16,9 @@ let s:temphome = s:tempdir .'/vim'
 call mkdir(s:temphome, 'p')
 
 " Get autoload script's # (not ours)
-function s:sid()
-	return matchstr(expand('<sfile>'), '<SNR>\zs\d\+\ze_runner.*$')
-endfun
 let s:g = g:pytest_pdb_break_overrides
-let s:g.runner = funcref('s:sid')
+let s:g.runner = {-> matchstr(expand('<sfile>'), '<SNR>\zs\d\+\ze_runner.*$')}
 let s:pfx = printf('<SNR>%s_', pytest_pdb_break#run())
-let s:g.runner = s:g._orig.runner
 let s:this_buffer = bufname('%')
 let s:s = s:g._s
 let s:errors = []
@@ -48,6 +46,16 @@ function s:_report() "{{{
 		echo join(s:errors, '')
 		redir END
 	endif
+endfunction "}}}
+
+function s:has_overrides() "{{{
+	return len(filter(copy(s:g._orig), 's:g[v:key] != v:val'))
+endfunction "}}}
+
+function s:restore_overrides() "{{{
+	for k in keys(s:g._orig)
+		let s:g[k] = s:g._orig[k]
+	endfor
 endfunction "}}}
 
 function s:runfail(test_func, ...) "{{{
@@ -81,6 +89,7 @@ function s:runfail(test_func, ...) "{{{
 		if ec && !defer
 			execute ec .'cquit!'
 		endif
+		call s:restore_overrides()
 	endtry
 	return ec
 endfunction "}}}
@@ -139,6 +148,12 @@ function s:write_src(src) "{{{
 	silent write
 endfunction "}}}
 
+call assert_notequal(s:g.runner, s:g._orig.runner)
+call assert_equal(1, s:has_overrides())
+call s:restore_overrides()
+call assert_false(s:has_overrides())
+call s:runfail(function('assert_true', [v:true])) " No file-scope v:errors yet
+
 function s:test_fail(ecode)
 	throw 'Should be '. a:ecode
 endfunction
@@ -164,7 +179,7 @@ let s:_soon = len(s:errors) == 1 && s:errors[0] =~# 'test_utils.*line 1'
 			\ && len(v:errors) == 1 && v:errors[0] =~# 'test_utils.*line 1'
 let s:errors = []
 let v:errors = []
-call assert_true(s:_soon)
+call s:runfail(function('assert_true', [s:_soon])) " No file-scope v:errors yet
 unlet s:_soon
 
 
@@ -172,34 +187,31 @@ unlet s:_soon
 
 function s:test_is_custom() "{{{
 	call assert_true(exists('*'. s:pfx .'is_custom'))
-	let Ic = funcref(s:pfx . 'is_custom')
+	let IsCust = funcref(s:pfx . 'is_custom')
 	let overrideables = [
 				\ 'extend_python_path', 'get_context', 'get_node_id',
 				\ 'query_helper', 'runner', 'split'
 				\ ]
+	call assert_equal(overrideables, sort(keys(s:g._orig)))
 	for name in overrideables
-		call assert_false(Ic(name), name .' has not been overridden')
+		call assert_false(IsCust(name), name .' has not been overridden')
 	endfor
 	" XXX why does this propagate (not handled by assert_fails)?
 	try
-		call assert_fails(call(Ic, ['is_custom']))
+		call assert_fails(call(IsCust, ['is_custom']))
 	catch /.*/
 		call assert_exception('is_custom is not overrideable')
 	endtry
-	call assert_equal(overrideables, sort(keys(s:g._orig)))
-	" Equiv exp below, otherwise would need closure over overrideables
-	function! g:pytest_pdb_break_overrides.runner(...)
-		call assert_true(exists('self'))
-		call assert_equal(self.get_context, s:g._orig.get_context)
-		call assert_equal(sort(keys(s:g._orig)),
+	function! g:pytest_pdb_break_overrides.runner(...) closure
+		call assert_equal(self, s:g)
+		call assert_equal(overrideables,
 					\ sort(filter(keys(self), 'v:val !~# "^_"')))
-		call assert_equal(['foo', 'bar'], a:000)
-		return v:true
+		return ['foo', 'bar'] == a:000
 	endfunction
-	call assert_true(Ic('runner'))
+	call assert_true(IsCust('runner'))
 	call assert_notequal(s:g._orig.runner, s:g.runner)
 	call assert_true(g:pytest_pdb_break_overrides.runner('foo', 'bar'))
-	let s:g.runner = s:g._orig.runner " reset
+	let s:g.runner = s:g._orig.runner
 endfunction "}}}
 
 call s:runfail(funcref('s:test_is_custom'))
@@ -241,7 +253,6 @@ function s:test_get_context() "{{{
 endfunction "}}}
 
 call s:pybuf('test_get_context')
-call assert_equal(s:g._orig.get_context, s:g.get_context)
 
 
 " get_node_id -----------------------------------------------------------------
@@ -366,7 +377,6 @@ endfunction "}}}
 
 call s:pybuf('test_get_node_id_two_funcs')
 call s:pybuf('test_get_node_id_one_class')
-call assert_equal(s:g._orig.get_node_id, s:g.get_node_id)
 
 
 " query_helper ----------------------------------------------------------------
@@ -435,7 +445,6 @@ function s:test_query_helper() "{{{
 endfunction "}}}
 
 call s:pybuf('test_query_helper')
-call assert_equal(s:g._orig.query_helper, s:g.query_helper)
 
 
 " extend_python_path ----------------------------------------------------------
@@ -469,6 +478,65 @@ function s:test_extend_python_path() "{{{
 endfunction "}}}
 
 call s:runfail(funcref('s:test_extend_python_path'))
+
+
+" runner ----------------------------------------------------------------------
+
+function s:test_runner() "{{{
+	" Mock split, get_node_id
+	let thisbuf = bufname('%')
+	let g:pytest_pdb_break_overrides.split = {-> a:000}
+	let g:pytest_pdb_break_overrides.get_node_id =
+				\ {-> [thisbuf, 'test_first']}
+	let b:pytest_pdb_break_python_exe = '/tmp/fakepython'
+	let ctx = s:g.get_context()
+	" Inject plugin
+	let ctx.registered = v:false
+	let rv = s:g.runner('⁉')
+	call assert_equal([
+				\ 'env', 'PYTHONPATH='. s:s.get('home'),
+				\ '/tmp/fakepython', '-mpytest'
+				\ ], ctx.last.cmd)
+	call assert_equal(['⁉'], ctx.last.uopts)
+	call assert_equal([
+				\ '-p', 'pytest_pdb_break',
+				\ '--break='. thisbuf .':1'
+				\ ], ctx.last.opts)
+	call assert_equal([thisbuf, 'test_first'], ctx.last.node_id)
+	call assert_equal(
+				\ ctx.last.cmd
+				\ + ctx.last.uopts
+				\ + ctx.last.opts
+				\ + [thisbuf .'::test_first'],
+				\ rv)
+	" Plugin present
+	let ctx.registered = v:true
+	let rv = s:g.runner('⁉')
+	call assert_equal([
+				\ '/tmp/fakepython', '-mpytest',
+				\ '⁉', '--break='. thisbuf .':1',
+				\ thisbuf.'::test_first'
+				\ ], rv)
+	" Change in args triggers call to query_helper (mocked)
+	let s:g.query_helper = {-> execute('echon "query_helper ran"')}
+	let [rv, out] = s:capture(funcref(s:g.runner, []))
+	call assert_equal('query_helper ran', out)
+	call assert_equal([], ctx.last.uopts)
+	let expected = [
+				\ '/tmp/fakepython', '-mpytest',
+				\ '--break='. thisbuf .':1',
+				\ thisbuf.'::test_first'
+				\ ]
+	call assert_equal(expected, rv)
+	" As does absence of registration check
+	unlet ctx.registered
+	let s:g.query_helper = {-> extend(ctx, {'registered': v:true})}
+	let rv = s:g.runner()
+	call assert_true(exists('ctx.registered'))
+	call assert_equal(expected, rv)
+endfunction "}}}
+
+call s:pybuf('test_runner')
 
 " -----------------------------------------------------------------------------
 quitall!

@@ -1,3 +1,5 @@
+scriptencoding utf-8
+
 let s:file = expand('<sfile>')
 
 function! pytest_pdb_break#run(...) abort
@@ -148,7 +150,7 @@ function! s:runner(...) abort "{{{
 	let arg = join(nid, '::')
 	let opts = []
 	let last = get(ctx, 'last', {})
-	if !has_key(ctx, 'registered') || a:000 != get(last, 'uopts', a:000)
+	if !has_key(ctx, 'registered') || a:000 != get(last, 'uopts', ["\u2049"])
 		try
 			call call('s:query_helper', [ctx] + a:000 + [arg])
 		catch /.*HelperError/
