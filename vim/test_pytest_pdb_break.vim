@@ -1,16 +1,12 @@
 if !has('unix')
-	cquit!
+	127cquit!
 endif
 
-" Write python source files for inspection
-let s:want_write = exists('$PYTEST_PDB_BREAK_TEST_VIM_WRITE')
-			\ && $PYTEST_PDB_BREAK_TEST_VIM_WRITE ==# '1'
-if s:want_write
-	let s:temphome = '/tmp/pytest-pdb-break-test/vim'
-	call mkdir(s:temphome, 'p')
-else
-	let s:temphome = fnamemodify(tempname(), ':h')
+let s:temphome = $PYTEST_PDB_BREAK_TEST_TEMPDIR
+if empty(s:temphome) || s:temphome !~# '^\%(/[^/]\+\)\{2,}'
+	126cquit!
 endif
+call mkdir(s:temphome, 'p')
 
 " Get autoload script's # (not ours)
 function s:sid()
@@ -84,12 +80,8 @@ function s:runfail(test_func, ...) "{{{
 endfunction "}}}
 
 function s:pybuf(name) "{{{
-	if s:want_write
-		let tempname = s:temphome . '/' . a:name . '.py'
-		call delete(tempname)
-	else
-		let tempname = tempname() . '-pytest_pdb_break.py'
-	endif
+	let tempname = s:temphome . '/' . a:name . '.py'
+	call delete(tempname)
 	call assert_true(exists('*s:'. a:name))
 	let Func = funcref('s:'. a:name)
 	execute 'edit '. tempname
@@ -111,12 +103,10 @@ function s:capture(func, ...) "{{{
 		silent exec 'let rv = a:func()'
 	finally
 		redir END
-		if s:want_write
-			let outlines = ['<<< '. string(a:func)] + split(output, "\n")
-			let outname = a:0 && type(a:1) == 1 ? a:1 : bufname('%') . '.log'
-			let mode = a:0 == 2 ? a:2 : ''
-			call writefile(outlines, outname, mode)
-		endif
+		let outlines = ['<<< '. string(a:func)] + split(output, "\n")
+		let outname = a:0 && type(a:1) == 1 ? a:1 : bufname('%') . '.log'
+		let mode = a:0 == 2 ? a:2 : ''
+		call writefile(outlines, outname, mode)
 	endtry
 	return rv
 endfunction "}}}
@@ -254,9 +244,7 @@ function s:t_get_node_id_two_funcs() "{{{
 	call append(0, s:src_two_funcs)
 	normal! dG
 	call assert_equal('    assert vartwo', getline('$'))
-	if s:want_write
-		silent write
-	endif
+	silent write
 	" Baseline
 	call cursor(1, 1)
 	let pos = searchpos('varone')
@@ -317,9 +305,7 @@ function s:t_get_node_id_one_class() "{{{
 	call append(0, s:src_one_class)
 	normal! dG
 	call assert_equal('        assert vartwo', getline('$'))
-	if s:want_write
-		silent write
-	endif
+	silent write
 	" Baseline
 	call cursor(1, 1)
 	let pos = searchpos('varone')

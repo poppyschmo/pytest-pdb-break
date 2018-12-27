@@ -1,4 +1,6 @@
 NVIM ?= nvim
+PYTEST_PDB_BREAK_TEST_TEMPDIR ?= /tmp/pytest-pdb-break-test/vim
+export PYTEST_PDB_BREAK_TEST_TEMPDIR
 
 .phony: neovim
 
