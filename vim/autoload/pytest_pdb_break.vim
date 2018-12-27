@@ -100,38 +100,19 @@ function! s:query_helper(ctx, ...) abort "{{{
 		return call(g:pytest_pdb_break_overrides.query_helper, [a:ctx] + a:000)
 	endif
 	let context = a:ctx
-	" XXX need to clarify the effect of including a specific node-id vs any
-	" (valid) node-id when querying for a particular project/exe context. If
-	" two ids for one context can produce distinct outputs, it would defy the
-	" purpose of this IF block, which only runs when nothing's been mapped for
-	" this lookup.  This may ultimately mean exe paths shouldn't be used as
-	" keys for the context dict.
-	if has('nvim')
-		let jd = {'stdout_buffered': v:true, 'stderr_buffered': v:true}
-		let lines = readfile(s:helper)
-		let jd.id = jobstart([context.exe, '-'] + a:000, jd)
-		let jd.sent = chansend(jd.id, lines)
-		call chanclose(jd.id, 'stdin')
-		let jd.exit = jobwait([jd.id], 1000)[0]
-		if jd.exit
-			let context.helper_rv = jd
-			echo join(jd.stderr, "\n")
-			throw 'Error querying pytest'
-		endif
-		call extend(context, json_decode(jd.stdout[0]))
-	else
-		" call ch_logfile('channellog', 'a')
-		let jd = {'in_io': 'file', 'in_name': s:helper}
-		let job = job_start([context.exe, '-'] + a:000, jd)
-		let jd.stdout = ch_readraw(job)
-		call extend(jd, job_info(job))
-		if jd.exitval || empty(jd.stdout)
-			let context.helper_rv = jd
-			echo ch_readraw(job, {'part': 'err'})
-			throw 'Error querying pytest'
-		endif
-		call extend(context, json_decode(jd.stdout))
-	endif
+	let cmdline = [context.exe, '-'] + a:000
+	let lines = readfile(s:helper)
+	try
+		let result = system(cmdline, lines)
+		let decoded = json_decode(result)
+		call extend(context, decoded)
+	catch /.*/
+		echohl WarningMsg | echo 'Problem calling helper' | echohl None
+		echo 'path: '. s:helper
+		echo 'cmdline: '. string(cmdline)
+		echo 'exc: '. v:exception
+		echoerr 'HelperError'
+	endtry
 endfunction "}}}
 
 function! s:extend_python_path(ctx) abort "{{{
@@ -161,7 +142,11 @@ function! s:runner(...) abort "{{{
 	let opts = []
 	let last = get(ctx, 'last', {})
 	if !has_key(ctx, 'registered') || a:000 != get(last, 'uopts', a:000)
-		call call('s:query_helper', [ctx] + a:000 + [arg])
+		try
+			call call('s:query_helper', [ctx] + a:000 + [arg])
+		catch /.*HelperError/
+			return
+		endtry
 	endif
 	if !ctx.registered
 		let preenv = s:extend_python_path(ctx)
@@ -174,7 +159,7 @@ function! s:runner(...) abort "{{{
 endfunction "}}}
 
 function! s:split(...) abort "{{{
-	if exists('g:pytest_pdb_break_overrides.split')
+	if s:is_custom('split')
 		return call(g:pytest_pdb_break_overrides.split, a:000)
 	endif
 	let context = s:get_context()
