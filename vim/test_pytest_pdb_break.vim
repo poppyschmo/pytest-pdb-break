@@ -8,6 +8,8 @@ let s:want_write = exists('$PYTEST_PDB_BREAK_TEST_VIM_WRITE')
 if s:want_write
 	let s:temphome = '/tmp/pytest-pdb-break-test/vim'
 	call mkdir(s:temphome, 'p')
+else
+	let s:temphome = fnamemodify(tempname(), ':h')
 endif
 
 " Get autoload script's # (not ours)
@@ -20,10 +22,68 @@ let s:pfx = printf('<SNR>%s_', pytest_pdb_break#run())
 let s:g.runner = s:g._orig.runner
 let s:this_buffer = bufname('%')
 let s:s = s:g._s
+let s:errors = []
+
 call assert_equal(expand('%:p:h') . '/autoload/pytest_pdb_break.vim',
 			\ s:s.get('file'))
 
-function s:pybuf(name)
+
+" Utils -----------------------------------------------------------------------
+
+function s:_fmterrors(k, v) "{{{
+	let pat = '\(^.*\)\(line \d\+\): \(.*\)'
+	let F = {m -> printf("[%d] %s(%s)\n\t%s\n", a:k,
+				\	fnamemodify(m[1], ':t'), m[2], m[3])}
+	return substitute(a:v, pat, F, '')
+endfunction "}}}
+
+function s:_report() "{{{
+	let s:errors += map(copy(v:errors), funcref('s:_fmterrors'))
+	if has('nvim')
+		echo join(s:errors, '')
+	elseif exists('$VIMTEMP')
+		execute 'redir > ' . $VIMTEMP
+		echo join(s:errors, '')
+		redir END
+	endif
+endfunction "}}}
+
+function s:runfail(test_func, ...) "{{{
+	" ... => [exit hander][defer]
+	let ec = 100
+	let Handler = a:0 ? a:1 : v:null
+	let defer = a:0 == 2 ? a:2 : v:false
+	try
+		call a:test_func()
+		let ec = 0
+	catch /.*/
+		call add(s:errors, v:exception)
+		let m = matchlist(v:exception, '^Vim\%((\a\+)\)\=:E\(\d\+\)')
+		let ec = get(m, 1, 101)
+	finally
+		if type(Handler) == 2
+			try
+				call Handler()
+			catch /.*/
+				call add(s:errors, v:exception)
+				let ec = 102
+			endtry
+		endif
+		if !empty(s:errors) && !defer
+			echo join(s:errors, "\n") . "\n"
+		endif
+		if !empty(v:errors)
+			let ec = len(v:errors)
+			call s:_report()
+		endif
+		if ec && !defer
+			execute ec .'cquit!'
+		endif
+	endtry
+	return ec
+endfunction "}}}
+
+function s:pybuf(name) "{{{
 	if s:want_write
 		let tempname = s:temphome . '/' . a:name . '.py'
 		call delete(tempname)
@@ -36,16 +96,15 @@ function s:pybuf(name)
 	call assert_equal('python', &filetype)
 	call assert_false(exists('b:pytest_pdb_break_context'))
 	call assert_false(exists('b:pytest_pdb_break_python_exe'))
-	try
-		call Func()
-	finally
+	function! s:_pybuf_handler() closure
 		execute bufnr(tempname) .'bdelete!'
 		call assert_false(bufloaded(tempname))
 		call assert_equal(s:this_buffer, bufname('%'))
-	endtry
-endfunction
+	endfunction
+	call s:runfail(Func, funcref('s:_pybuf_handler'))
+endfunction "}}}
 
-function s:capture(func, ...)
+function s:capture(func, ...) "{{{
 	let rv = v:null
 	redir => output
 	try
@@ -54,56 +113,82 @@ function s:capture(func, ...)
 		redir END
 		if s:want_write
 			let outlines = ['<<< '. string(a:func)] + split(output, "\n")
-			let outname = bufname('%') . '.log'
-			let mode = a:0 ? a:1 : ''
+			let outname = a:0 && type(a:1) == 1 ? a:1 : bufname('%') . '.log'
+			let mode = a:0 == 2 ? a:2 : ''
 			call writefile(outlines, outname, mode)
 		endif
 	endtry
 	return rv
+endfunction "}}}
+
+function s:t_fail(ecode)
+	throw 'Should be '. a:ecode
 endfunction
+call assert_equal(101, s:runfail(funcref('s:t_fail', [101]),
+			\ v:null, v:true))
+call assert_equal(['Should be 101'], s:errors)
+let s:errors = []
+call assert_equal(102, s:runfail(function('acos', [-1]),
+			\ funcref('s:t_fail', [102]),
+			\ v:true))
+call assert_equal(['Should be 102'], s:errors)
+let s:errors = []
+call s:runfail(function('assert_true', [v:true])) " No v:errors
+
+function s:t_fake()
+	call assert_true(v:false)
+endfunction
+" Exit code matches len(v:errors)
+call assert_equal(1, s:capture(
+			\ funcref('s:runfail', [funcref('s:t_fake'), v:null, v:true]),
+			\ s:temphome . '/t_fake.log'))
+call assert_true(len(s:errors) == 1 && s:errors[0] =~# 't_fake.*line 1')
+call assert_true(len(v:errors) == 1 && v:errors[0] =~# 't_fake.*line 1')
+let s:errors = []
+let v:errors = []
 
 
 " is_custom -------------------------------------------------------------------
 
-call assert_true(exists('*'. s:pfx .'is_custom'))
-let s:is_custom = funcref(s:pfx . 'is_custom')
+function s:t_is_custom() "{{{
+	call assert_true(exists('*'. s:pfx .'is_custom'))
+	let Ic = funcref(s:pfx . 'is_custom')
+	let overrideables = [
+				\ 'check_plugin', 'extend_python_path',
+				\ 'get_context', 'get_node_id',
+				\ 'runner', 'split'
+				\ ]
+	for name in overrideables
+		call assert_false(Ic(name), name .' has not been overridden')
+	endfor
+	" XXX why does this propagate (not handled by assert_fails)?
+	try
+		call assert_fails(call(Ic, ['is_custom']))
+	catch /.*/
+		call assert_exception('is_custom is not overrideable')
+	endtry
+	call assert_equal(overrideables, sort(keys(s:g._orig)))
+	" Equiv exp below, otherwise would need closure over overrideables
+	function! g:pytest_pdb_break_overrides.runner(...)
+		call assert_true(exists('self'))
+		call assert_equal(self.get_context, s:g._orig.get_context)
+		call assert_equal(sort(keys(s:g._orig)),
+					\ sort(filter(keys(self), 'v:val !~# "^_"')))
+		call assert_equal(['foo', 'bar'], a:000)
+		return v:true
+	endfunction
+	call assert_true(Ic('runner'))
+	call assert_notequal(s:g._orig.runner, s:g.runner)
+	call assert_true(g:pytest_pdb_break_overrides.runner('foo', 'bar'))
+	let s:g.runner = s:g._orig.runner " reset
+endfunction "}}}
 
-let s:overrideables = [
-			\ 'check_plugin', 'extend_python_path',
-			\ 'get_context', 'get_node_id',
-			\ 'runner', 'split'
-			\ ]
-call assert_equal(s:overrideables, sort(keys(s:g._orig)))
-
-for name in s:overrideables
-	call assert_false(s:is_custom(name), name .' has not been overridden')
-endfor
-
-" XXX why does this propagate (not handled by assert_fails)?
-try
-	call assert_fails(call(s:is_custom, ['is_custom']))
-catch /.*/
-	call assert_exception('is_custom is not overrideable')
-endtry
-
-function! g:pytest_pdb_break_overrides.runner(...)
-	call assert_true(exists('self'))
-	call assert_equal(self.get_context, s:g._orig.get_context)
-	call assert_equal(s:overrideables,
-				\ sort(filter(keys(self), 'v:val !~# "^_"')))
-	call assert_equal(['foo', 'bar'], a:000)
-	return v:true
-endfunction
-
-call assert_true(s:is_custom('runner'))
-call assert_notequal(s:g._orig.runner, s:g.runner)
-call assert_true(g:pytest_pdb_break_overrides.runner('foo', 'bar'))
-let s:g.runner = s:g._orig.runner " reset
+call s:runfail(funcref('s:t_is_custom'))
 
 
 " get_context -----------------------------------------------------------------
 
-function s:t_get_context()
+function s:t_get_context() "{{{
 	call assert_false(s:s.exists('s:plugin'))
 	call assert_false(s:s.exists('s:home'))
 	call assert_false(s:s.exists('s:helper'))
@@ -123,14 +208,15 @@ function s:t_get_context()
 	call assert_true(has_key(b:pytest_pdb_break_context, '/tmp/fakepython'))
 	let after = map(['plugin', 'home', 'helper'], 's:s.get(v:val)')
 	call assert_equal(before, after)
-endfunction
+endfunction "}}}
+
 call s:pybuf('t_get_context')
 call assert_equal(s:g._orig.get_context, s:g.get_context)
 
 
 " get_node_id -----------------------------------------------------------------
 
-function s:get_python_jump_prev()
+function s:get_python_jump_prev() "{{{
 	" Hijack built-in [m
 	redir => l:cap
 	silent! scriptnames
@@ -141,7 +227,7 @@ function s:get_python_jump_prev()
 	" Original b:prev pattern escapes <bar> because it's used in a mapping
 	let args = ['n', '\v^\s*(class|def|async def)>', 'Wb']
 	return funcref(funcname, args)
-endfunction
+endfunction "}}}
 
 let g:pytest_pdb_break_overrides.get_node_id = {-> a:000}
 call assert_equal([1, 2, 3], s:g._orig.get_node_id(1, 2, 3))
@@ -161,12 +247,12 @@ let s:src_two_funcs = [
 			\ '    assert vartwo',
 			\ ]
 
-function s:t_get_node_id_two_funcs()
+function s:t_get_node_id_two_funcs() "{{{
 	let buf = bufname('%')
-	call assert_true(buf =~ '^/')
+	call assert_true(buf =~# '^/')
 	let s:python_jump_prev = s:get_python_jump_prev()
 	call append(0, s:src_two_funcs)
-	normal dG
+	normal! dG
 	call assert_equal('    assert vartwo', getline('$'))
 	if s:want_write
 		silent write
@@ -200,7 +286,7 @@ function s:t_get_node_id_two_funcs()
 	call assert_equal([buf, 'test_first'], rv)
 	" Last line
 	call cursor(line('$'), 1)
-	normal $
+	normal! $
 	let rv = s:g._orig.get_node_id(1)
 	call assert_equal([buf, 'test_last'], rv)
 	" No match
@@ -208,7 +294,8 @@ function s:t_get_node_id_two_funcs()
 	let rv = s:capture(funcref(s:g._orig.get_node_id, [1]))
 	call assert_equal(-1, rv)
 	call assert_equal(ext_pos, getpos('.')[1:2])
-endfunction
+endfunction "}}}
+
 call s:pybuf('t_get_node_id_two_funcs')
 
 let s:src_one_class = [
@@ -223,12 +310,12 @@ let s:src_one_class = [
 			\ '        assert vartwo',
 			\ ]
 
-function s:t_get_node_id_one_class()
+function s:t_get_node_id_one_class() "{{{
 	let buf = bufname('%')
-	call assert_true(buf =~ '^/')
+	call assert_true(buf =~# '^/')
 	let s:python_jump_prev = s:get_python_jump_prev()
 	call append(0, s:src_one_class)
-	normal dG
+	normal! dG
 	call assert_equal('        assert vartwo', getline('$'))
 	if s:want_write
 		silent write
@@ -257,32 +344,10 @@ function s:t_get_node_id_one_class()
 	call assert_true(search('^$') > 0)
 	let rv = s:g._orig.get_node_id()
 	call assert_equal(buf .'::TestBed::test_one', rv)
-endfunction
+endfunction "}}}
 
 call s:pybuf('t_get_node_id_one_class')
 call assert_equal(s:g._orig.get_node_id, s:g.get_node_id)
 
 
-" Report ----------------------------------------------------------------------
-
-function s:fmterrors(k, v)
-	let pat = '\(^.*\)\(line \d\+\): \(.*\)'
-	let F = {m -> printf("[%d] %s(%s)\n\t%s\n", a:k,
-				\	fnamemodify(m[1], ':t'), m[2], m[3])}
-	return substitute(a:v, pat, F, '')
-endfunction
-
-if len(v:errors)
-	let s:errors = map(v:errors, funcref('s:fmterrors'))
-	if has('nvim')
-		echo join(s:errors, '')
-	elseif exists('$VIMTEMP')
-		execute 'redir > ' . $VIMTEMP
-		echo join(s:errors, '')
-		redir END
-	endif
-	cquit!
-endif
-
 quitall!
-
