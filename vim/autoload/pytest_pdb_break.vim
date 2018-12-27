@@ -55,18 +55,32 @@ function! s:check_plugin(ctx, ...) "{{{
 	if !has_key(context, 'registered')
 		" Heard somewhere that using job control instead of system() can help
 		" with shell-quoting issues. No idea.
-		let jd = {'stdout_buffered': v:true, 'stderr_buffered': v:true}
-		let lines = readfile(s:helper)
-		let jd.id = jobstart([context.exe, '-'] + a:000, jd)
-		let jd.sent = chansend(jd.id, lines)
-		call chanclose(jd.id, 'stdin')
-		let jd.exit = jobwait([jd.id], 1000)[0]
-		if jd.exit
-			let context.helper_rv = jd
-			echo join(jd.stderr, "\n")
-			throw "Error querying pytest"
+		if has('nvim')
+			let jd = {'stdout_buffered': v:true, 'stderr_buffered': v:true}
+			let lines = readfile(s:helper)
+			let jd.id = jobstart([context.exe, '-'] + a:000, jd)
+			let jd.sent = chansend(jd.id, lines)
+			call chanclose(jd.id, 'stdin')
+			let jd.exit = jobwait([jd.id], 1000)[0]
+			if jd.exit
+				let context.helper_rv = jd
+				echo join(jd.stderr, "\n")
+				throw "Error querying pytest"
+			endif
+			call extend(context, json_decode(jd.stdout[0]))
+		else
+			" call ch_logfile('channellog', 'a')
+			let jd = {'in_io': 'file', 'in_name': s:helper}
+			let job = job_start([context.exe, '-'] + a:000, jd)
+			let jd.stdout = ch_readraw(job)
+			call extend(jd, job_info(job))
+			if jd.exitval || jd.stdout == ""
+				let context.helper_rv = jd
+				echo ch_readraw(job, {"part": "err"})
+				throw "Error querying pytest"
+			endif
+			call extend(context, json_decode(jd.stdout))
 		endif
-		call extend(context, json_decode(jd.stdout[0]))
 	endif
 	return context.registered
 endfunction "}}}
@@ -139,10 +153,15 @@ function! s:split(...) "{{{
 		return call(g:pytest_pdb_break_overrides.split, a:000)
 	endif
 	let context = s:get_context()
-	execute ((winwidth(0) + 0.0) / winheight(0) > 2.5) ? 'vnew' : 'new'
-	let context.job = termopen(a:000, {'cwd': context.rootdir})
-	let @@ = winnr()
-	execute bufwinnr(bufnr('%')) . 'wincmd w'
-	execute @@ . 'wincmd w'
-	redraw | startinsert
+	let vert = (winwidth(0) + 0.0) / winheight(0) > 2.5
+	if has('nvim')
+		execute vert ? 'vnew' : 'new'
+		let context.job = termopen(a:000, {'cwd': context.rootdir})
+		let @@ = winnr()
+		execute bufwinnr(bufnr('%')) . 'wincmd w'
+		execute @@ . 'wincmd w'
+		redraw | startinsert
+	else
+		let context.job = term_start(a:000, {'vertical': vert})
+	endif
 endfunction "}}}
