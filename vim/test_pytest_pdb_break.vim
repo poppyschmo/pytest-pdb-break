@@ -423,4 +423,37 @@ call s:pybuf('test_query_helper')
 call assert_equal(s:g._orig.query_helper, s:g.query_helper)
 
 
+" extend_python_path ----------------------------------------------------------
+
+function s:test_extend_python_path() "{{{
+	" Basic vim reminders
+	let $PYTHONPATH = ''
+	call assert_false(exists('$PYTHONPATH'))
+	call assert_true(empty($PYTHONPATH))
+	"
+	let ctx = {'PP': '/tmp/fake'}
+	call assert_equal(ctx.PP, s:g.extend_python_path(ctx))
+	unlet ctx.PP
+	let home = s:s.get('home')
+	call assert_true(filereadable(home . '/tox.ini'))
+	call assert_equal(home, s:g.extend_python_path(ctx))
+	call assert_equal(ctx.PP, home)
+	unlet ctx.PP
+	"
+	let first = s:temphome . '/first'
+	let $PYTHONPATH = first
+	call assert_equal(home .':'. first, s:g.extend_python_path(ctx))
+	call assert_equal(home .':'. first, ctx.PP)
+	" No uniq-like filtering
+	let $PYTHONPATH = ctx.PP
+	unlet ctx.PP
+	let expected = join([home, home, first], ':')
+	call assert_equal(expected, s:g.extend_python_path(ctx))
+	call assert_equal(expected, ctx.PP)
+	let $PYTHONPATH = ''
+endfunction "}}}
+
+call s:runfail(funcref('s:test_extend_python_path'))
+
+" -----------------------------------------------------------------------------
 quitall!

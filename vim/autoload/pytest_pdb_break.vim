@@ -132,9 +132,8 @@ function! s:extend_python_path(ctx) abort "{{{
 	if has_key(ctx, 'PP')
 		return ctx.PP
 	endif
-	let val = expand('$PYTHONPATH')
-	let val = val ==# '$PYTHONPATH' ? [] : split(val, ':')
-	call add(val, fnameescape(s:home))
+	let val = empty($PYTHONPATH) ? [] : split($PYTHONPATH, ':')
+	call insert(val, s:home)
 	let ctx.PP = join(val, ':')
 	return ctx.PP
 endfunction "}}}
