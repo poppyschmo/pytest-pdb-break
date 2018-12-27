@@ -1,31 +1,44 @@
 
 
-
 *pytest_pdb_break.txt*            For Nvim and Vim 8         Updated: 2018 Dec
 
-This is just an example plugin. It currently depends on the built-in python
-filetype plugin and will fail if it isn't loaded. The python interpreter will
-be the same one shebanged in the reigning pytest executable (in PATH).
+An example Vim integration.
 
 
 Commands~
 
 :PytestBreakHere {args}
 
-    The only command. Cursor must be in a test function. Any {args} are passed
-    on to pytest. For example, `:PytestBreakHere -o addopts=` will disregard
-    an addopts directive in your pytest ini.
-
+    Run the test containing the cursor (in pytest PDB mode) and break at the
+    current line. Any {args} are passed on to pytest. For example, this will
+    cancel out addopts in your pytest ini: `:PytestBreakHere -o addopts=`
 
 Overrides~
+
+b:pytest_pdb_break_python_exe
+
+    Use this Python interpreter instead of the one shebanged in the reigning
+    pytest executable (in PATH).
 
 g:pytest_pdb_break_overrides
 
     Most autoloaded funcs can be overridden. For example, a general-purpose
     runner (no PDB):
 >
-    function! g:pytest_pdb_break_overrides.runner(...)
-        return self.split(self.get_context().exe, self.get_node_id())
+    function s:PytestRunner(...)
+        let cmdline = ['pytest'] + a:000
+        function! g:pytest_pdb_break_overrides.runner(...) closure
+            call add(cmdline, self.get_node_id())
+            return self.split(cmdline, {})
+        endfunction
+        try
+            call pytest_pdb_break#run()
+        finally
+            unlet g:pytest_pdb_break_overrides.runner
+        endtry
     endfunction
+
+    autocmd FileType python
+        \ nnoremap <buffer> <F5> :call <SID>PytestRunner('-x', '-v')<cr>
 <
  vim:ft=help
