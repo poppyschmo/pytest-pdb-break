@@ -153,6 +153,7 @@ function s:write_src(src) "{{{
 	if bufname('%') !~# '^'. s:temphome
 		throw 'Cannot write '. bufname('%')
 	endif
+	call cursor(1, 1)
 	normal! dG
 	call append(0, a:src)
 	normal! dG
@@ -296,15 +297,23 @@ let s:src_two_funcs = [
 			\ ]
 
 let s:src_one_class = [
-			\ 'class TestBed:',
+			\ 'class TestClass:',
+			\ '    """',
+			\ '    class Example:',
+			\ '    """',
 			\ '    def test_one(self):',
 			\ '        varone = 1',
 			\ '        assert varone',
 			\ '',
-			\ '    @deco',
+			\ '    @test_wrap',
 			\ '    def test_two(self, request):',
 			\ '        vartwo = 2',
 			\ '        assert vartwo',
+			\ ]
+
+let s:src_fake_method = [
+			\ 'def test_arg(self):',
+			\ '    return self'
 			\ ]
 
 function s:test_get_node_id_two_funcs() "{{{
@@ -347,8 +356,8 @@ function s:test_get_node_id_two_funcs() "{{{
 	call assert_equal([buf, 'test_last'], rv)
 	" No match
 	call cursor(ext_pos)
-	let rv = s:capture(funcref(s:o.get_node_id, [1]))[0]
-	call assert_equal(-1, rv)
+	let [__, out] = s:capture(funcref(s:o.get_node_id, [1]))
+	call assert_match('No test found', out)
 	call assert_equal(ext_pos, getpos('.')[1:2])
 endfunction "}}}
 
@@ -366,21 +375,27 @@ function s:test_get_node_id_one_class() "{{{
 	" String
 	call cursor(pos)
 	let rv = s:o.get_node_id()
-	call assert_equal(buf .'::TestBed::test_one', rv)
+	call assert_equal(buf .'::TestClass::test_one', rv)
 	" With signature
-	call setline(1, 'class TestBed(object):')
+	call setline(1, 'class TestClass(object):')
 	call assert_equal(pos, getpos('.')[1:2])
 	let rv = s:o.get_node_id()
-	call assert_equal(buf .'::TestBed::test_one', rv)
+	call assert_equal(buf .'::TestClass::test_one', rv)
+	" Between
+	call cursor(1, 1)
+	let pos = searchpos('^$')
+	call assert_notequal([0, 0], pos)
+	let [__, out] = s:capture(funcref(s:o.get_node_id, []))
+	call assert_match('No test found', out)
 	" Last line
 	call cursor(line('$'), 1)
 	let rv = s:o.get_node_id()
-	call assert_equal(buf .'::TestBed::test_two', rv)
-	" Between
-	call cursor(1, 1)
-	call assert_true(search('^$') > 0)
+	call assert_equal(buf .'::TestClass::test_two', rv)
+	" No match
+	call s:write_src(s:src_one_class + [''] + s:src_fake_method)
+	call cursor(line('$'), 1)
 	let rv = s:o.get_node_id()
-	call assert_equal(buf .'::TestBed::test_one', rv)
+	call assert_equal(buf .'::test_arg', rv)
 endfunction "}}}
 
 call s:pybuf('test_get_node_id_two_funcs')

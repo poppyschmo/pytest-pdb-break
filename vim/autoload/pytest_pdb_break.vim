@@ -53,39 +53,48 @@ function! s:get_context() abort "{{{
 	return b:pytest_pdb_break_context[exe]
 endfunction "}}}
 
-function! s:report_failed(matchgroup) abort "{{{
-	echohl WarningMsg | echo 'Search failed' | echohl Normal
-	echo ' line: ' . getline('.')
-	echo ' match: ' . string(a:matchgroup)
+function! s:_search_back(pat, test) abort "{{{
+	let dent = indent('.')
+	while 1
+		if !search(a:pat, 'Wb')
+			return 0
+		endif
+		let sid = synID(line('.'), col('.'), 1)
+		if synIDattr(sid, 'name') !~? 'comment\|string' && a:test(dent)
+			break
+		endif
+	endwhile
+	return line('.')
 endfunction "}}}
 
 function! s:get_node_id(...) abort "{{{
 	" ... => [want list][start pos]
-	let saved_cursor = getcurpos()
+	let spos = getcurpos()
 	try
 		if a:0 == 2
 			call setpos('.', a:2)
 		endif
 		normal! $
-		call search('\v^\s*(class|def|async def)>', 'Wb')
-		let pat = '^\s*\(def\|async def\)\s\(test_\w\+\)(\(.*\)).*$'
-		let groups = matchlist(getline('.'), pat)
-		if !len(groups) || empty(groups[2])
-			call s:report_failed(groups)
-			return -1
+		let gr = []
+		if s:_search_back('\v^\s*(def|async def)>', {l -> indent('.') <= l})
+			let pat = '^\s*\(def\|async def\)\s\(test_\w\+\)(\(.*\)).*$'
+			let gr = matchlist(getline('.'), pat)
 		endif
-		let nodeid = [groups[2]]
-		if groups[3] =~# '^self.*' && search('\_^\s*class\s', 'Wb') != 0
-			let maybeclass = matchlist(getline('.'), '^\s*class\s\(\w\+\).*:.*')
-			if empty(maybeclass) || empty(maybeclass[1])
-				call s:report_failed(maybeclass)
-			endif
-			if !empty(maybeclass) && !empty(maybeclass[1])
-				call add(nodeid, maybeclass[1])
-			endif
+		if empty(gr) || empty(gr[2])
+			echohl WarningMsg | echo 'No test found!' | echohl Normal
+			echo printf(' beg(%d): %s', spos[1], shellescape(getline(spos[1])))
+			echo printf(' end(%d): %s', line('.'), shellescape(getline('.')))
+			echo ' match: ' . string(gr)
+			throw 'Search failed'
+		endif
+		let nodeid = [gr[2]]
+		if gr[3] =~# '^self.*' &&
+					\ s:_search_back('\_^\s*class\s', {l -> indent('.') < l})
+			let cgr = matchlist(getline('.'), '^\s*class\s\(\w\+\).*:.*')
+			call add(nodeid, cgr[1])
 		endif
 	finally
-		call setpos('.', saved_cursor)
+		call setpos('.', spos)
 	endtry
 	call add(nodeid, expand('%:p'))
 	return a:0 && a:1 ? reverse(nodeid) : join(reverse(nodeid), '::')
@@ -168,7 +177,7 @@ function! s:runner(...) abort "{{{
 endfunction "}}}
 
 function! s:split(cmdl, jobd) abort "{{{
-	if !haskey(a:jobd, 'vertical')
+	if !has_key(a:jobd, 'vertical')
 		if exists('b:pytest_pdb_break_vertical')
 			let a:jobd.vertical = b:pytest_pdb_break_vertical
 		else
