@@ -576,5 +576,74 @@ endfunction "}}}
 call s:pybuf('test_runner')
 
 
+" split -----------------------------------------------------------------------
+
+function s:test_split() "{{{
+	let exe = s:tempdir . '/.venv_base/bin/python'
+	let buf = bufname('%')
+	let jobd = {'commands': ['import sys', 'sys.path[1]'], 'output': []}
+	if has('nvim')
+		let cmdl = ['env', 'PYTHONPATH=/tmp/fake', exe, '-i']
+		function! s:on_stdout(id, data, event) dict
+			let str = join(a:data, '')
+			call add(self.output, str)
+			let comms = self.commands
+			if str =~# '>>> $'
+				if !empty(comms)
+					call chansend(a:id, [comms[0], ''])
+					call remove(comms, 0)
+				else
+					call chansend(a:id, ['', ''])
+				endif
+			endif
+		endfunction
+		let jobd.on_stdout = function('s:on_stdout')
+	else
+		let cmdl = [exe, '-i']
+		function! s:on_out(chan, msg) dict
+			call add(self.output, a:msg)
+			if a:msg =~# '>>> $'
+				if !empty(self.commands)
+					call ch_sendraw(a:chan, self.commands[0] . "\n")
+					call remove(self.commands, 0)
+				else
+					call ch_sendraw(a:chan, "\x4")
+				endif
+			endif
+		endfunction
+		let _jobd = jobd
+		let jobd = {}
+		let jobd.env = {'PYTHONPATH': '/tmp/fake'}
+		let jobd.out_cb = funcref('s:on_out', _jobd)
+		call ch_logfile(expand('%:p:h') .'/vim8-channel.log', 'a')
+	endif
+	call s:o.split(cmdl, jobd)
+	call assert_true(has_key(jobd, 'vertical'))
+	call assert_true(has_key(jobd, 'job'))
+	call assert_notequal(buf, bufname('%'))
+	if has('nvim')
+		call assert_equal([0], jobwait([jobd.job], 5000))
+		execute 'bdelete! term'
+		let outlines = split(join(jobd.output, ''), "\r\\|\n")
+		call assert_match('/tmp/fake', join(jobd.output, ''))
+	else
+		let bn = ch_getbufnr(jobd.job, 'out')
+		let waited = 0
+		while (ch_status(jobd.job) != 'closed'
+					\ || job_status(jobd.job) != 'dead')
+					\ && waited < 2000
+			call term_wait(bn)
+			let waited += 10
+		endwhile
+		call ch_log('waited: '. waited .'ms')
+		bdelete!
+		let outlines = split(join(_jobd.output, ''), "\r\n")
+		call assert_match('/tmp/fake', join(_jobd.output, ''))
+	endif
+	call writefile(outlines, 'term.log')
+endfunction "}}}
+
+call s:pybuf('test_split')
+
 " -----------------------------------------------------------------------------
 quitall!

@@ -190,7 +190,7 @@ function! s:split(cmdl, jobd) abort "{{{
 		let a:jobd.job = termopen(a:cmdl, a:jobd)
 		startinsert
 	else
-		let a:jobd.job = term_start(a:cmdl, a:jobd)
+		let a:jobd.job = term_getjob(term_start(a:cmdl, a:jobd))
 	endif
 endfunction "}}}
 
