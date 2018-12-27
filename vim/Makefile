@@ -5,6 +5,15 @@ VENVBASE ?= $(PYTEST_PDB_BREAK_TEST_TEMPDIR)/.venv_base
 VENVSELF ?= $(PYTEST_PDB_BREAK_TEST_TEMPDIR)/.venv_self
 export PYTEST_PDB_BREAK_TEST_TEMPDIR
 
+ifdef VIRTUAL_ENV
+ifeq (x$(VIRTUAL_ENV),$(findstring x$(VIRTUAL_ENV),x$(PATH)))
+	VENV_BINDIR = $(shell printf %s $$PATH | cut -d ":" -f 1)
+	PATH := $(subst $(VENV_BINDIR):,,$(PATH))
+	export PATH
+	unexport VIRTUAL_ENV
+	unexport PYTHONPATH
+endif
+endif
 .phony: neovim
 
 neovim: | $(VENVBARE) $(VENVBASE) $(VENVSELF)

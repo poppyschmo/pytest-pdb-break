@@ -2,9 +2,13 @@ if !has('unix')
 	127cquit!
 endif
 
+if exists('$VIRTUAL_ENV')
+	126cquit!
+endif
+
 let s:tempdir = $PYTEST_PDB_BREAK_TEST_TEMPDIR
 if empty(s:tempdir) || s:tempdir !~# '^\%(/[^/]\+\)\{2,}'
-	126cquit!
+	125cquit!
 endif
 let s:temphome = s:tempdir .'/vim'
 call mkdir(s:temphome, 'p')
@@ -223,6 +227,17 @@ function s:test_get_context() "{{{
 	call assert_true(has_key(b:pytest_pdb_break_context, '/tmp/fakepython'))
 	let after = map(['plugin', 'home', 'helper'], 's:s.get(v:val)')
 	call assert_equal(before, after)
+	unlet b:pytest_pdb_break_python_exe
+	" Hack PATH (as done by $VIRTUAL_ENV/bin/activate)
+	let origpath = $PATH
+	let vbin = s:tempdir .'/.venv_base/bin'
+	let vpy = vbin . '/python3'
+	let vpt = vbin . '/pytest'
+	let $PATH = vbin .':'. $PATH
+	call assert_equal(vpt, exepath('pytest'))
+	call s:g.get_context()
+	call assert_true(has_key(b:pytest_pdb_break_context, vpy))
+	let $PATH = origpath
 endfunction "}}}
 
 call s:pybuf('test_get_context')

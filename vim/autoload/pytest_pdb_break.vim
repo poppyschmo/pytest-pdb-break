@@ -39,7 +39,7 @@ function! s:get_context() abort "{{{
 	else
 		try
 			let shebang = readfile(exepath('pytest'), '', 1)[0]
-			let exe = substitute(shebang, '^!#', '', '')
+			let exe = substitute(shebang, '^#!', '', '')
 		catch /^Vim\%((\a\+)\)\=:E/
 			let exe = ''
 		endtry
