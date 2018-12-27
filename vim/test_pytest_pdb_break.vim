@@ -66,7 +66,7 @@ endfunction "}}}
 
 function s:runfail(test_func, ...) "{{{
 	" ... => [exit hander][defer]
-	let ec = 100
+	let ec = 1000
 	let Handler = a:0 ? a:1 : v:null
 	let defer = a:0 == 2 ? a:2 : v:false
 	try
@@ -74,7 +74,7 @@ function s:runfail(test_func, ...) "{{{
 		let ec = 0
 	catch /.*/
 		let m = matchlist(v:exception, '^Vim\%((\a\+)\)\=:E\(\d\+\)')
-		let ec = get(m, 1, 101)
+		let ec = get(m, 1, 1001)
 		call add(s:errors, s:_fmterrors(
 					\ ec, printf('%s: %s', v:throwpoint, v:exception)
 					\ ))
@@ -84,7 +84,7 @@ function s:runfail(test_func, ...) "{{{
 				call Handler()
 			catch /.*/
 				call add(s:errors, v:exception)
-				let ec = 102
+				let ec = 1002
 			endtry
 		endif
 		if !empty(s:errors) && !defer
@@ -95,11 +95,7 @@ function s:runfail(test_func, ...) "{{{
 			call s:_report()
 		endif
 		if ec && !defer
-			if has('nvim')
-				execute ec .'cquit!'
-			else
-				cquit!
-			endif
+			cquit!
 		endif
 		call s:clear_overrides()
 	endtry
@@ -173,15 +169,17 @@ call s:runfail(function('assert_true', [v:true])) " No file-scope v:errors yet
 function s:test_fail(ecode)
 	throw 'Should be '. a:ecode
 endfunction
-call assert_equal(101, s:runfail(funcref('s:test_fail', [101]), v:null, v:true))
-let s:_soon = 1 == len(s:errors) && match(s:errors[0], 'Should be 101') != -1
+call assert_equal(1001, s:runfail(
+			\ funcref('s:test_fail', [1001]), v:null, v:true
+			\ ))
+let s:_soon = 1 == len(s:errors) && match(s:errors[0], 'Should be 1001') != -1
 let s:errors = []
 call s:runfail(function('assert_true', [s:_soon]))
 
-call assert_equal(102, s:runfail(
-			\ function('acos', [-1]), funcref('s:test_fail', [102]), v:true
+call assert_equal(1002, s:runfail(
+			\ function('acos', [-1]), funcref('s:test_fail', [1002]), v:true
 			\ ))
-let s:_soon = ['Should be 102'] == s:errors
+let s:_soon = ['Should be 1002'] == s:errors
 let s:errors = []
 call s:runfail(function('assert_true', [s:_soon]))
 
@@ -305,15 +303,9 @@ let s:src_one_class = [
 			\ '        varone = 1',
 			\ '        assert varone',
 			\ '',
-			\ '    @test_wrap',
 			\ '    def test_two(self, request):',
 			\ '        vartwo = 2',
 			\ '        assert vartwo',
-			\ ]
-
-let s:src_fake_method = [
-			\ 'def test_arg(self):',
-			\ '    return self'
 			\ ]
 
 function s:test_get_node_id_two_funcs() "{{{
@@ -391,8 +383,10 @@ function s:test_get_node_id_one_class() "{{{
 	call cursor(line('$'), 1)
 	let rv = s:o.get_node_id()
 	call assert_equal(buf .'::TestClass::test_two', rv)
-	" No match
-	call s:write_src(s:src_one_class + [''] + s:src_fake_method)
+	" Indentation level
+	" FIXME bad example (implies there's some fixture named 'self')
+	let unlikely = ['', 'def test_arg(self):', '    return self']
+	call s:write_src(s:src_one_class + unlikely)
 	call cursor(line('$'), 1)
 	let rv = s:o.get_node_id()
 	call assert_equal(buf .'::test_arg', rv)
@@ -580,6 +574,7 @@ function s:test_runner() "{{{
 endfunction "}}}
 
 call s:pybuf('test_runner')
+
 
 " -----------------------------------------------------------------------------
 quitall!
