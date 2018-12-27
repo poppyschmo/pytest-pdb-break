@@ -2,10 +2,11 @@ if !has('unix')
 	127cquit!
 endif
 
-let s:temphome = $PYTEST_PDB_BREAK_TEST_TEMPDIR
-if empty(s:temphome) || s:temphome !~# '^\%(/[^/]\+\)\{2,}'
+let s:tempdir = $PYTEST_PDB_BREAK_TEST_TEMPDIR
+if empty(s:tempdir) || s:tempdir !~# '^\%(/[^/]\+\)\{2,}'
 	126cquit!
 endif
+let s:temphome = s:tempdir .'/vim'
 call mkdir(s:temphome, 'p')
 
 " Get autoload script's # (not ours)
