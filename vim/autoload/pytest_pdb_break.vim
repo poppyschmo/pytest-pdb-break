@@ -164,32 +164,42 @@ function! s:runner(...) abort "{{{
 			return
 		endtry
 	endif
+	let jd = {'cwd': ctx.rootdir}
 	if !ctx.registered
 		let preenv = s:extend_python_path(ctx)
-		let cmd = ['env', printf('PYTHONPATH=%s', preenv)] + cmd
+		if has('nvim')
+			let cmd = ['env', printf('PYTHONPATH=%s', preenv)] + cmd
+		else
+			let jd.env = {'PYTHONPATH': preenv}
+		endif
 		let opts = ['-p', 'pytest_pdb_break']
 	endif
 	call add(opts,  printf('--break=%s:%s', nid[0], line('.')))
-	let ctx.last = {'cmd': cmd, 'uopts': a:000, 'opts': opts, 'node_id': nid}
-	return call('s:split', cmd + a:000 + opts + [arg])
+	let ctx.last = {
+				\ 'cmd': cmd, 'uopts': a:000, 'opts': opts,
+				\ 'node_id': nid, 'jd': jd
+				\ }
+	return call('s:split', [cmd + a:000 + opts + [arg], jd])
 endfunction "}}}
 
-function! s:split(...) abort "{{{
+function! s:split(cmdl, jobd) abort "{{{
 	if s:is_custom('split')
-		return call(g:pytest_pdb_break_overrides.split, a:000)
+		return call(g:pytest_pdb_break_overrides.split, [a:cmdl, a:jobd])
 	endif
-	let context = s:get_context()
-	let vert = (winwidth(0) + 0.0) / winheight(0) > 2.5
+	if !haskey(a:jobd, 'vertical')
+		if exists('b:pytest_pdb_break_vertical')
+			let a:jobd.vertical = b:pytest_pdb_break_vertical
+		else
+			let wn = winnr()
+			let a:jobd.vertical = (winwidth(wn) + 0.0) / winheight(wn) > 2.5
+		endif
+	endif
 	if has('nvim')
-		execute vert ? 'vnew' : 'new'
-		let cwd =  {'cwd': get(context, 'rootdir', expand('%:p:h'))}
-		let context.job = termopen(a:000, cwd)
-		let @@ = winnr()
-		execute bufwinnr(bufnr('%')) . 'wincmd w'
-		execute @@ . 'wincmd w'
-		redraw | startinsert
+		execute a:jobd.vertical ? 'vnew' : 'new'
+		let a:jobd.job = termopen(a:cmdl, a:jobd)
+		startinsert
 	else
-		let context.job = term_start(a:000, {'vertical': vert})
+		let a:jobd.job = term_start(a:cmdl, a:jobd)
 	endif
 endfunction "}}}
 

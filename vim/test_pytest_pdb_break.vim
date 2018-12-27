@@ -68,9 +68,11 @@ function s:runfail(test_func, ...) "{{{
 		call a:test_func()
 		let ec = 0
 	catch /.*/
-		call add(s:errors, v:exception)
 		let m = matchlist(v:exception, '^Vim\%((\a\+)\)\=:E\(\d\+\)')
 		let ec = get(m, 1, 101)
+		call add(s:errors, s:_fmterrors(
+					\ ec, printf('%s: %s', v:throwpoint, v:exception)
+					\ ))
 	finally
 		if type(Handler) == 2
 			try
@@ -88,8 +90,11 @@ function s:runfail(test_func, ...) "{{{
 			call s:_report()
 		endif
 		if ec && !defer
-			" execute ec .'cquit!'
-			cquit!
+			if has('nvim')
+				execute ec .'cquit!'
+			else
+				cquit!
+			endif
 		endif
 		call s:restore_overrides()
 	endtry
@@ -160,14 +165,15 @@ function s:test_fail(ecode)
 	throw 'Should be '. a:ecode
 endfunction
 call assert_equal(101, s:runfail(funcref('s:test_fail', [101]), v:null, v:true))
-call assert_equal(['Should be 101'], s:errors)
+call assert_equal(1, len(s:errors))
+call assert_match('Should be 101', s:errors[0])
 let s:errors = []
 call assert_equal(102, s:runfail(
 			\ function('acos', [-1]), funcref('s:test_fail', [102]), v:true
 			\ ))
-call assert_equal(['Should be 102'], s:errors)
+let s:_soon = ['Should be 102'] == s:errors
 let s:errors = []
-call s:runfail(function('assert_true', [v:true])) " No file-scope v:errors yet
+call s:runfail(function('assert_true', [s:_soon]))
 
 function s:test_utils()
 	call assert_true(v:false)
@@ -181,7 +187,7 @@ let s:_soon = len(s:errors) == 1 && s:errors[0] =~# 'test_utils.*line 1'
 			\ && len(v:errors) == 1 && v:errors[0] =~# 'test_utils.*line 1'
 let s:errors = []
 let v:errors = []
-call s:runfail(function('assert_true', [s:_soon])) " No file-scope v:errors yet
+call s:runfail(function('assert_true', [s:_soon]))
 unlet s:_soon
 
 
@@ -481,38 +487,50 @@ call s:runfail(funcref('s:test_extend_python_path'))
 function s:test_runner() "{{{
 	" Mock split, get_node_id
 	let thisbuf = bufname('%')
+	let dirname = fnamemodify(bufname('%'), ':h')
 	let g:pytest_pdb_break_overrides.split = {-> a:000}
-	let g:pytest_pdb_break_overrides.get_node_id =
-				\ {-> [thisbuf, 'test_first']}
+	let g:pytest_pdb_break_overrides.get_node_id = {-> [thisbuf, 'test_first']}
 	let b:pytest_pdb_break_python_exe = '/tmp/fakepython'
 	let ctx = s:g.get_context()
 	" Inject plugin
 	let ctx.registered = v:false
+	let ctx.rootdir = dirname
 	let rv = s:g.runner('⁉')
-	call assert_equal([
-				\ 'env', 'PYTHONPATH='. s:s.get('home'),
-				\ '/tmp/fakepython', '-mpytest'
-				\ ], ctx.last.cmd)
+	let plhome = s:s.get('home')
+	if has('nvim')
+		call assert_equal([
+					\ 'env', 'PYTHONPATH='. plhome,
+					\ '/tmp/fakepython', '-mpytest'
+					\ ], ctx.last.cmd)
+	else
+		call assert_equal(['/tmp/fakepython', '-mpytest'], ctx.last.cmd)
+	endif
 	call assert_equal(['⁉'], ctx.last.uopts)
 	call assert_equal([
 				\ '-p', 'pytest_pdb_break',
 				\ '--break='. thisbuf .':1'
 				\ ], ctx.last.opts)
 	call assert_equal([thisbuf, 'test_first'], ctx.last.node_id)
-	call assert_equal(
+	let expect_jobd = {'cwd': dirname }
+	if !has('nvim')
+		let expect_jobd.env = {'PYTHONPATH': plhome}
+	endif
+	call assert_equal([
 				\ ctx.last.cmd
 				\ + ctx.last.uopts
 				\ + ctx.last.opts
 				\ + [thisbuf .'::test_first'],
-				\ rv)
+				\ expect_jobd
+				\ ], rv)
 	" Plugin present
 	let ctx.registered = v:true
+	let ctx.rootdir = dirname
 	let rv = s:g.runner('⁉')
-	call assert_equal([
+	call assert_equal([[
 				\ '/tmp/fakepython', '-mpytest',
 				\ '⁉', '--break='. thisbuf .':1',
-				\ thisbuf.'::test_first'
-				\ ], rv)
+				\ thisbuf .'::test_first'
+				\ ], {'cwd': dirname}], rv)
 	" Change in args triggers call to query_helper (mocked)
 	function! s:g.query_helper(...)
 		echon 'query_helper ran'
@@ -520,18 +538,19 @@ function s:test_runner() "{{{
 	let [rv, out] = s:capture(funcref(s:g.runner, []))
 	call assert_match('query_helper ran', out)
 	call assert_equal([], ctx.last.uopts)
-	let expected = [
+	let expect_cmdl = [
 				\ '/tmp/fakepython', '-mpytest',
 				\ '--break='. thisbuf .':1',
 				\ thisbuf.'::test_first'
 				\ ]
-	call assert_equal(expected, rv)
+	let expect_jobd = {'cwd': dirname}
+	call assert_equal([expect_cmdl, expect_jobd], rv)
 	" As does absence of registration check
 	unlet ctx.registered
 	let s:g.query_helper = {-> extend(ctx, {'registered': v:true})}
 	let rv = s:g.runner()
 	call assert_true(exists('ctx.registered'))
-	call assert_equal(expected, rv)
+	call assert_equal([expect_cmdl, expect_jobd], rv)
 endfunction "}}}
 
 call s:pybuf('test_runner')

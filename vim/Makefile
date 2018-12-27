@@ -15,7 +15,11 @@ ifeq (x$(VIRTUAL_ENV),$(findstring x$(VIRTUAL_ENV),x$(PATH)))
 	unexport PYTHONPATH
 endif
 endif
-.phony: neovim vim8
+.phony: all neovim vim8
+
+all:
+	@echo Must specify neovim or vim8
+	@exit 1
 
 vim8: | $(VENVBARE) $(VENVBASE) $(VENVSELF)
 	$(VIM) -Nnesu test_initrc -S test_pytest_pdb_break.vim
