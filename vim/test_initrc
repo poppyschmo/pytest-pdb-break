@@ -1,0 +1,6 @@
+
+execute "set runtimepath^=" . fnamemodify('$MYVIMRC', ':p:h')
+syntax on
+filetype plugin indent on
+
+" vim:ft=vim
