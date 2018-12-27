@@ -6,7 +6,7 @@ endfunction
 
 
 function! s:is_custom(name) abort "{{{
-	if !exists('g:pytest_pdb_break_overrides.' . a:name)
+	if !has_key(s:defuncs._orig, a:name)
 		throw a:name .' is not overrideable'
 	endif
 	if get(g:pytest_pdb_break_overrides, a:name) == funcref('s:' . a:name)
@@ -25,7 +25,7 @@ function! s:get_python_jump_prev() abort "{{{
 	let pat = '\zs\d\+\ze: *' . $VIMRUNTIME . '/ftplugin/python.vim'
 	let mstr = matchstr(l:cap, pat)
 	if empty(mstr)
-		throw "No python ftplugin in rtp"
+		throw 'No python ftplugin in rtp'
 	endif
 	let funcname = '<SNR>'. mstr .'_Python_jump'
 	" Need different test: never runs because exists() says invalid func name
@@ -33,7 +33,6 @@ function! s:get_python_jump_prev() abort "{{{
 		throw "Couldn't find Python_jump function"
 	endif
 	let args = ['n', '\v^\s*(class\|def\|async def)>', 'Wb']
-	let s:python_jump = funcref(funcname)
 	let s:python_jump_prev = funcref(funcname, args)
 	return s:python_jump_prev
 endfunction "}}}
@@ -41,8 +40,9 @@ endfunction "}}}
 function! s:get_context() abort "{{{
 	" Save venv info in buffer-local dict, keyed by python executable
 	if s:is_custom('get_context')
-		return call(g:pytest_pdb_break_overrides.get_context)
+		return g:pytest_pdb_break_overrides.get_context()
 	endif
+	call assert_equal(&filetype, 'python')
 	if !exists('s:home')
 		let path = fnamemodify(s:file, ':h:p') . ';'
 		let plugin = findfile('pytest_pdb_break.py', path)
@@ -75,9 +75,42 @@ function! s:get_context() abort "{{{
 	return b:pytest_pdb_break_context[exe]
 endfunction "}}}
 
+function! s:get_node_id(...) abort "{{{
+	" Return a pytest node-id string or, with varg 1, its components as a list.
+	" Varg 2, if provided, is the start pos.
+	if s:is_custom('get_node_id')
+		return call(g:pytest_pdb_break_overrides.get_node_id, a:000)
+	endif
+	let saved_cursor = getcurpos()
+	if a:0 == 2
+		call setpos('.', a:2)
+	endif
+	normal! +
+	normal [m
+	let pat = '^\s*\(def\|async def\)\s\(test_\w\+\)(\(.*\)).*$'
+	let groups = matchlist(getline('.'), pat)
+	if !len(groups) || empty(groups[2])
+		call s:report_failed(groups)
+		return -1
+	endif
+	let nodeid = [groups[2]]
+	if groups[3] =~# '^self.*' && search('\_^\s*class\s', 'Wb') != 0
+		let maybeclass = matchlist(getline('.'), '^\s*class\s\(\w\+\).*:.*')
+		if empty(maybeclass) || empty(maybeclass[1])
+			call s:report_failed(maybeclass)
+		endif
+		if !empty(maybeclass) && !empty(maybeclass[1])
+			call add(nodeid, maybeclass[1])
+		endif
+	endif
+	call setpos('.', saved_cursor)
+	call add(nodeid, expand('%:p'))
+	return a:0 && a:1 ? reverse(nodeid) : join(reverse(nodeid), '::')
+endfunction "}}}
+
 function! s:check_plugin(ctx, ...) abort "{{{
 	if s:is_custom('check_plugin')
-		return call(g:pytest_pdb_break_overrides.check_plugin, [a:ctx, a:000])
+		return call(g:pytest_pdb_break_overrides.check_plugin, [a:ctx] + a:000)
 	endif
 	let context = a:ctx
 	if !has_key(context, 'registered')
@@ -116,7 +149,7 @@ endfunction "}}}
 function! s:extend_python_path(ctx) abort "{{{
 	" Stash modified copy of PYTHONPATH, should be unset if unneeded
 	if s:is_custom('extend_python_path')
-		return call(g:pytest_pdb_break_overrides.extend_python_path, a:ctx)
+		return g:pytest_pdb_break_overrides.extend_python_path(a:ctx)
 	endif
 	let context = a:ctx
 	if has_key(context, 'PP')
@@ -133,39 +166,6 @@ function! s:report_failed(matchgroup) abort "{{{
 	echohl WarningMsg | echo 'Search failed' | echohl Normal
 	echo ' line: ' . getline('.')
 	echo ' match: ' . string(a:matchgroup)
-endfunction "}}}
-
-function! s:get_node_id(...) abort "{{{
-	" Return a pytest node-id string or, with varg 1, its components as a list.
-	" Varg 2, if provided, is the start pos.
-	if s:is_custom('get_node_id')
-		return call(g:pytest_pdb_break_overrides.get_node_id, a:000)
-	endif
-	let saved_cursor = getcurpos()
-	if a:0 == 2
-		call setpos('.', a:2)
-	endif
-	normal! +
-	normal [m
-	let pat = '^\s*\(def\|async def\)\s\(test_\w\+\)(\(.*\)).*$'
-	let groups = matchlist(getline('.'), pat)
-	if !len(groups) || empty(groups[2])
-		call s:report_failed(groups)
-		return -1
-	endif
-	let nodeid = [groups[2]]
-	if groups[3] =~# '^self.*' && search('\_^\s*class\s', 'Wb') != 0
-		let maybeclass = matchlist(getline('.'), '^\s*class\s\(\w\+\).*:.*')
-		if empty(maybeclass) || empty(maybeclass[1])
-			call s:report_failed(maybeclass)
-		endif
-		if !empty(maybeclass) && !empty(maybeclass[1])
-			call add(nodeid, maybeclass[1])
-		endif
-	endif
-	call setpos('.', saved_cursor)
-	call add(nodeid, expand('%:p'))
-	return a:0 && a:1 ? reverse(nodeid) : join(reverse(nodeid), '::')
 endfunction "}}}
 
 function! s:runner(...) abort "{{{
@@ -216,4 +216,8 @@ let s:defuncs = {'get_context': funcref('s:get_context'),
 				\ 'runner': funcref('s:runner'),
 				\ 'split': funcref('s:split')}
 let s:defuncs._orig = copy(s:defuncs)
+let g:pytest_pdb_break_overrides._s = {
+			\ 'exists': {e -> exists(e)},
+			\ 'get': {v -> eval('s:'. v)}
+			\ }
 call extend(g:pytest_pdb_break_overrides, s:defuncs, 'keep')
