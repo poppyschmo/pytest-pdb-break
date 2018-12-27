@@ -3,25 +3,23 @@ scriptencoding utf-8
 let s:file = expand('<sfile>')
 
 function! pytest_pdb_break#run(...) abort
-	return call('s:runner', a:000)
+	return s:call('runner', a:000, 1)
 endfunction
 
-
-function! s:is_custom(name) abort "{{{
-	if !has_key(s:defuncs._orig, a:name)
-		throw a:name .' is not overrideable'
+function! s:call(name, args, ...) abort "{{{
+	" ... => [clear]
+	let d = a:0 && a:1 ?
+				\ {} : get(g:pytest_pdb_break_overrides, '_flattened', {})
+	if empty(d)
+		let d = filter(copy(g:pytest_pdb_break_overrides), 'v:key !~# "^_"')
+		call extend(d, s:defuncs, 'keep')
+		let g:pytest_pdb_break_overrides._flattened = d
 	endif
-	if get(g:pytest_pdb_break_overrides, a:name) == funcref('s:' . a:name)
-		return 0
-	endif
-	return 1
+	return call(d[a:name], a:args, d)
 endfunction "}}}
 
 function! s:get_context() abort "{{{
 	" Save venv info in buffer-local dict, keyed by python executable
-	if s:is_custom('get_context')
-		return g:pytest_pdb_break_overrides.get_context()
-	endif
 	call assert_equal(&filetype, 'python')
 	if !exists('s:home')
 		let path = fnamemodify(s:file, ':h:p') . ';'
@@ -62,11 +60,7 @@ function! s:report_failed(matchgroup) abort "{{{
 endfunction "}}}
 
 function! s:get_node_id(...) abort "{{{
-	" Return a pytest node-id string or, with varg 1, its components as a list.
-	" Varg 2, if provided, is the start pos.
-	if s:is_custom('get_node_id')
-		return call(g:pytest_pdb_break_overrides.get_node_id, a:000)
-	endif
+	" ... => [want list][start pos]
 	let saved_cursor = getcurpos()
 	try
 		if a:0 == 2
@@ -99,9 +93,6 @@ endfunction "}}}
 
 function! s:query_helper(ctx, ...) abort "{{{
 	" https://docs.pytest.org/en/latest/customize.html#finding-the-rootdir
-	if s:is_custom('query_helper')
-		return call(g:pytest_pdb_break_overrides.query_helper, [a:ctx] + a:000)
-	endif
 	let context = a:ctx
 	let cmdline = [context.exe, '-'] + a:000
 	if !has('nvim')
@@ -134,9 +125,6 @@ endfunction "}}}
 
 function! s:extend_python_path(ctx) abort "{{{
 	" Stash modified copy of PYTHONPATH, should be unset if unneeded
-	if s:is_custom('extend_python_path')
-		return g:pytest_pdb_break_overrides.extend_python_path(a:ctx)
-	endif
 	let ctx = a:ctx
 	if has_key(ctx, 'PP')
 		return ctx.PP
@@ -148,25 +136,22 @@ function! s:extend_python_path(ctx) abort "{{{
 endfunction "}}}
 
 function! s:runner(...) abort "{{{
-	if s:is_custom('runner')
-		return call(g:pytest_pdb_break_overrides.runner, a:000)
-	endif
-	let ctx = s:get_context()
-	let nid = s:get_node_id(1)
+	let ctx = s:call('get_context', [])
+	let nid = s:call('get_node_id', [1])
 	let cmd = [ctx.exe, '-mpytest']
 	let arg = join(nid, '::')
 	let opts = []
 	let last = get(ctx, 'last', {})
 	if !has_key(ctx, 'registered') || a:000 != get(last, 'uopts', ["\u2049"])
 		try
-			call call('s:query_helper', [ctx] + a:000 + [arg])
+			call s:call('query_helper', [ctx] + a:000 + [arg])
 		catch /.*HelperError/
 			return
 		endtry
 	endif
 	let jd = {'cwd': ctx.rootdir}
 	if !ctx.registered
-		let preenv = s:extend_python_path(ctx)
+		let preenv = s:call('extend_python_path', [ctx])
 		if has('nvim')
 			let cmd = ['env', printf('PYTHONPATH=%s', preenv)] + cmd
 		else
@@ -179,13 +164,10 @@ function! s:runner(...) abort "{{{
 				\ 'cmd': cmd, 'uopts': a:000, 'opts': opts,
 				\ 'node_id': nid, 'jd': jd
 				\ }
-	return call('s:split', [cmd + a:000 + opts + [arg], jd])
+	return s:call('split', [cmd + a:000 + opts + [arg], jd])
 endfunction "}}}
 
 function! s:split(cmdl, jobd) abort "{{{
-	if s:is_custom('split')
-		return call(g:pytest_pdb_break_overrides.split, [a:cmdl, a:jobd])
-	endif
 	if !haskey(a:jobd, 'vertical')
 		if exists('b:pytest_pdb_break_vertical')
 			let a:jobd.vertical = b:pytest_pdb_break_vertical
@@ -210,9 +192,11 @@ let s:defuncs = {'get_context': funcref('s:get_context'),
 				\ 'get_node_id': funcref('s:get_node_id'),
 				\ 'runner': funcref('s:runner'),
 				\ 'split': funcref('s:split')}
-let s:defuncs._orig = copy(s:defuncs)
-let g:pytest_pdb_break_overrides._s = {
-			\ 'exists': {e -> exists(e)},
-			\ 'get': {v -> eval('s:'. v)}
-			\ }
-call extend(g:pytest_pdb_break_overrides, s:defuncs, 'keep')
+
+if exists('g:pytest_pdb_break_testing')
+	let g:pytest_pdb_break_overrides._s = {
+				\ 'exists': {e -> exists(e)},
+				\ 'get': {v -> eval('s:'. v)}
+				\ }
+	let g:pytest_pdb_break_overrides._orig = copy(s:defuncs)
+endif

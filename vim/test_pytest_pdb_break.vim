@@ -15,20 +15,20 @@ endif
 let s:temphome = s:tempdir .'/vim'
 call mkdir(s:temphome, 'p')
 
-" Get autoload script's # (not ours)
+let g:pytest_pdb_break_testing = 1
 let s:g = g:pytest_pdb_break_overrides
-let s:g.runner = {-> matchstr(expand('<sfile>'), '<SNR>\zs\d\+\ze_runner.*$')}
+let s:g.runner = {-> matchstr(expand('<sfile>'), '<SNR>\zs\d\+\ze_call.*$')}
 let s:pfx = printf('<SNR>%s_', pytest_pdb_break#run())
 let s:this_buffer = bufname('%')
 let s:s = s:g._s
+let s:o = s:g._orig
 let s:errors = []
 
-call assert_equal(expand('%:p:h') . '/autoload/pytest_pdb_break.vim',
-			\ s:s.get('file'))
+if expand('%:p:h') . '/autoload/pytest_pdb_break.vim' != s:s.get('file')
+	cquit!
+endif
 execute 'cd '. s:temphome
 
-
-" Utils -----------------------------------------------------------------------
 
 function s:_fmterrors(k, v) "{{{
 	let pat = '\(^.*\)\(line \d\+\): \(.*\)'
@@ -50,13 +50,18 @@ function s:_report() "{{{
 endfunction "}}}
 
 function s:has_overrides() "{{{
-	return len(filter(copy(s:g._orig), 's:g[v:key] != v:val'))
+	return len(filter(copy(s:g), 'v:key !~# "^_"'))
 endfunction "}}}
 
-function s:restore_overrides() "{{{
-	for k in keys(s:g._orig)
-		let s:g[k] = s:g._orig[k]
-	endfor
+function s:reset_chain() "{{{
+	if has_key(s:g, '_flattened')
+		unlet s:g._flattened
+	endif
+endfunction "}}}
+
+function s:clear_overrides() "{{{
+	call filter(s:g, '!has_key(s:o, v:key)')
+	call s:reset_chain()
 endfunction "}}}
 
 function s:runfail(test_func, ...) "{{{
@@ -96,7 +101,7 @@ function s:runfail(test_func, ...) "{{{
 				cquit!
 			endif
 		endif
-		call s:restore_overrides()
+		call s:clear_overrides()
 	endtry
 	return ec
 endfunction "}}}
@@ -155,9 +160,12 @@ function s:write_src(src) "{{{
 	silent write
 endfunction "}}}
 
-call assert_notequal(s:g.runner, s:g._orig.runner)
+
+" Utils (above) ---------------------------------------------------------------
+
+call assert_notequal(s:g.runner, s:o.runner)
 call assert_equal(1, s:has_overrides())
-call s:restore_overrides()
+call s:clear_overrides()
 call assert_false(s:has_overrides())
 call s:runfail(function('assert_true', [v:true])) " No file-scope v:errors yet
 
@@ -165,9 +173,10 @@ function s:test_fail(ecode)
 	throw 'Should be '. a:ecode
 endfunction
 call assert_equal(101, s:runfail(funcref('s:test_fail', [101]), v:null, v:true))
-call assert_equal(1, len(s:errors))
-call assert_match('Should be 101', s:errors[0])
+let s:_soon = 1 == len(s:errors) && match(s:errors[0], 'Should be 101') != -1
 let s:errors = []
+call s:runfail(function('assert_true', [s:_soon]))
+
 call assert_equal(102, s:runfail(
 			\ function('acos', [-1]), funcref('s:test_fail', [102]), v:true
 			\ ))
@@ -191,38 +200,45 @@ call s:runfail(function('assert_true', [s:_soon]))
 unlet s:_soon
 
 
-" is_custom -------------------------------------------------------------------
+" call ------------------------------------------------------------------------
 
-function s:test_is_custom() "{{{
-	call assert_true(exists('*'. s:pfx .'is_custom'))
-	let IsCust = funcref(s:pfx . 'is_custom')
+function s:test_call() "{{{
+	call assert_true(exists('*'. s:pfx .'call'))
+	let Call = funcref(s:pfx . 'call')
 	let overrideables = [
 				\ 'extend_python_path', 'get_context', 'get_node_id',
 				\ 'query_helper', 'runner', 'split'
 				\ ]
-	call assert_equal(overrideables, sort(keys(s:g._orig)))
-	for name in overrideables
-		call assert_false(IsCust(name), name .' has not been overridden')
-	endfor
-	" XXX why does this propagate (not handled by assert_fails)?
+	call assert_equal(overrideables, sort(keys(s:o)))
+	let s:g['get_context'] = {-> a:000}
+	let args = [1, 2, 3]
+	call assert_equal(args, Call('get_context', args))
+	" Same dict is reused unless reset
+	let s:g['extend_python_path'] = {-> a:000}
 	try
-		call assert_fails(call(IsCust, ['is_custom']))
+		" XXX if this is supposed to propagate, must always use in tandem?
+		call assert_fails(Call('extend_python_path', args))
 	catch /.*/
-		call assert_exception('is_custom is not overrideable')
+		call assert_exception('E118:') "Too many arguments
 	endtry
-	function! g:pytest_pdb_break_overrides.runner(...) closure
-		call assert_equal(self, s:g)
-		call assert_equal(overrideables,
-					\ sort(filter(keys(self), 'v:val !~# "^_"')))
-		return ['foo', 'bar'] == a:000
+	call assert_equal(args, Call('extend_python_path', args, 1)) " reset
+	"
+	let flat = s:g._flattened
+	function s:g.get_node_id()
+		return self
 	endfunction
-	call assert_true(IsCust('runner'))
-	call assert_notequal(s:g._orig.runner, s:g.runner)
-	call assert_true(g:pytest_pdb_break_overrides.runner('foo', 'bar'))
-	let s:g.runner = s:g._orig.runner
+	call assert_notequal(flat, Call('get_node_id', [], 1)) " reset
+	let flat = s:g._flattened
+	call assert_equal(flat, Call('get_node_id', []))
+	"
+	function! g:pytest_pdb_break_overrides.runner(...) closure
+		call assert_equal(overrideables, sort(keys(self)))
+		return args == a:000
+	endfunction
+	call assert_true(Call('runner', args, 1))
 endfunction "}}}
 
-call s:runfail(funcref('s:test_is_custom'))
+call s:runfail(funcref('s:test_call'))
 
 
 " get_context -----------------------------------------------------------------
@@ -232,7 +248,7 @@ function s:test_get_context() "{{{
 	call assert_false(s:s.exists('s:home'))
 	call assert_false(s:s.exists('s:helper'))
 	call assert_false(exists('b:pytest_pdb_break_context'))
-	call s:g.get_context()
+	call s:o.get_context()
 	call assert_true(s:s.exists('s:plugin'))
 	call assert_true(s:s.exists('s:home'))
 	call assert_true(s:s.exists('s:helper'))
@@ -243,7 +259,7 @@ function s:test_get_context() "{{{
 	" Script-local vars persist
 	let before = map(['plugin', 'home', 'helper'], 's:s.get(v:val)')
 	let b:pytest_pdb_break_python_exe = '/tmp/fakepython'
-	call s:g.get_context()
+	call s:o.get_context()
 	call assert_true(has_key(b:pytest_pdb_break_context, '/tmp/fakepython'))
 	let after = map(['plugin', 'home', 'helper'], 's:s.get(v:val)')
 	call assert_equal(before, after)
@@ -255,7 +271,7 @@ function s:test_get_context() "{{{
 	let vpt = vbin . '/pytest'
 	let $PATH = vbin .':'. $PATH
 	call assert_equal(vpt, exepath('pytest'))
-	call s:g.get_context()
+	call s:o.get_context()
 	call assert_true(has_key(b:pytest_pdb_break_context, vpy))
 	let $PATH = origpath
 endfunction "}}}
@@ -292,10 +308,6 @@ let s:src_one_class = [
 			\ ]
 
 function s:test_get_node_id_two_funcs() "{{{
-	" Override
-	let g:pytest_pdb_break_overrides.get_node_id = {-> a:000}
-	call assert_equal([1, 2, 3], s:g._orig.get_node_id(1, 2, 3))
-	let s:g.get_node_id = s:g._orig.get_node_id
 	" Setup
 	let buf = bufname('%')
 	call assert_true(buf =~# '^/')
@@ -309,33 +321,33 @@ function s:test_get_node_id_two_funcs() "{{{
 	call assert_true(getline('.') =~# 'def test_first')
 	" String
 	call cursor(pos)
-	let rv = s:g._orig.get_node_id()
+	let rv = s:o.get_node_id()
 	call assert_equal(join([buf, 'test_first'], '::'), rv)
 	" External
 	let ext_pos = searchpos('# a comment')
 	call assert_notequal([0, 0], ext_pos)
 	let [line_num, column] = pos
-	let rv = s:g._orig.get_node_id(1, [0, line_num, column, 0])
+	let rv = s:o.get_node_id(1, [0, line_num, column, 0])
 	call assert_equal([buf, 'test_first'], rv)
 	call assert_equal(ext_pos, getpos('.')[1:2])
 	" List
 	call cursor(pos)
-	let rv = s:g._orig.get_node_id(1)
+	let rv = s:o.get_node_id(1)
 	call assert_equal([buf, 'test_first'], rv)
 	call assert_equal(pos, getpos('.')[1:2])
 	" In def line
 	call cursor(1, 1)
 	call assert_true(search('test_first') > 0)
-	let rv = s:g._orig.get_node_id(1)
+	let rv = s:o.get_node_id(1)
 	call assert_equal([buf, 'test_first'], rv)
 	" Last line
 	call cursor(line('$'), 1)
 	normal! $
-	let rv = s:g._orig.get_node_id(1)
+	let rv = s:o.get_node_id(1)
 	call assert_equal([buf, 'test_last'], rv)
 	" No match
 	call cursor(ext_pos)
-	let rv = s:capture(funcref(s:g._orig.get_node_id, [1]))[0]
+	let rv = s:capture(funcref(s:o.get_node_id, [1]))[0]
 	call assert_equal(-1, rv)
 	call assert_equal(ext_pos, getpos('.')[1:2])
 endfunction "}}}
@@ -353,21 +365,21 @@ function s:test_get_node_id_one_class() "{{{
 	call assert_true(getline('.') =~# 'def test_one')
 	" String
 	call cursor(pos)
-	let rv = s:g._orig.get_node_id()
+	let rv = s:o.get_node_id()
 	call assert_equal(buf .'::TestBed::test_one', rv)
 	" With signature
 	call setline(1, 'class TestBed(object):')
 	call assert_equal(pos, getpos('.')[1:2])
-	let rv = s:g._orig.get_node_id()
+	let rv = s:o.get_node_id()
 	call assert_equal(buf .'::TestBed::test_one', rv)
 	" Last line
 	call cursor(line('$'), 1)
-	let rv = s:g._orig.get_node_id()
+	let rv = s:o.get_node_id()
 	call assert_equal(buf .'::TestBed::test_two', rv)
 	" Between
 	call cursor(1, 1)
 	call assert_true(search('^$') > 0)
-	let rv = s:g._orig.get_node_id()
+	let rv = s:o.get_node_id()
 	call assert_equal(buf .'::TestBed::test_one', rv)
 endfunction "}}}
 
@@ -378,64 +390,61 @@ call s:pybuf('test_get_node_id_one_class')
 " query_helper ----------------------------------------------------------------
 
 function s:test_query_helper() "{{{
-	let g:pytest_pdb_break_overrides.query_helper = {-> a:000}
-	call assert_equal([{'a': 1}, 2, 3], s:g._orig.query_helper({'a': 1}, 2, 3))
-	let s:g.query_helper = s:g._orig.query_helper
 	" ERROR - no pytest (unrealistic since get_context() uses shebang)
 	call assert_true(filereadable(s:s.get('helper')))
 	let ctx = {'exe': s:tempdir . '/.venv_bare/bin/python'}
 	call assert_equal(ctx.exe, exepath(ctx.exe), 'exepath mismatch')
-	let [__, out] = s:capture(funcref(s:g.query_helper, [ctx]))
+	let [__, out] = s:capture(funcref(s:o.query_helper, [ctx]))
 	call assert_match('Traceback.*ModuleNotFoundError', out)
 	call assert_equal({'exe': s:tempdir . '/.venv_bare/bin/python'}, ctx)
 	" Has pytest
 	let ctx = {'exe': s:tempdir . '/.venv_base/bin/python'}
-	call s:g.query_helper(ctx)
+	call s:o.query_helper(ctx)
 	call assert_false(ctx.registered)
 	call assert_equal(getcwd(), ctx.rootdir)
 	call assert_equal(s:tempdir . '/.venv_base/bin/python', ctx.exe)
 	" ERROR - Bad option
 	let ctx = {'exe': s:tempdir . '/.venv_base/bin/python'}
-	let [__, out] = s:capture(funcref(s:g.query_helper, [ctx, '--fake']))
+	let [__, out] = s:capture(funcref(s:o.query_helper, [ctx, '--fake']))
 	call assert_match('unrecognized arguments', out)
 	call assert_equal({'exe': s:tempdir . '/.venv_base/bin/python'}, ctx)
 	" Node-id - nonexistent/unsaved file
 	call assert_false(filereadable(bufname('%')))
 	let ctx = {'exe': s:tempdir . '/.venv_base/bin/python'}
-	call s:g.query_helper(ctx, bufname('%'))
+	call s:o.query_helper(ctx, bufname('%'))
 	call assert_false(ctx.registered)
 	call assert_equal(getcwd(), ctx.rootdir)
 	" Node-id - nonexistent/unsaved file and unknown func
 	let ctx = {'exe': s:tempdir . '/.venv_base/bin/python'}
-	call s:g.query_helper(ctx, bufname('%') .'::test_fake')
+	call s:o.query_helper(ctx, bufname('%') .'::test_fake')
 	call assert_false(ctx.registered)
 	call assert_equal(getcwd(), ctx.rootdir)
 	" Node-id - real file, unknown func
 	call s:write_src(s:src_two_funcs)
 	let ctx = {'exe': s:tempdir . '/.venv_base/bin/python'}
-	call s:g.query_helper(ctx, bufname('%') .'::test_fake')
+	call s:o.query_helper(ctx, bufname('%') .'::test_fake')
 	call assert_false(ctx.registered)
 	call assert_equal(getcwd(), ctx.rootdir)
 	" Node-id - real file, real func
 	let ctx = {'exe': s:tempdir . '/.venv_base/bin/python'}
-	call s:g.query_helper(ctx, bufname('%') .'::test_first')
+	call s:o.query_helper(ctx, bufname('%') .'::test_first')
 	call assert_false(ctx.registered)
 	call assert_equal(getcwd(), ctx.rootdir)
 	" Alt rootdir (empty, not ancestor of CWD or node-id path)
 	let ctx = {'exe': s:tempdir . '/.venv_base/bin/python'}
 	let altroot = s:temphome .'/test_get_context'
-	call s:g.query_helper(ctx, '--rootdir='. altroot, bufname('%'))
+	call s:o.query_helper(ctx, '--rootdir='. altroot, bufname('%'))
 	call assert_false(ctx.registered)
 	call assert_equal(altroot, ctx.rootdir)
 	" Has plugin
 	let ctx = {'exe': s:tempdir . '/.venv_self/bin/python'}
-	call s:g.query_helper(ctx, bufname('%') .'::test_fake')
+	call s:o.query_helper(ctx, bufname('%') .'::test_fake')
 	call assert_true(ctx.registered)
 	call assert_equal(getcwd(), ctx.rootdir)
 	" With ini
 	call writefile(['[pytest]', 'addopts = -v'], 'pytest.ini')
 	let ctx = {'exe': s:tempdir . '/.venv_self/bin/python'}
-	call s:g.query_helper(ctx, bufname('%') .'::test_fake')
+	call s:o.query_helper(ctx, bufname('%') .'::test_fake')
 	call assert_true(ctx.registered)
 	call assert_equal(getcwd(), ctx.rootdir)
 endfunction "}}}
@@ -454,23 +463,23 @@ function s:test_extend_python_path() "{{{
 	call assert_true(empty($PYTHONPATH))
 	"
 	let ctx = {'PP': '/tmp/fake'}
-	call assert_equal(ctx.PP, s:g.extend_python_path(ctx))
+	call assert_equal(ctx.PP, s:o.extend_python_path(ctx))
 	unlet ctx.PP
 	let home = s:s.get('home')
 	call assert_true(filereadable(home . '/tox.ini'))
-	call assert_equal(home, s:g.extend_python_path(ctx))
+	call assert_equal(home, s:o.extend_python_path(ctx))
 	call assert_equal(ctx.PP, home)
 	unlet ctx.PP
 	"
 	let first = s:temphome . '/first'
 	let $PYTHONPATH = first
-	call assert_equal(home .':'. first, s:g.extend_python_path(ctx))
+	call assert_equal(home .':'. first, s:o.extend_python_path(ctx))
 	call assert_equal(home .':'. first, ctx.PP)
 	" No uniq-like filtering
 	let $PYTHONPATH = ctx.PP
 	unlet ctx.PP
 	let expected = join([home, home, first], ':')
-	call assert_equal(expected, s:g.extend_python_path(ctx))
+	call assert_equal(expected, s:o.extend_python_path(ctx))
 	call assert_equal(expected, ctx.PP)
 	try
 		unlet $PYTHONPATH
@@ -488,14 +497,14 @@ function s:test_runner() "{{{
 	" Mock split, get_node_id
 	let thisbuf = bufname('%')
 	let dirname = fnamemodify(bufname('%'), ':h')
-	let g:pytest_pdb_break_overrides.split = {-> a:000}
-	let g:pytest_pdb_break_overrides.get_node_id = {-> [thisbuf, 'test_first']}
+	let s:g.split = {-> a:000}
+	let s:g.get_node_id = {-> [thisbuf, 'test_first']}
 	let b:pytest_pdb_break_python_exe = '/tmp/fakepython'
-	let ctx = s:g.get_context()
+	let ctx = s:o.get_context()
 	" Inject plugin
 	let ctx.registered = v:false
 	let ctx.rootdir = dirname
-	let rv = s:g.runner('⁉')
+	let rv = s:o.runner('⁉')
 	let plhome = s:s.get('home')
 	if has('nvim')
 		call assert_equal([
@@ -525,7 +534,7 @@ function s:test_runner() "{{{
 	" Plugin present
 	let ctx.registered = v:true
 	let ctx.rootdir = dirname
-	let rv = s:g.runner('⁉')
+	let rv = s:o.runner('⁉')
 	call assert_equal([[
 				\ '/tmp/fakepython', '-mpytest',
 				\ '⁉', '--break='. thisbuf .':1',
@@ -535,7 +544,8 @@ function s:test_runner() "{{{
 	function! s:g.query_helper(...)
 		echon 'query_helper ran'
 	endfunction
-	let [rv, out] = s:capture(funcref(s:g.runner, []))
+	call s:reset_chain()
+	let [rv, out] = s:capture(funcref(s:o.runner, []))
 	call assert_match('query_helper ran', out)
 	call assert_equal([], ctx.last.uopts)
 	let expect_cmdl = [
@@ -548,7 +558,8 @@ function s:test_runner() "{{{
 	" As does absence of registration check
 	unlet ctx.registered
 	let s:g.query_helper = {-> extend(ctx, {'registered': v:true})}
-	let rv = s:g.runner()
+	call s:reset_chain()
+	let rv = s:o.runner()
 	call assert_true(exists('ctx.registered'))
 	call assert_equal([expect_cmdl, expect_jobd], rv)
 endfunction "}}}
