@@ -1,5 +1,5 @@
 
-execute "set runtimepath^=" . fnamemodify('$MYVIMRC', ':p:h')
+execute 'set runtimepath=' . fnamemodify('$MYVIMRC', ':p:h') . ',' . $VIMRUNTIME
 syntax on
 filetype plugin indent on
 

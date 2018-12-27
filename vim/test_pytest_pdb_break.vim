@@ -1,6 +1,17 @@
+if !has('unix')
+	cquit!
+endif
+
+" Write python source files for inspection
+let s:want_write = exists('$PYTEST_PDB_BREAK_TEST_VIM_WRITE')
+			\ && $PYTEST_PDB_BREAK_TEST_VIM_WRITE ==# '1'
+if s:want_write
+	let s:temphome = '/tmp/pytest-pdb-break-test/vim'
+	call mkdir(s:temphome, 'p')
+endif
 
 " Get autoload script's # (not ours)
-function! s:sid()
+function s:sid()
 	return matchstr(expand('<sfile>'), '<SNR>\zs\d\+\ze_runner.*$')
 endfun
 let s:g = g:pytest_pdb_break_overrides
@@ -12,18 +23,43 @@ let s:s = s:g._s
 call assert_equal(expand('%:p:h') . '/autoload/pytest_pdb_break.vim',
 			\ s:s.get('file'))
 
-function! s:pybuf(f)
-	let tempname = tempname() . '.py'
+function s:pybuf(name)
+	if s:want_write
+		let tempname = s:temphome . '/' . a:name . '.py'
+		call delete(tempname)
+	else
+		let tempname = tempname() . '-pytest_pdb_break.py'
+	endif
+	call assert_true(exists('*s:'. a:name))
+	let Func = funcref('s:'. a:name)
 	execute 'edit '. tempname
 	call assert_equal('python', &filetype)
 	call assert_false(exists('b:pytest_pdb_break_context'))
 	call assert_false(exists('b:pytest_pdb_break_python_exe'))
 	try
-		call a:f()
+		call Func()
 	finally
 		execute bufnr(tempname) .'bdelete!'
 		call assert_false(bufloaded(tempname))
+		call assert_equal(s:this_buffer, bufname('%'))
 	endtry
+endfunction
+
+function s:capture(func, ...)
+	let rv = v:null
+	redir => output
+	try
+		silent exec 'let rv = a:func()'
+	finally
+		redir END
+		if s:want_write
+			let outlines = ['<<< '. string(a:func)] + split(output, "\n")
+			let outname = bufname('%') . '.log'
+			let mode = a:0 ? a:1 : ''
+			call writefile(outlines, outname, mode)
+		endif
+	endtry
+	return rv
 endfunction
 
 
@@ -45,9 +81,9 @@ endfor
 
 " XXX why does this propagate (not handled by assert_fails)?
 try
-	call assert_fails(call(s:is_custom, ['get_python_jump_prev']))
+	call assert_fails(call(s:is_custom, ['is_custom']))
 catch /.*/
-	call assert_exception('get_python_jump_prev is not overrideable')
+	call assert_exception('is_custom is not overrideable')
 endtry
 
 function! g:pytest_pdb_break_overrides.runner(...)
@@ -63,21 +99,6 @@ call assert_true(s:is_custom('runner'))
 call assert_notequal(s:g._orig.runner, s:g.runner)
 call assert_true(g:pytest_pdb_break_overrides.runner('foo', 'bar'))
 let s:g.runner = s:g._orig.runner " reset
-
-
-" get_python_jump_prev --------------------------------------------------------
-
-let s:get_python_jump_prev = funcref(s:pfx . 'get_python_jump_prev')
-try
-	call assert_fails(s:get_python_jump_prev(), 'No python ftplugin in rtp')
-catch /.*/
-	call assert_exception('No python ftplugin in rtp')
-endtry
-
-function s:t_get_python_jump_prev()
-	call assert_equal(2, type(s:get_python_jump_prev()))
-endfunction
-call s:pybuf(funcref('s:t_get_python_jump_prev'))
 
 
 " get_context -----------------------------------------------------------------
@@ -103,15 +124,143 @@ function s:t_get_context()
 	let after = map(['plugin', 'home', 'helper'], 's:s.get(v:val)')
 	call assert_equal(before, after)
 endfunction
-call s:pybuf(funcref('s:t_get_context'))
+call s:pybuf('t_get_context')
 call assert_equal(s:g._orig.get_context, s:g.get_context)
 
 
 " get_node_id -----------------------------------------------------------------
 
+function s:get_python_jump_prev()
+	" Hijack built-in [m
+	redir => l:cap
+	silent! scriptnames
+	redir END
+	let pat = '\zs\d\+\ze: *' . $VIMRUNTIME . '/ftplugin/python.vim'
+	let mstr = matchstr(l:cap, pat)
+	let funcname = '<SNR>'. mstr .'_Python_jump'
+	" Original b:prev pattern escapes <bar> because it's used in a mapping
+	let args = ['n', '\v^\s*(class|def|async def)>', 'Wb']
+	return funcref(funcname, args)
+endfunction
+
 let g:pytest_pdb_break_overrides.get_node_id = {-> a:000}
 call assert_equal([1, 2, 3], s:g._orig.get_node_id(1, 2, 3))
 let s:g.get_node_id = s:g._orig.get_node_id
+
+let s:src_two_funcs = [
+			\ 'def test_first():',
+			\ '    varone = True',
+			\ '    assert varone',
+			\ '',
+			\ 'def some_func():',
+			\ '    # a comment',
+			\ '    return 1',
+			\ '',
+			\ 'def test_last(request):',
+			\ '    vartwo = True',
+			\ '    assert vartwo',
+			\ ]
+
+function s:t_get_node_id_two_funcs()
+	let buf = bufname('%')
+	call assert_true(buf =~ '^/')
+	let s:python_jump_prev = s:get_python_jump_prev()
+	call append(0, s:src_two_funcs)
+	normal dG
+	call assert_equal('    assert vartwo', getline('$'))
+	if s:want_write
+		silent write
+	endif
+	" Baseline
+	call cursor(1, 1)
+	let pos = searchpos('varone')
+	call assert_notequal([0, 0], pos)
+	call s:python_jump_prev()
+	call assert_true(getline('.') =~# 'def test_first')
+	" String
+	call cursor(pos)
+	let rv = s:g._orig.get_node_id()
+	call assert_equal(join([buf, 'test_first'], '::'), rv)
+	" External
+	let ext_pos = searchpos('# a comment')
+	call assert_notequal([0, 0], ext_pos)
+	let [line_num, column] = pos
+	let rv = s:g._orig.get_node_id(1, [0, line_num, column, 0])
+	call assert_equal([buf, 'test_first'], rv)
+	call assert_equal(ext_pos, getpos('.')[1:2])
+	" List
+	call cursor(pos)
+	let rv = s:g._orig.get_node_id(1)
+	call assert_equal([buf, 'test_first'], rv)
+	call assert_equal(pos, getpos('.')[1:2])
+	" In def line
+	call cursor(1, 1)
+	call assert_true(search('test_first') > 0)
+	let rv = s:g._orig.get_node_id(1)
+	call assert_equal([buf, 'test_first'], rv)
+	" Last line
+	call cursor(line('$'), 1)
+	normal $
+	let rv = s:g._orig.get_node_id(1)
+	call assert_equal([buf, 'test_last'], rv)
+	" No match
+	call cursor(ext_pos)
+	let rv = s:capture(funcref(s:g._orig.get_node_id, [1]))
+	call assert_equal(-1, rv)
+	call assert_equal(ext_pos, getpos('.')[1:2])
+endfunction
+call s:pybuf('t_get_node_id_two_funcs')
+
+let s:src_one_class = [
+			\ 'class TestBed:',
+			\ '    def test_one(self):',
+			\ '        varone = 1',
+			\ '        assert varone',
+			\ '',
+			\ '    @deco',
+			\ '    def test_two(self, request):',
+			\ '        vartwo = 2',
+			\ '        assert vartwo',
+			\ ]
+
+function s:t_get_node_id_one_class()
+	let buf = bufname('%')
+	call assert_true(buf =~ '^/')
+	let s:python_jump_prev = s:get_python_jump_prev()
+	call append(0, s:src_one_class)
+	normal dG
+	call assert_equal('        assert vartwo', getline('$'))
+	if s:want_write
+		silent write
+	endif
+	" Baseline
+	call cursor(1, 1)
+	let pos = searchpos('varone')
+	call assert_notequal([0, 0], pos)
+	call s:python_jump_prev()
+	call assert_true(getline('.') =~# 'def test_one')
+	" String
+	call cursor(pos)
+	let rv = s:g._orig.get_node_id()
+	call assert_equal(buf .'::TestBed::test_one', rv)
+	" With signature
+	call setline(1, 'class TestBed(object):')
+	call assert_equal(pos, getpos('.')[1:2])
+	let rv = s:g._orig.get_node_id()
+	call assert_equal(buf .'::TestBed::test_one', rv)
+	" Last line
+	call cursor(line('$'), 1)
+	let rv = s:g._orig.get_node_id()
+	call assert_equal(buf .'::TestBed::test_two', rv)
+	" Between
+	call cursor(1, 1)
+	call assert_true(search('^$') > 0)
+	let rv = s:g._orig.get_node_id()
+	call assert_equal(buf .'::TestBed::test_one', rv)
+endfunction
+
+call s:pybuf('t_get_node_id_one_class')
+call assert_equal(s:g._orig.get_node_id, s:g.get_node_id)
 
 
 " Report ----------------------------------------------------------------------
