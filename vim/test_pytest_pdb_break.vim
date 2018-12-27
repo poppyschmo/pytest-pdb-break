@@ -111,36 +111,36 @@ function s:capture(func, ...) "{{{
 	return rv
 endfunction "}}}
 
-function s:t_fail(ecode)
+function s:test_fail(ecode)
 	throw 'Should be '. a:ecode
 endfunction
-call assert_equal(101, s:runfail(funcref('s:t_fail', [101]),
+call assert_equal(101, s:runfail(funcref('s:test_fail', [101]),
 			\ v:null, v:true))
 call assert_equal(['Should be 101'], s:errors)
 let s:errors = []
 call assert_equal(102, s:runfail(function('acos', [-1]),
-			\ funcref('s:t_fail', [102]),
+			\ funcref('s:test_fail', [102]),
 			\ v:true))
 call assert_equal(['Should be 102'], s:errors)
 let s:errors = []
 call s:runfail(function('assert_true', [v:true])) " No v:errors
 
-function s:t_fake()
+function s:test_fake()
 	call assert_true(v:false)
 endfunction
 " Exit code matches len(v:errors)
 call assert_equal(1, s:capture(
-			\ funcref('s:runfail', [funcref('s:t_fake'), v:null, v:true]),
-			\ s:temphome . '/t_fake.log'))
-call assert_true(len(s:errors) == 1 && s:errors[0] =~# 't_fake.*line 1')
-call assert_true(len(v:errors) == 1 && v:errors[0] =~# 't_fake.*line 1')
+			\ funcref('s:runfail', [funcref('s:test_fake'), v:null, v:true]),
+			\ s:temphome . '/test_fake.log'))
+call assert_true(len(s:errors) == 1 && s:errors[0] =~# 'test_fake.*line 1')
+call assert_true(len(v:errors) == 1 && v:errors[0] =~# 'test_fake.*line 1')
 let s:errors = []
 let v:errors = []
 
 
 " is_custom -------------------------------------------------------------------
 
-function s:t_is_custom() "{{{
+function s:test_is_custom() "{{{
 	call assert_true(exists('*'. s:pfx .'is_custom'))
 	let Ic = funcref(s:pfx . 'is_custom')
 	let overrideables = [
@@ -172,12 +172,12 @@ function s:t_is_custom() "{{{
 	let s:g.runner = s:g._orig.runner " reset
 endfunction "}}}
 
-call s:runfail(funcref('s:t_is_custom'))
+call s:runfail(funcref('s:test_is_custom'))
 
 
 " get_context -----------------------------------------------------------------
 
-function s:t_get_context() "{{{
+function s:test_get_context() "{{{
 	call assert_false(s:s.exists('s:plugin'))
 	call assert_false(s:s.exists('s:home'))
 	call assert_false(s:s.exists('s:helper'))
@@ -199,7 +199,7 @@ function s:t_get_context() "{{{
 	call assert_equal(before, after)
 endfunction "}}}
 
-call s:pybuf('t_get_context')
+call s:pybuf('test_get_context')
 call assert_equal(s:g._orig.get_context, s:g.get_context)
 
 
@@ -236,7 +236,7 @@ let s:src_two_funcs = [
 			\ '    assert vartwo',
 			\ ]
 
-function s:t_get_node_id_two_funcs() "{{{
+function s:test_get_node_id_two_funcs() "{{{
 	let buf = bufname('%')
 	call assert_true(buf =~# '^/')
 	let s:python_jump_prev = s:get_python_jump_prev()
@@ -283,7 +283,7 @@ function s:t_get_node_id_two_funcs() "{{{
 	call assert_equal(ext_pos, getpos('.')[1:2])
 endfunction "}}}
 
-call s:pybuf('t_get_node_id_two_funcs')
+call s:pybuf('test_get_node_id_two_funcs')
 
 let s:src_one_class = [
 			\ 'class TestBed:',
@@ -297,7 +297,7 @@ let s:src_one_class = [
 			\ '        assert vartwo',
 			\ ]
 
-function s:t_get_node_id_one_class() "{{{
+function s:test_get_node_id_one_class() "{{{
 	let buf = bufname('%')
 	call assert_true(buf =~# '^/')
 	let s:python_jump_prev = s:get_python_jump_prev()
@@ -331,7 +331,7 @@ function s:t_get_node_id_one_class() "{{{
 	call assert_equal(buf .'::TestBed::test_one', rv)
 endfunction "}}}
 
-call s:pybuf('t_get_node_id_one_class')
+call s:pybuf('test_get_node_id_one_class')
 call assert_equal(s:g._orig.get_node_id, s:g.get_node_id)
 
 
