@@ -39,12 +39,13 @@ endfunction "}}}
 
 function s:_report() "{{{
 	let s:errors += map(copy(v:errors), funcref('s:_fmterrors'))
-	if has('nvim')
-		echo join(s:errors, '')
-	elseif exists('$VIMTEMP')
-		execute 'redir > ' . $VIMTEMP
-		echo join(s:errors, '')
-		redir END
+	if !empty($PYTEST_PDB_BREAK_TEST_VIM_TEST_OUTPUT)
+		call writefile(s:errors, $PYTEST_PDB_BREAK_TEST_VIM_TEST_OUTPUT)
+	else
+		" https://github.com/junegunn/vader.vim ... vader#print_stderr
+		for line in s:errors
+		  verbose echon line."\n"
+		endfor
 	endif
 endfunction "}}}
 

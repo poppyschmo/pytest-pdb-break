@@ -1,6 +1,7 @@
 
+filetype off
 execute 'set runtimepath=' . fnamemodify('$MYVIMRC', ':p:h') . ',' . $VIMRUNTIME
-syntax on
 filetype plugin indent on
+syntax enable
 
 " vim:ft=vim
