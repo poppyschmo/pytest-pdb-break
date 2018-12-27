@@ -144,9 +144,8 @@ function s:t_is_custom() "{{{
 	call assert_true(exists('*'. s:pfx .'is_custom'))
 	let Ic = funcref(s:pfx . 'is_custom')
 	let overrideables = [
-				\ 'check_plugin', 'extend_python_path',
-				\ 'get_context', 'get_node_id',
-				\ 'runner', 'split'
+				\ 'extend_python_path', 'get_context', 'get_node_id',
+				\ 'query_helper', 'runner', 'split'
 				\ ]
 	for name in overrideables
 		call assert_false(Ic(name), name .' has not been overridden')

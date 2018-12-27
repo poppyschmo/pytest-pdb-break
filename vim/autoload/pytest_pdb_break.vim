@@ -95,42 +95,43 @@ function! s:get_node_id(...) abort "{{{
 	return a:0 && a:1 ? reverse(nodeid) : join(reverse(nodeid), '::')
 endfunction "}}}
 
-function! s:check_plugin(ctx, ...) abort "{{{
-	if s:is_custom('check_plugin')
-		return call(g:pytest_pdb_break_overrides.check_plugin, [a:ctx] + a:000)
+function! s:query_helper(ctx, ...) abort "{{{
+	if s:is_custom('query_helper')
+		return call(g:pytest_pdb_break_overrides.query_helper, [a:ctx] + a:000)
 	endif
 	let context = a:ctx
-	if !has_key(context, 'registered')
-		" Heard somewhere that using job control instead of system() can help
-		" with shell-quoting issues. No idea.
-		if has('nvim')
-			let jd = {'stdout_buffered': v:true, 'stderr_buffered': v:true}
-			let lines = readfile(s:helper)
-			let jd.id = jobstart([context.exe, '-'] + a:000, jd)
-			let jd.sent = chansend(jd.id, lines)
-			call chanclose(jd.id, 'stdin')
-			let jd.exit = jobwait([jd.id], 1000)[0]
-			if jd.exit
-				let context.helper_rv = jd
-				echo join(jd.stderr, "\n")
-				throw 'Error querying pytest'
-			endif
-			call extend(context, json_decode(jd.stdout[0]))
-		else
-			" call ch_logfile('channellog', 'a')
-			let jd = {'in_io': 'file', 'in_name': s:helper}
-			let job = job_start([context.exe, '-'] + a:000, jd)
-			let jd.stdout = ch_readraw(job)
-			call extend(jd, job_info(job))
-			if jd.exitval || empty(jd.stdout)
-				let context.helper_rv = jd
-				echo ch_readraw(job, {'part': 'err'})
-				throw 'Error querying pytest'
-			endif
-			call extend(context, json_decode(jd.stdout))
+	" XXX need to clarify the effect of including a specific node-id vs any
+	" (valid) node-id when querying for a particular project/exe context. If
+	" two ids for one context can produce distinct outputs, it would defy the
+	" purpose of this IF block, which only runs when nothing's been mapped for
+	" this lookup.  This may ultimately mean exe paths shouldn't be used as
+	" keys for the context dict.
+	if has('nvim')
+		let jd = {'stdout_buffered': v:true, 'stderr_buffered': v:true}
+		let lines = readfile(s:helper)
+		let jd.id = jobstart([context.exe, '-'] + a:000, jd)
+		let jd.sent = chansend(jd.id, lines)
+		call chanclose(jd.id, 'stdin')
+		let jd.exit = jobwait([jd.id], 1000)[0]
+		if jd.exit
+			let context.helper_rv = jd
+			echo join(jd.stderr, "\n")
+			throw 'Error querying pytest'
 		endif
+		call extend(context, json_decode(jd.stdout[0]))
+	else
+		" call ch_logfile('channellog', 'a')
+		let jd = {'in_io': 'file', 'in_name': s:helper}
+		let job = job_start([context.exe, '-'] + a:000, jd)
+		let jd.stdout = ch_readraw(job)
+		call extend(jd, job_info(job))
+		if jd.exitval || empty(jd.stdout)
+			let context.helper_rv = jd
+			echo ch_readraw(job, {'part': 'err'})
+			throw 'Error querying pytest'
+		endif
+		call extend(context, json_decode(jd.stdout))
 	endif
-	return context.registered
 endfunction "}}}
 
 function! s:extend_python_path(ctx) abort "{{{
@@ -138,36 +139,38 @@ function! s:extend_python_path(ctx) abort "{{{
 	if s:is_custom('extend_python_path')
 		return g:pytest_pdb_break_overrides.extend_python_path(a:ctx)
 	endif
-	let context = a:ctx
-	if has_key(context, 'PP')
-		return context.PP
+	let ctx = a:ctx
+	if has_key(ctx, 'PP')
+		return ctx.PP
 	endif
 	let val = expand('$PYTHONPATH')
 	let val = val ==# '$PYTHONPATH' ? [] : split(val, ':')
 	call add(val, fnameescape(s:home))
-	let context.PP = join(val, ':')
-	return context.PP
+	let ctx.PP = join(val, ':')
+	return ctx.PP
 endfunction "}}}
 
 function! s:runner(...) abort "{{{
 	if s:is_custom('runner')
 		return call(g:pytest_pdb_break_overrides.runner, a:000)
 	endif
-	let nodeid = s:get_node_id(1)
-	let context = s:get_context()
-	let args = []
-	let cmd = [context.exe, '-mpytest']
-	let arg = join(nodeid, '::')
-	let registered = call('s:check_plugin', [context] + a:000 + [arg])
-	if !registered
-		let preenv = s:extend_python_path(context)
-		let cmd = ['env', printf('PYTHONPATH=%s', preenv)] + cmd
-		call extend(args, ['-p', 'pytest_pdb_break'])
+	let ctx = s:get_context()
+	let nid = s:get_node_id(1)
+	let cmd = [ctx.exe, '-mpytest']
+	let arg = join(nid, '::')
+	let opts = []
+	let last = get(ctx, 'last', {})
+	if !has_key(ctx, 'registered') || a:000 != get(last, 'uopts', a:000)
+		call call('s:query_helper', [ctx] + a:000 + [arg])
 	endif
-	let opt = printf('--break=%s:%s', nodeid[0], line('.'))
-	call extend(args, [opt, arg])
-	let context.last = cmd + a:000 + args
-	return call('s:split', context.last)
+	if !ctx.registered
+		let preenv = s:extend_python_path(ctx)
+		let cmd = ['env', printf('PYTHONPATH=%s', preenv)] + cmd
+		let opts = ['-p', 'pytest_pdb_break']
+	endif
+	call add(opts,  printf('--break=%s:%s', nid[0], line('.')))
+	let ctx.last = {'cmd': cmd, 'uopts': a:000, 'opts': opts, 'node_id': nid}
+	return call('s:split', cmd + a:000 + opts + [arg])
 endfunction "}}}
 
 function! s:split(...) abort "{{{
@@ -191,7 +194,7 @@ endfunction "}}}
 
 
 let s:defuncs = {'get_context': funcref('s:get_context'),
-				\ 'check_plugin': funcref('s:check_plugin'),
+				\ 'query_helper': funcref('s:query_helper'),
 				\ 'extend_python_path': funcref('s:extend_python_path'),
 				\ 'get_node_id': funcref('s:get_node_id'),
 				\ 'runner': funcref('s:runner'),
