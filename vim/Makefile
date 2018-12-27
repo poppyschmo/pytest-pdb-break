@@ -1,4 +1,5 @@
 NVIM ?= nvim
+VIM ?= vim
 PYTEST_PDB_BREAK_TEST_TEMPDIR ?= /tmp/pytest-pdb-break-test
 VENVBARE ?= $(PYTEST_PDB_BREAK_TEST_TEMPDIR)/.venv_bare
 VENVBASE ?= $(PYTEST_PDB_BREAK_TEST_TEMPDIR)/.venv_base
@@ -14,7 +15,10 @@ ifeq (x$(VIRTUAL_ENV),$(findstring x$(VIRTUAL_ENV),x$(PATH)))
 	unexport PYTHONPATH
 endif
 endif
-.phony: neovim
+.phony: neovim vim8
+
+vim8: | $(VENVBARE) $(VENVBASE) $(VENVSELF)
+	$(VIM) -Nnesu test_initrc -S test_pytest_pdb_break.vim
 
 neovim: | $(VENVBARE) $(VENVBASE) $(VENVSELF)
 	$(NVIM) -n -u test_initrc -i NONE -S test_pytest_pdb_break.vim --headless

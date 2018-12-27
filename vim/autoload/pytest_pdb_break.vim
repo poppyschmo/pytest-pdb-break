@@ -104,10 +104,17 @@ function! s:query_helper(ctx, ...) abort "{{{
 	endif
 	let context = a:ctx
 	let cmdline = [context.exe, '-'] + a:000
+	if !has('nvim')
+		let cmdline = join(cmdline)
+	endif
 	let lines = readfile(s:helper)
 	try
 		let result = system(cmdline, lines)
-		let decoded = json_decode(result)
+		try
+			let decoded = json_decode(result)
+		catch /^Vim\%((\a\+)\)\=:E474/
+			throw result
+		endtry
 		call extend(context, decoded)
 	catch /.*/
 		echohl WarningMsg | echo 'Problem calling helper' | echohl None

@@ -1,16 +1,16 @@
 scriptencoding utf-8
 
 if !has('unix')
-	127cquit!
+	cquit!
 endif
 
 if exists('$VIRTUAL_ENV')
-	126cquit!
+	cquit!
 endif
 
 let s:tempdir = $PYTEST_PDB_BREAK_TEST_TEMPDIR
 if empty(s:tempdir) || s:tempdir !~# '^\%(/[^/]\+\)\{2,}'
-	125cquit!
+	cquit!
 endif
 let s:temphome = s:tempdir .'/vim'
 call mkdir(s:temphome, 'p')
@@ -81,14 +81,15 @@ function s:runfail(test_func, ...) "{{{
 			endtry
 		endif
 		if !empty(s:errors) && !defer
-			echo join(s:errors, "\n") . "\n"
+			verbose echo join(s:errors, "\n") . "\n"
 		endif
 		if !empty(v:errors)
 			let ec = len(v:errors)
 			call s:_report()
 		endif
 		if ec && !defer
-			execute ec .'cquit!'
+			" execute ec .'cquit!'
+			cquit!
 		endif
 		call s:restore_overrides()
 	endtry
@@ -284,19 +285,6 @@ let s:src_one_class = [
 			\ '        assert vartwo',
 			\ ]
 
-function s:_get_python_jump_prev() "{{{
-	" Hijack built-in [m
-	redir => l:cap
-	silent! scriptnames
-	redir END
-	let pat = '\zs\d\+\ze: *' . $VIMRUNTIME . '/ftplugin/python.vim'
-	let mstr = matchstr(l:cap, pat)
-	let funcname = '<SNR>'. mstr .'_Python_jump'
-	" Original b:prev pattern escapes <bar> because it's used in a mapping
-	let args = ['n', '\v^\s*(class|def|async def)>', 'Wb']
-	return funcref(funcname, args)
-endfunction "}}}
-
 function s:test_get_node_id_two_funcs() "{{{
 	" Override
 	let g:pytest_pdb_break_overrides.get_node_id = {-> a:000}
@@ -305,13 +293,13 @@ function s:test_get_node_id_two_funcs() "{{{
 	" Setup
 	let buf = bufname('%')
 	call assert_true(buf =~# '^/')
-	let s:python_jump_prev = s:_get_python_jump_prev()
 	call s:write_src(s:src_two_funcs)
 	" Baseline
 	call cursor(1, 1)
 	let pos = searchpos('varone')
 	call assert_notequal([0, 0], pos)
-	call s:python_jump_prev()
+	" vint: -ProhibitCommandRelyOnUser
+	normal [m
 	call assert_true(getline('.') =~# 'def test_first')
 	" String
 	call cursor(pos)
@@ -354,7 +342,8 @@ function s:test_get_node_id_one_class() "{{{
 	call cursor(1, 1)
 	let pos = searchpos('varone')
 	call assert_notequal([0, 0], pos)
-	call s:python_jump_prev()
+	" vint: -ProhibitCommandRelyOnUser
+	normal [m
 	call assert_true(getline('.') =~# 'def test_one')
 	" String
 	call cursor(pos)
@@ -451,9 +440,11 @@ call s:pybuf('test_query_helper')
 " extend_python_path ----------------------------------------------------------
 
 function s:test_extend_python_path() "{{{
-	" Basic vim reminders
-	let $PYTHONPATH = ''
-	call assert_false(exists('$PYTHONPATH'))
+	try
+		unlet $PYTHONPATH
+	catch /^Vim\%((\a\+)\)\=:E488/
+		let $PYTHONPATH = ''
+	endtry
 	call assert_true(empty($PYTHONPATH))
 	"
 	let ctx = {'PP': '/tmp/fake'}
@@ -475,7 +466,11 @@ function s:test_extend_python_path() "{{{
 	let expected = join([home, home, first], ':')
 	call assert_equal(expected, s:g.extend_python_path(ctx))
 	call assert_equal(expected, ctx.PP)
-	let $PYTHONPATH = ''
+	try
+		unlet $PYTHONPATH
+	catch /^Vim\%((\a\+)\)\=:E488/
+		let $PYTHONPATH = ''
+	endtry
 endfunction "}}}
 
 call s:runfail(funcref('s:test_extend_python_path'))
@@ -519,9 +514,11 @@ function s:test_runner() "{{{
 				\ thisbuf.'::test_first'
 				\ ], rv)
 	" Change in args triggers call to query_helper (mocked)
-	let s:g.query_helper = {-> execute('echon "query_helper ran"')}
+	function! s:g.query_helper(...)
+		echon 'query_helper ran'
+	endfunction
 	let [rv, out] = s:capture(funcref(s:g.runner, []))
-	call assert_equal('query_helper ran', out)
+	call assert_match('query_helper ran', out)
 	call assert_equal([], ctx.last.uopts)
 	let expected = [
 				\ '/tmp/fakepython', '-mpytest',
