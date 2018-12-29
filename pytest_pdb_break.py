@@ -34,22 +34,22 @@ pytestPDB = pytest.set_trace.__self__
 
 class BreakLoc(namedtuple("BreakpointLocation", "file lnum name")):
     """Data object holding filename, line number, test name."""
+    __slots__ = ()
+
     def __new__(cls, *args, **kwargs):
         if len(args) == 1:
             item = args[0]
-            # Should probably just invoke constructor methods directly instead
-            # of playing overload cop, but space is tight in those [list comps]
             if isinstance(item, str):
                 return cls.from_cmd_option_arg_spec(item)
-            if hasattr(item, "location"):
+            elif hasattr(item, "location"):
                 return cls.from_pytest_item(item)
         return super().__new__(cls, *args, **kwargs)
 
-    def __repr__(self):
-        rv = super().__repr__()
-        if module_logger and hasattr(self.file, "parent"):
-            rv = rv.replace(str(self.file.parent), "...")
-        return rv
+    if module_logger:
+        def __repr__(self):
+            if hasattr(self.file, "parent"):
+                return super().__repr__().replace(str(self.file.parent), "…")
+            return super().__repr__()
 
     @classmethod
     def from_pytest_item(cls, item):
