@@ -85,7 +85,7 @@ This is the root path of cloned repo, not a \"lisp\" sub directory."
   "Return a plist with items :registered BOOL and :rootdir STRING.
 Include any ARGS when calling external helper."
   (let* ((home (or pytest-pdb-break--home (pytest-pdb-break--homer)))
-         (helper (concat home "get_config_info.py"))
+         (helper (concat home "helpers/get_config_info.py"))
          (json-object-type 'plist)
          json-false)
     (with-temp-buffer

@@ -29,7 +29,7 @@ function! s:get_context() abort "{{{
 		endif
 		let s:plugin = fnamemodify(plugin, ':p') " covers the rare './plugin'
 		let s:home = fnamemodify(s:plugin, ':h:p') " no trailing/
-		let s:helper = simplify(s:home . '/get_config_info.py')
+		let s:helper = simplify(s:home . '/helpers/get_config_info.py')
 	endif
 	if !exists('b:pytest_pdb_break_context')
 		let b:pytest_pdb_break_context = {}
