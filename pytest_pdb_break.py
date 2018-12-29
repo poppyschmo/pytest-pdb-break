@@ -91,16 +91,30 @@ class PdbBreak:
     debug = False
 
     def __init__(self, wanted, config):
-        config.pluginmanager.register(self, "pdb_break")
-        self.capman = config.pluginmanager.getplugin("capturemanager")
-        self.config = config
-        self.wanted = wanted
-        self.target = None
         if module_logger:
             self._l = LoggingHelper.get_logger("PdbBreak")
             self.debug = True
+        config.pluginmanager.register(self, "pdb_break")
+        self.capman = config.pluginmanager.getplugin("capturemanager")
+        self.config = config
+        self.wanted = self._resolve_wanted(wanted)
+        self.target = None
         self.last_pdb = None
         self.last_func = None
+
+    def _resolve_wanted(self, wanted):
+        if not wanted.file:
+            return wanted
+        file = wanted.file.expanduser()
+        rootdir = Path(self.config.rootdir)
+        assert rootdir.is_absolute()
+        try:
+            resolved = file.resolve(True)
+        except FileNotFoundError:
+            if Path().cwd().samefile(rootdir):
+                raise
+            resolved = (rootdir / file).resolve(True)
+        return wanted._replace(file=resolved)
 
     def pytest_internalerror(self, excrepr, excinfo):
         if self.debug:  # already prints to tw w/o cap
@@ -108,24 +122,9 @@ class PdbBreak:
 
     def pytest_runtestloop(self, session):
         """Find target or raise."""
-        if not self.wanted or not any(self.wanted):
-            return
         locs = [BreakLoc(i) for i in session.items]
         self.debug and self._l.prinspotl(1)
-        if self.wanted.file:
-            curdir = Path().resolve()
-            rootdir = Path(session.config.rootdir)
-            assert rootdir.is_absolute()
-            try:
-                _f = self.wanted.file.resolve(True)
-            except FileNotFoundError:
-                if curdir.samefile(rootdir):
-                    raise
-                os.chdir(rootdir)
-                _f = self.wanted.file.resolve(True)
-            self.wanted = self.wanted._replace(file=_f)
-            os.chdir(curdir)
-        else:
+        if not self.wanted.file:
             locs_files = set(l.file for l in locs)
             # If solo, assume good
             if len(locs_files) == 1:
@@ -301,6 +300,50 @@ def test_get_targets():
     assert items[2].name == "test_bar[three-3]"
 
 
+def test_resolve_wanted(tmp_path):
+    import attr
+    # Mock PdbBreak(...).config.rootdir
+    Mcfg = attr.make_class("Mcfg", ["rootdir"])
+    Mpdb = attr.make_class("Mpdb", ["config"])
+    Mpdb._resolve_wanted = PdbBreak._resolve_wanted
+    rootdir = tmp_path / "rootdir"
+    inst = Mpdb(Mcfg(rootdir))
+
+    rootdir.mkdir()
+    os.chdir(rootdir)
+    assert Path().cwd() == rootdir
+
+    # Relative, top-level
+    file = Path(rootdir / "test_top.py")
+    path = Path(file.name)
+    assert not path.is_absolute()
+    wanted = BreakLoc(path, 1, None)
+    with pytest.raises(FileNotFoundError):
+        inst._resolve_wanted(wanted)
+    file.write_text("pass")
+    result = inst._resolve_wanted(wanted)
+    assert result.file.exists()
+    assert result.file.is_absolute()
+
+    # Relative, subdir
+    subdir = rootdir / "subdir"
+    subdir.mkdir()
+    file = subdir / "test_sub.py"
+    path = file.relative_to(rootdir)
+    assert not path.is_absolute()
+    wanted = BreakLoc(path, 1, None)
+    #
+    file.write_text("pass")
+    result = inst._resolve_wanted(wanted)
+    assert result.file.exists()
+    assert result.file.is_absolute()
+    #
+    os.chdir(subdir)
+    result = inst._resolve_wanted(wanted)
+    assert result.file.exists()
+    assert result.file.is_absolute()
+
+
 def unansi(byte_string, as_list=True):
     import re
     out = re.sub("\x1b\\[[\\d;]+m", "", byte_string.decode().strip())
@@ -312,11 +355,9 @@ def unansi(byte_string, as_list=True):
 @pytest.fixture
 def testdir_setup(testdir):
     """Copy this file to testdir basetemp."""
-    from pathlib import PurePath
-    fpp = PurePath(__file__)
     testdir.makeconftest("""
         pytest_plugins = "%s"
-    """ % fpp.stem)
+    """ % Path(__file__).stem)
     return testdir
 
 
@@ -336,7 +377,7 @@ def test_invalid_arg(testdir_setup):
     # Non-existent file
     result = td.runpytest("--break=foo:99")
     assert result.ret == 3
-    lines = LineMatcher(result.stdout.lines[-5:])
+    lines = LineMatcher(result.stderr.lines)
     lines.fnmatch_lines("INTERNALERROR>*FileNotFoundError*")
 
     # Ambiguous case: no file named, but multiple given
