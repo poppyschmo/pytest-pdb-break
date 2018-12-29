@@ -29,7 +29,7 @@ if sys.version_info < (3, 6):
 
 module_logger = None
 try:
-    from logging_helper import LoggingHelper
+    from helpers.logging_helper import LoggingHelper
 except ImportError:
     pass
 else:
