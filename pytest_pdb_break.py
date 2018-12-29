@@ -74,10 +74,11 @@ def pytest_addoption(parser):
     group = parser.getgroup("pdb")
     group.addoption("--break",
                     action="store",
-                    metavar="<file:lnum>",
+                    metavar="[<file>:]<line-no>",
                     dest="pdb_break",
                     type=BreakLoc,
-                    help="One [<file>:<line-number>] pair, like foo.py:42")
+                    help="run the test enclosing <line-no> and break there; "
+                    "<file> may be omitted if obvious")
 
 
 def pytest_configure(config):
@@ -278,7 +279,7 @@ def get_targets(filename, upper, locations):
     return deque(out)
 
 
-# Tests for this plugin (requires pexpect)
+# Tests for this plugin (most require pexpect)
 
 prompt_re = r"\(Pdb[+]*\)\s?"
 
