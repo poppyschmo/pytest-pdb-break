@@ -1,8 +1,30 @@
 ---
-_init_helper:
-  LOGFILE: PDBBRK_LOGFILE
-  LEVEL: DEBUG
-  HANDLER_NAME: PDB BREAK (DEBUG)
+? !!python/name:helpers.logging_helper.LoggingHelper
+:
+  init:
+    LOGFILE: PDBBRK_LOGFILE
+    LEVEL: DEBUG
+    HANDLER_NAME: PDB BREAK (DEBUG)
+  filters:
+    input:
+      frame:
+        type: frame
+        exp: >
+          dict(file=v_.f_code.co_filename, line=v_.f_lineno, name=v_.f_code.co_name)
+      bl:
+        type: BreakLoc
+        exp: >
+          attr.asdict(v_)
+      bls:
+        types: [list, deque]
+        cond: all(isinstance(i, BreakLoc) for i in v_)
+        exp: >
+          [attr.asdict(i) for i in v_]
+    output:
+      tmpdir:
+        pat: !!python/object/new:re.compile ["/tmp/pytest-of[^/]+/pytest-\\d+"]
+        new: "$T"
+        method: sub
 
 pytest_internalerror:
   1:
@@ -12,10 +34,9 @@ pytest_internalerror:
 
 pytest_runtestloop:
   1:
-    kwargs:
-      wanted: attr.asdict(self.wanted)
-      locs: >
-        [attr.asdict(l) for l in locs]
+    args:
+      - self.wanted
+      - locs
   2:
     kwargs:
       "wanted.file": >
@@ -23,8 +44,7 @@ pytest_runtestloop:
   3:
     args:
       - self.targets
-    kwargs:
-      target: attr.asdict(self.target)
+      - self.target
 
 runcall_until:
   pre_capfix:

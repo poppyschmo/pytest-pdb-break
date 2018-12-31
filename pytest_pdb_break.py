@@ -30,12 +30,11 @@ if sys.version_info < (3, 6):
 module_logger = None
 try:
     from helpers.logging_helper import LoggingHelper
-except ImportError:
-    pass
-else:
-    LoggingHelper.LOGDEFS = os.getenv("PDBBRK_LOGYAML")
-    if LoggingHelper.LOGDEFS:
-        module_logger = LoggingHelper.get_logger("<module>")
+    _logging_helper = LoggingHelper.from_logdefs("PDBBRK_LOGYAML")
+    if _logging_helper:
+        module_logger = _logging_helper.get_logger(__name__)
+except Exception:
+    module_logger = None
 
 
 pytestPDB = pytest.set_trace.__self__
@@ -104,7 +103,7 @@ class PdbBreak:
 
     def __init__(self, wanted, config):
         if module_logger:
-            self._l = LoggingHelper.get_logger("PdbBreak")
+            self._l = module_logger.helper.get_logger("PdbBreak")
             self.debug = True
         config.pluginmanager.register(self, "pdb_break")
         self.capman = config.pluginmanager.getplugin("capturemanager")
