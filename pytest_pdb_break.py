@@ -14,7 +14,7 @@
 import os
 import sys
 import pytest
-from functools import namedtuple
+import attr
 from pathlib import Path
 
 
@@ -44,51 +44,54 @@ else:
 pytestPDB = pytest.set_trace.__self__
 
 
-class BreakLoc(namedtuple("BreakpointLocation", "file lnum name")):
-    """Data object holding filename, line number, test name."""
-    __slots__ = ()
+@attr.s(frozen=True)
+class BreakLoc:
+    """Data object holding path-like filename, line number, test name.
+    """
+    file = attr.ib(converter=attr.converters.optional(lambda v:
+                                                      Path(v) if v else None))
+    lnum = attr.ib(validator=attr.validators.instance_of(int))
+    name = attr.ib()
 
-    def __new__(cls, *args, **kwargs):
-        if len(args) == 1:
-            item = args[0]
-            if isinstance(item, str):
-                return cls.from_cmd_option_arg_spec(item)
-            elif hasattr(item, "location"):
-                return cls.from_pytest_item(item)
-        return super().__new__(cls, *args, **kwargs)
-
-    if module_logger:
-        def __repr__(self):
-            if hasattr(self.file, "parent"):
-                return super().__repr__().replace(str(self.file.parent), "…")
-            return super().__repr__()
+    def _replace(self, **kwargs):  # temporary
+        for k, v in kwargs.items():
+            object.__setattr__(self, k, v)
+        return self
 
     @classmethod
     def from_pytest_item(cls, item):
         # Note: pytest.Item.location line numbers are zero-indexed, but pdb
         # breakpoints aren't, and neither are linecache's.
-        assert isinstance(item, pytest.Item)
         file, lnum, name = item.location
-        file = Path(file)
         # Comment in ``Config.cwd_relative_nodeid`` says "nodeid's are relative
         # to the rootpath." Seems this also applies to .location names.
-        assert not file.is_absolute()
-        file = Path(item.session.config.rootdir) / file
-        return cls(file, lnum + 1, name)
+        assert not Path(file).is_absolute()
+        file = item.session.config.rootdir.join(file)
+        return cls(file, lnum + 1, str(name))  # name is used for sorting
 
     @classmethod
-    def from_cmd_option_arg_spec(cls, string):
+    def from_arg_spec(cls, string):
+        """Stash components of arg supplied to the --break option."""
         file, __, lnum = string.rpartition(":")
-        return cls(Path(file) if file else None, int(lnum), None)
+        # Pytest may be invoked from an editor via exec(), in which case these
+        # might not get expanded.
+        if file:
+            # $TMPHOME/foo may be ~/.local/tmp/foo, so expand envvars first
+            file = os.path.expanduser(os.path.expandvars(file))
+        return cls(file if file else None, int(lnum), None)
 
 
 def pytest_addoption(parser):
     group = parser.getgroup("pdb")
+    # TODO consider using str() instead of passing constructor, which was done
+    # initially so invalid args would trigger the usage/help msg.  However,
+    # most errors involve file validation, which must happen later, once we
+    # have access to the fully initialized config object.
     group.addoption("--break",
                     action="store",
                     metavar="[<file>:]<line-no>",
                     dest="pdb_break",
-                    type=BreakLoc,
+                    type=BreakLoc.from_arg_spec,
                     help="run the test enclosing <line-no> and break there; "
                     "<file> may be omitted if obvious")
 
@@ -148,7 +151,7 @@ class PdbBreak:
 
     def pytest_runtestloop(self, session):
         """Find target or raise."""
-        locs = [BreakLoc(i) for i in session.items]
+        locs = [BreakLoc.from_pytest_item(i) for i in session.items]
         self.debug and self._l.prinspotl(1)
         if not self.wanted.file:
             locs_files = set(l.file for l in locs)
@@ -273,7 +276,7 @@ class PdbBreak:
             assert self.last_func is None
             assert not pyfuncitem._isyieldedfunction()
             self._l.prinspot(1)
-        if BreakLoc(pyfuncitem) == self.target:
+        if BreakLoc.from_pytest_item(pyfuncitem) == self.target:
             self.last_func = pyfuncitem.obj
             pyfuncitem.obj = self.runcall_until
         yield

@@ -1,6 +1,3 @@
-# let $PDBBRK_LOGYAML = expand("%:p")
-# (setenv "PDBBRK_LOGYAML" buffer-file-name)
-
 ---
 pytest_internalerror:
   1:
@@ -10,17 +7,19 @@ pytest_internalerror:
 
 pytest_runtestloop:
   1:
-    args:
-      - self.wanted
-      - locs
+    kwargs:
+      wanted: attr.asdict(self.wanted)
+      locs: >
+        [attr.asdict(l) for l in locs]
   2:
     kwargs:
       "wanted.file": >
         "'' -> {}".format(self.wanted.file)
   3:
     args:
-      - self.target
       - self.targets
+    kwargs:
+      target: attr.asdict(self.target)
 
 runcall_until:
   pre_capfix:
@@ -45,7 +44,7 @@ pytest_pyfunc_call:
       - pyfuncitem.funcargs
       - self.target
     kwargs:
-      "loc equals target": BreakLoc(pyfuncitem) == self.target
+      "loc equals target": BreakLoc.from_pytest_item(pyfuncitem) == self.target
   2:
     args:
       - self.target

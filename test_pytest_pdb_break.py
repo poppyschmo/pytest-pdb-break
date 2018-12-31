@@ -10,6 +10,51 @@ from pytest_pdb_break import BreakLoc, get_targets, PdbBreak
 prompt_re = r"\(Pdb[+]*\)\s?"
 
 
+def test_breakloc(request):
+    with pytest.raises(TypeError):
+        BreakLoc(file="test_loc.py", lnum="1", name="test_loc_1")
+    loc = BreakLoc(file="", lnum=1, name="")
+    assert loc.file is None
+    assert loc.name == ""
+    loc = BreakLoc(file=None, lnum=1, name=None)
+    assert loc.file is None
+    assert loc.name is None
+    loc = BreakLoc(file="test_loc.py", lnum=1, name="test_loc_1")
+    assert isinstance(loc.file, Path)
+    assert not loc.file.is_absolute()
+    assert not loc.file.exists()
+
+    # From arg spec
+    assert BreakLoc.from_arg_spec("test_loc.py:1") \
+        == BreakLoc(file="test_loc.py", lnum=1, name=None)
+    assert BreakLoc.from_arg_spec(":1") \
+        == BreakLoc.from_arg_spec("1") \
+        == BreakLoc(file=None, lnum=1, name=None)
+    assert BreakLoc.from_arg_spec("foo:bar:1") \
+        == BreakLoc(file="foo:bar", lnum=1, name=None)
+    assert BreakLoc.from_arg_spec("foo:bar::1") \
+        == BreakLoc(file="foo:bar:", lnum=1, name=None)
+    with pytest.raises(ValueError):
+        assert BreakLoc.from_arg_spec("test_loc.py:")
+    with pytest.raises(ValueError):
+        assert BreakLoc.from_arg_spec("test_loc.py")
+    with pytest.raises(ValueError):
+        assert BreakLoc.from_arg_spec("")
+    with pytest.raises(ValueError):
+        assert BreakLoc.from_arg_spec("a:b:c")
+
+    # From pytest item
+    Item = attr.make_class("Item", ["location"])
+    Item.session = request.session
+    rootdir = request.config.rootdir
+    assert BreakLoc.from_pytest_item(Item(("test_loc.py", 1, "test_loc_1"))) \
+        == BreakLoc(rootdir / "test_loc.py", 2, "test_loc_1")
+    assert BreakLoc.from_pytest_item(Item(("test_loc.py", 1, None))) \
+        == BreakLoc(rootdir / "test_loc.py", 2, "None")
+    with pytest.raises(AssertionError):
+        BreakLoc.from_pytest_item(Item(("/tmp/test_loc.py", 1, "test_loc_1")))
+
+
 def test_get_targets():
     # XXX this assumes parametrized variants, whether their names are
     # auto-assigned or not, always appear in the order they'll be called.
@@ -20,10 +65,10 @@ def test_get_targets():
              BreakLoc(file="file_b", lnum=10, name="test_bar[three-3]"),
              BreakLoc(file="file_b", lnum=99, name="test_baz"),
              BreakLoc(file="file_c", lnum=1, name="test_notbaz")]
-    assert get_targets("file_b", 30, items).popleft() == items[2]
+    assert get_targets(Path("file_b"), 30, items).popleft() == items[2]
     assert items[2].name == "test_bar[one-1]"
     items.reverse()
-    assert get_targets("file_b", 30, items).popleft() == items[2]
+    assert get_targets(Path("file_b"), 30, items).popleft() == items[2]
     assert items[2].name == "test_bar[three-3]"
 
 
@@ -144,7 +189,7 @@ def test_invalid_arg(testdir_setup):
     result = td.runpytest("--break=test_invalid_arg.py")
     assert result.ret == 4
     lines = LineMatcher(result.stderr.lines)
-    lines.fnmatch_lines(["usage:*", "*--break*invalid BreakLoc value*"])
+    lines.fnmatch_lines(["usage:*", "*--break*invalid*value*"])
 
     # Non-existent file
     result = td.runpytest("--break=foo:99")
