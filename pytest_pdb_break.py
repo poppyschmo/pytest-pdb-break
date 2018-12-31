@@ -33,11 +33,8 @@ try:
 except ImportError:
     pass
 else:
-    LoggingHelper.LOGFILE = os.getenv("PDBBRK_LOGFILE")
-    if LoggingHelper.LOGFILE:
-        LoggingHelper.LOGDEFS = os.getenv("PDBBRK_LOGYAML")
-        LoggingHelper.HANDLER_NAME = "PDB BREAK (DEBUG)"
-        LoggingHelper.LEVEL = "DEBUG"
+    LoggingHelper.LOGDEFS = os.getenv("PDBBRK_LOGYAML")
+    if LoggingHelper.LOGDEFS:
         module_logger = LoggingHelper.get_logger("<module>")
 
 

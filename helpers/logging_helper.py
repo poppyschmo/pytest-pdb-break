@@ -4,9 +4,9 @@
 import os
 import sys
 import logging
+from pathlib import Path
 
 
-# Can't figure out how to use pdb to inspect these hooks, so it's this for now
 class LoggingHelper:
     # XXX Don't register .close or .shutdown, etc. with any teardown machinery
     # Warning: some functions eval source code in .LOGDEFS, if defined
@@ -24,18 +24,24 @@ class LoggingHelper:
         if hasattr(cls.logfile, "closed"):
             assert not cls.logfile.closed
             return
+        if cls.LOGDEFS:
+            cls.load_logdefs()
+        cls.LOGFILE = Path(cls.LOGFILE)
+        if not cls.LOGFILE.is_char_device():
+            raise ValueError("%s is not a character device" % cls.LOGFILE)
         cls.logfile = open(cls.LOGFILE, "w")
         assert os.isatty(cls.logfile.fileno())
         cls.logfile.write("\n")
         if cls.LOGDEFS:
-            cls.load_logdefs()
+            cls.logfile.write("Loaded logging defs from %s\n" % cls.LOGDEFS)
         cls.logfile.flush()
         klass = type("LoggingHelperLogger", (logging.Logger, cls), {})
         logging.setLoggerClass(klass)
 
     @classmethod
     def load_logdefs(cls):
-        # Often fails because of syntax errors, so helps to run at import time
+        cls.LOGDEFS = Path(cls.LOGDEFS)
+        assert cls.LOGDEFS.exists(), "%s exists" % cls.LOGDEFS
         try:
             import yaml
         except ImportError:
@@ -43,7 +49,19 @@ class LoggingHelper:
         else:
             with open(cls.LOGDEFS) as flo:
                 cls.logdefs = yaml.load(flo)
-        cls.logfile.write("Loaded log defs from {!r}\n".format(cls.LOGDEFS))
+        init = cls.logdefs.get("_init_helper")
+        if init:
+            if not cls.LOGFILE and "LOGFILE" in init:
+                cls.LOGFILE = init["LOGFILE"]
+                if cls.LOGFILE and cls.LOGFILE.isupper():
+                    cls.LOGFILE = os.getenv(cls.LOGFILE) or cls.LOGFILE
+            for attr in ("LEVEL", "HANDLER_NAME"):
+                if attr in init:
+                    setattr(cls, attr, init[attr])
+            if "exec" in init:
+                exec(init["exec"])
+        if not cls.LOGFILE:
+            raise RuntimeError("No LOGFILE assigned in %r" % cls.LOGDEFS)
 
     def _log_as(self, frame, msg, exc_info=None):
         """Log msg, impersonating frame."""
@@ -109,11 +127,15 @@ class LoggingHelper:
     @classmethod
     def get_logger(cls, name):
         """Return a logger with a TTY handler for cls.LEVEL."""
-        if not cls.LOGFILE:
+        if not cls.LOGFILE and not cls.LOGDEFS:
             assert cls.LOGFILE is None
             return
         if not hasattr(cls, "level"):
-            cls._module_init()
+            try:
+                cls._module_init()
+            except Exception:
+                cls.LOGFILE = cls.LOGDEFS = None
+                raise
         assert cls.logfile
         # Passing "" as name will fetch root logger (wrong class)
         logger = logging.getLogger(name)

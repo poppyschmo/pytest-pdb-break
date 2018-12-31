@@ -1,4 +1,9 @@
 ---
+_init_helper:
+  LOGFILE: PDBBRK_LOGFILE
+  LEVEL: DEBUG
+  HANDLER_NAME: PDB BREAK (DEBUG)
+
 pytest_internalerror:
   1:
     args:
