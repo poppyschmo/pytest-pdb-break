@@ -5,6 +5,7 @@ import os
 import sys
 import logging
 from pathlib import Path
+from .ordered import OrderedPrettyPrinter
 
 
 class LoggingHelper:
@@ -75,8 +76,7 @@ class LoggingHelper:
 
     def prinspect(self, *args, **kwargs):
         """Print stuff."""
-        from pprint import PrettyPrinter
-        pp = PrettyPrinter()
+        pp = OrderedPrettyPrinter()
         caller = sys._getframe(1)
         name = caller.f_code.co_name
         if name == "prinspot":
