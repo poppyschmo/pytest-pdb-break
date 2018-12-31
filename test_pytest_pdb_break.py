@@ -1,4 +1,4 @@
-import os
+import attr
 import pytest
 
 from pathlib import Path
@@ -27,14 +27,57 @@ def test_get_targets():
     assert items[2].name == "test_bar[three-3]"
 
 
-def test_resolve_wanted(tmp_path):
-    import attr
-    # Mock PdbBreak(...).config.rootdir
-    Mcfg = attr.make_class("Mcfg", ["rootdir"])
-    Mpdb = attr.make_class("Mpdb", ["config"])
-    Mpdb._resolve_wanted = PdbBreak._resolve_wanted
+# TODO delete this after committing once; add note and SHA to _resolve_wanted
+def test_cwd_lemma(testdir):
+    """Current directory persists between ``pytest_configure`` visits.
+    (Which is when ``._resolve_wanted`` runs.)
+    """
+    testdir.makeconftest("""
+        pytest_plugins = ['pytest_one', 'pytest_two']
+    """)
+    common = """
+        def pytest_configure(config):
+            cwd = type(config.invocation_dir)()
+            print('in', %%r)
+            print('invocation_dir:', config.invocation_dir)
+            print('cwd:', cwd)
+            if config.invocation_dir == cwd:
+                import os
+                os.chdir(%r)
+    """ % str(testdir.test_tmproot)
+    testdir.makepyfile(pytest_one=common % "one")
+    testdir.makepyfile(pytest_two=common % "two")
+    testdir.makepyfile("""
+        def test_foo(request):
+            cwd = type(request.config.invocation_dir)()
+            assert request.config.invocation_dir.samefile(%r)
+            assert cwd.samefile(%r)
+    """ % (str(testdir.tmpdir), str(testdir.test_tmproot)))
+    result = testdir.runpytest("--capture=no")
+    result.assert_outcomes(passed=1)
+    testdir.maketxtfile(log="\n".join(result.outlines))
+
+
+def test_resolve_wanted(tmp_path, request):
+    # tmp_path is a pathlib.Path object, which has no .chdir()
+    import os
+
+    # For rootdir determination, see:
+    # - _pytest.config.findpaths
+    # - _pytest.config.Config._initini
+    # - testing/test_config.py (pytest project)
+    import py
+    invocation_dir = py.path.local()
+    assert Path(invocation_dir).is_absolute()
+    assert invocation_dir == Path().cwd() == request.config.invocation_dir
+    assert invocation_dir.strpath == str(invocation_dir)
+
+    # PdbBreak stub with mocked .config dirs
+    Config = attr.make_class("Config", ["rootdir", "invocation_dir"])
+    PdbClass = attr.make_class("PdbClass", ["config"])
+    PdbClass._resolve_wanted = PdbBreak._resolve_wanted
     rootdir = tmp_path / "rootdir"
-    inst = Mpdb(Mcfg(rootdir))
+    inst = PdbClass(Config(py.path.local(rootdir), invocation_dir))
 
     rootdir.mkdir()
     os.chdir(rootdir)

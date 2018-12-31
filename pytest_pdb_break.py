@@ -115,17 +115,31 @@ class PdbBreak:
         self.last_func = None
 
     def _resolve_wanted(self, wanted):
-        if not wanted.file:
+        """Validate file component of user arg, if supplied"""
+        if wanted.file is None or wanted.file.is_absolute():
             return wanted
-        file = wanted.file.expanduser()
-        rootdir = Path(self.config.rootdir)
-        assert rootdir.is_absolute()
+        file = wanted.file
         try:
             resolved = file.resolve(True)
         except FileNotFoundError:
-            if Path().cwd().samefile(rootdir):
+            if file.is_absolute():
                 raise
-            resolved = (rootdir / file).resolve(True)
+            # Can't use Path().cwd() because its .samefile() calls .stat() on
+            # other and expects returned obj to have .st_ino, but path.Stat
+            # looks for st_st_ino
+            # TODO find out if users of the plugin API are meant to fiddle with
+            # LocalPath objects, or if these are only for internal use. A
+            # cursory search in the CHANGELOG/bug tracker for terms like
+            # pathlib, localpath, fspath, etc., didn't yield much, (occasional
+            # references to "recent pathlib refactoring" circa mid 2018).
+            cwd = type(self.config.rootdir)()
+            for parent in (self.config.rootdir, self.config.invocation_dir):
+                if not cwd.samefile(parent):
+                    resolved = parent / file
+                    if resolved.exists():
+                        break
+            else:
+                raise
         return wanted._replace(file=resolved)
 
     def pytest_internalerror(self, excrepr, excinfo):
