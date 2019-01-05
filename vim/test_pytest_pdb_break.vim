@@ -290,6 +290,8 @@ let s:src_two_funcs = [
 			\ '    return 1',
 			\ '',
 			\ 'def test_last(request):',
+			\ '    def inner():',
+			\ '        return True',
 			\ '    vartwo = True',
 			\ '    assert vartwo',
 			\ ]
@@ -349,7 +351,7 @@ function s:test_get_node_id_two_funcs() "{{{
 	" No match
 	call cursor(ext_pos)
 	let [__, out] = s:capture(funcref(s:o.get_node_id, [1]))
-	call assert_match('No test found', out)
+	call assert_match('No test found', out, 'Got: '. string(__))
 	call assert_equal(ext_pos, getpos('.')[1:2])
 endfunction "}}}
 
@@ -629,8 +631,8 @@ function s:test_split() "{{{
 	else
 		let bn = ch_getbufnr(jobd.job, 'out')
 		let waited = 0
-		while (ch_status(jobd.job) != 'closed'
-					\ || job_status(jobd.job) != 'dead')
+		while (ch_status(jobd.job) !=? 'closed'
+					\ || job_status(jobd.job) !=? 'dead')
 					\ && waited < 2000
 			call term_wait(bn)
 			let waited += 10

@@ -54,13 +54,14 @@ function! s:get_context() abort "{{{
 endfunction "}}}
 
 function! s:_search_back(pat, test) abort "{{{
-	let dent = indent('.')
+	let begd = indent('.')
+	let begl = line('.')
 	while 1
 		if !search(a:pat, 'Wb')
 			return 0
 		endif
 		let sid = synID(line('.'), col('.'), 1)
-		if synIDattr(sid, 'name') !~? 'comment\|string' && a:test(dent)
+		if synIDattr(sid, 'name') !~? 'comment\|string' && a:test(begl, begd)
 			break
 		endif
 	endwhile
@@ -76,8 +77,9 @@ function! s:get_node_id(...) abort "{{{
 		endif
 		normal! $
 		let gr = []
-		if s:_search_back('\v^\s*(def|async def)>', {l -> indent('.') <= l})
-			let pat = '^\s*\(def\|async def\)\s\(test_\w\+\)(\(.*\)).*$'
+		if s:_search_back('\v^\s*(def|async def)>',
+					\ {l, d -> indent('.') < d || line('.') == l})
+			let pat = '^\s*\(def\|async def\)\s\+\(test_\w\+\)(\(.*\)).*$'
 			let gr = matchlist(getline('.'), pat)
 		endif
 		if empty(gr) || empty(gr[2])
@@ -89,7 +91,7 @@ function! s:get_node_id(...) abort "{{{
 		endif
 		let nodeid = [gr[2]]
 		if gr[3] =~# '^self.*' &&
-					\ s:_search_back('\_^\s*class\s', {l -> indent('.') < l})
+					\ s:_search_back('\_^\s*class\s', {_, d -> indent('.') < d})
 			let cgr = matchlist(getline('.'), '^\s*class\s\(\w\+\).*:.*')
 			call add(nodeid, cgr[1])
 		endif
