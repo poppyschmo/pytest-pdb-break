@@ -361,7 +361,7 @@ a sound choice)."
    'base
    (with-temp-buffer
      (insert "[pytest]\n")
-     (write-file "setup.cfg"))
+     (write-file "pytest.ini"))
    (let ((python-shell-interpreter $pyexe))
      (ert-info ("Explicit py-shell-int, unreg, curdir")
        (pytest-pdb-break-test--query-wrap
