@@ -1,9 +1,15 @@
 NVIM ?= nvim
 VIM ?= vim
 PYTEST_PDB_BREAK_TEST_TEMPDIR ?= /tmp/pytest-pdb-break-test
-VENVBARE ?= $(PYTEST_PDB_BREAK_TEST_TEMPDIR)/.venv_bare
-VENVBASE ?= $(PYTEST_PDB_BREAK_TEST_TEMPDIR)/.venv_base
-VENVSELF ?= $(PYTEST_PDB_BREAK_TEST_TEMPDIR)/.venv_self
+VENVDIR = $(shell python3 ../helpers/ensure_venv.py ensure_venvdir)
+ifeq (,$(findstring $(PYTEST_PDB_BREAK_TEST_TEMPDIR),$(VENVDIR)))
+$(error error asking helper for venv home in tempdir)
+endif
+
+VENVBARE ?= $(VENVDIR)/bare
+VENVBASE ?= $(VENVDIR)/base
+VENVSELF ?= $(VENVDIR)/self
+export PYTEST_PDB_BREAK_TEST_VENVDIR = $(VENVDIR)
 export PYTEST_PDB_BREAK_TEST_TEMPDIR
 
 ifdef VIRTUAL_ENV
@@ -28,16 +34,13 @@ neovim: | $(VENVBARE) $(VENVBASE) $(VENVSELF)
 	$(NVIM) -n -u test_initrc -i NONE -S test_pytest_pdb_break.vim --headless
 
 $(VENVBARE): | $(PYTEST_PDB_BREAK_TEST_TEMPDIR)
-	python3 -mvenv $@
+	python3 ../helpers/ensure_venv.py get_pyexe bare
 
 $(VENVBASE): | $(PYTEST_PDB_BREAK_TEST_TEMPDIR)
-	python3 -mvenv $@
-	$@/bin/pip install pytest
+	python3 ../helpers/ensure_venv.py get_pyexe base
 
 $(VENVSELF): | $(PYTEST_PDB_BREAK_TEST_TEMPDIR)
-	test -e $(realpath ..)/tox.ini
-	python3 -mvenv $@
-	$@/bin/pip install $(realpath ..)
+	python3 ../helpers/ensure_venv.py get_pyexe self
 
 $(PYTEST_PDB_BREAK_TEST_TEMPDIR):
 	mkdir -p $@

@@ -12,6 +12,10 @@ let s:tempdir = $PYTEST_PDB_BREAK_TEST_TEMPDIR
 if empty(s:tempdir) || s:tempdir !~# '^\%(/[^/]\+\)\{2,}'
 	cquit!
 endif
+let s:venvdir = $PYTEST_PDB_BREAK_TEST_VENVDIR
+if empty(s:venvdir) || s:venvdir !~# '^\%(/[^/]\+\)\{3,}'
+	cquit!
+endif
 let s:temphome = s:tempdir .'/vim'
 call mkdir(s:temphome, 'p')
 
@@ -265,11 +269,13 @@ function s:test_get_context() "{{{
 	unlet b:pytest_pdb_break_python_exe
 	" Hack PATH (as done by $VIRTUAL_ENV/bin/activate)
 	let origpath = $PATH
-	let vbin = s:tempdir .'/.venv_base/bin'
-	let vpy = vbin . '/python3'
-	let vpt = vbin . '/pytest'
+	let vbin = s:venvdir .'/base/bin'
+	let vers = fnamemodify(s:venvdir, ':t')
+	let vpy = vbin .'/python'. vers
+	let vpt = vbin .'/pytest'
 	let $PATH = vbin .':'. $PATH
 	call assert_equal(vpt, exepath('pytest'))
+	call assert_equal(vpy, exepath('python'. vers))
 	call s:o.get_context()
 	call assert_true(has_key(b:pytest_pdb_break_context, vpy))
 	let $PATH = origpath
@@ -403,58 +409,58 @@ call s:pybuf('test_get_node_id_one_class')
 function s:test_query_helper() "{{{
 	" ERROR - no pytest (unrealistic since get_context() uses shebang)
 	call assert_true(filereadable(s:s.get('helper')))
-	let ctx = {'exe': s:tempdir . '/.venv_bare/bin/python'}
+	let ctx = {'exe': s:venvdir . '/bare/bin/python'}
 	call assert_equal(ctx.exe, exepath(ctx.exe), 'exepath mismatch')
 	let [__, out] = s:capture(funcref(s:o.query_helper, [ctx]))
 	call assert_match('Traceback.*ModuleNotFoundError', out)
-	call assert_equal({'exe': s:tempdir . '/.venv_bare/bin/python'}, ctx)
+	call assert_equal({'exe': s:venvdir . '/bare/bin/python'}, ctx)
 	" Has pytest
-	let ctx = {'exe': s:tempdir . '/.venv_base/bin/python'}
+	let ctx = {'exe': s:venvdir . '/base/bin/python'}
 	call s:o.query_helper(ctx)
 	call assert_false(ctx.registered)
 	call assert_equal(getcwd(), ctx.rootdir)
-	call assert_equal(s:tempdir . '/.venv_base/bin/python', ctx.exe)
+	call assert_equal(s:venvdir . '/base/bin/python', ctx.exe)
 	" ERROR - Bad option
-	let ctx = {'exe': s:tempdir . '/.venv_base/bin/python'}
+	let ctx = {'exe': s:venvdir . '/base/bin/python'}
 	let [__, out] = s:capture(funcref(s:o.query_helper, [ctx, '--fake']))
 	call assert_match('unrecognized arguments', out)
-	call assert_equal({'exe': s:tempdir . '/.venv_base/bin/python'}, ctx)
+	call assert_equal({'exe': s:venvdir . '/base/bin/python'}, ctx)
 	" Node-id - nonexistent/unsaved file
 	call assert_false(filereadable(bufname('%')))
-	let ctx = {'exe': s:tempdir . '/.venv_base/bin/python'}
+	let ctx = {'exe': s:venvdir . '/base/bin/python'}
 	call s:o.query_helper(ctx, bufname('%'))
 	call assert_false(ctx.registered)
 	call assert_equal(getcwd(), ctx.rootdir)
 	" Node-id - nonexistent/unsaved file and unknown func
-	let ctx = {'exe': s:tempdir . '/.venv_base/bin/python'}
+	let ctx = {'exe': s:venvdir . '/base/bin/python'}
 	call s:o.query_helper(ctx, bufname('%') .'::test_fake')
 	call assert_false(ctx.registered)
 	call assert_equal(getcwd(), ctx.rootdir)
 	" Node-id - real file, unknown func
 	call s:write_src(s:src_two_funcs)
-	let ctx = {'exe': s:tempdir . '/.venv_base/bin/python'}
+	let ctx = {'exe': s:venvdir . '/base/bin/python'}
 	call s:o.query_helper(ctx, bufname('%') .'::test_fake')
 	call assert_false(ctx.registered)
 	call assert_equal(getcwd(), ctx.rootdir)
 	" Node-id - real file, real func
-	let ctx = {'exe': s:tempdir . '/.venv_base/bin/python'}
+	let ctx = {'exe': s:venvdir . '/base/bin/python'}
 	call s:o.query_helper(ctx, bufname('%') .'::test_first')
 	call assert_false(ctx.registered)
 	call assert_equal(getcwd(), ctx.rootdir)
 	" Alt rootdir (empty, not ancestor of CWD or node-id path)
-	let ctx = {'exe': s:tempdir . '/.venv_base/bin/python'}
+	let ctx = {'exe': s:venvdir . '/base/bin/python'}
 	let altroot = s:temphome .'/test_get_context'
 	call s:o.query_helper(ctx, '--rootdir='. altroot, bufname('%'))
 	call assert_false(ctx.registered)
 	call assert_equal(altroot, ctx.rootdir)
 	" Has plugin
-	let ctx = {'exe': s:tempdir . '/.venv_self/bin/python'}
+	let ctx = {'exe': s:venvdir . '/self/bin/python'}
 	call s:o.query_helper(ctx, bufname('%') .'::test_fake')
 	call assert_true(ctx.registered)
 	call assert_equal(getcwd(), ctx.rootdir)
 	" With ini
 	call writefile(['[pytest]', 'addopts = -v'], 'pytest.ini')
-	let ctx = {'exe': s:tempdir . '/.venv_self/bin/python'}
+	let ctx = {'exe': s:venvdir . '/self/bin/python'}
 	call s:o.query_helper(ctx, bufname('%') .'::test_fake')
 	call assert_true(ctx.registered)
 	call assert_equal(getcwd(), ctx.rootdir)
@@ -581,7 +587,7 @@ call s:pybuf('test_runner')
 " split -----------------------------------------------------------------------
 
 function s:test_split() "{{{
-	let exe = s:tempdir . '/.venv_base/bin/python'
+	let exe = s:venvdir . '/base/bin/python'
 	let buf = bufname('%')
 	let jobd = {'commands': ['import sys', 'sys.path[1]'], 'output': []}
 	if has('nvim')
