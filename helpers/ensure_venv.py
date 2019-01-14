@@ -159,18 +159,25 @@ def get_pyvenv_cfg(parent=None):
 def get_base_pyexe():
     """Find a non-virtual-env-based python executable
 
-    If not in an active virtual environment, sys.executable is returned.
+    If not in an active virtual environment, sys.executable or a
+    version-suffixed sibling is returned.
+
     The returned exe may not be the one that created the current venv.
-    An exception is raised is versions don't match.
+    An exception is raised when versions don't match.
     """
     assert sys.version_info[0] == 3
     # With tox (and pyenv), base_prefix is same as prefix
-    if not is_venv(Path(sys.executable).parent):
-        return sys.executable
     version = "%d.%d" % sys.version_info[:2]
+    if not is_venv(Path(sys.executable).parent):
+        if not sys.executable.endswith(version):
+            versioned = Path(sys.executable).parent / f"python{version}"
+            if versioned.exists():
+                return str(versioned)
+        return sys.executable
     path = shave_path(os.getenv("PATH"), os.getenv("VIRTUAL_ENV"))
-    found = shutil.which("python" + version, path=path)
+    found = shutil.which(f"python{version}", path=path)
     if found:
+        # XXX why realpath here (and not elsewhere)?
         return os.path.realpath(found)
     # The previous will find the reigning pyenv shim, which may be preferable
     # to whatever created the now deactivated venv
@@ -218,7 +225,7 @@ def get_pyexe(name):
         if is_pyenv_shim(sysexe):
             update_shim_env(env, sysexe)
         subprocess.check_call([sysexe, "-mvenv", venv], env=env)
-        assert pyexe.exists()
+        assert pyexe.exists(), f"{pyexe!r} exists"
         if not (venv / "bin" / "pip").exists():
             from warnings import warn
             warn(f"{sysexe} did not create a pip in {pyexe.parent}")

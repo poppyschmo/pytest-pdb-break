@@ -201,14 +201,20 @@ class TestEnv(unittest.TestCase):
         vexe = vbin / "python"
         m_sys.executable = "/fake/bin/python"  # doesn't matter
         # Not a venv
-        with patch("helpers.ensure_venv.is_venv",
-                   return_value=False) as m_is_venv:
+        with patch("helpers.ensure_venv.is_venv", return_value=False) as m_iv:
+            # No matching versioned sibling exists
             rv = get_base_pyexe()
-            m_is_venv.assert_called_once_with(Path("/fake/bin"))
+            m_iv.assert_called_once_with(Path("/fake/bin"))
             self.assertEqual("/fake/bin/python", rv)
+        obin = self.make_opt_bin(wd, "python3.42")
+        m_sys.executable = str(obin / "python3")
+        with patch("helpers.ensure_venv.is_venv", return_value=False) as m_iv:
+            # Matching versioned sibling exists
+            rv = get_base_pyexe()
+            m_iv.assert_called_once_with(obin)
+            self.assertEqual(str(obin / "python3.42"), rv)
         # In virtual env
         m_sys.executable = str(vexe)
-        obin = self.make_opt_bin(wd, "python3.42")
         PATH = ":".join(map(str, (vbin, obin)))
         PATH += os.defpath
         env = dict(PATH=PATH, VIRTUAL_ENV=str(vbin.parent))
