@@ -25,6 +25,7 @@
     pytest-pdb-break-test-get-node-id
     pytest-pdb-break-test-make-arg-string
     pytest-pdb-break-test-minor-mode
+    pytest-pdb-break-test-get-rootdir
     pytest-pdb-break-test-main-command))
 
 (defvar pytest-pdb-break-test-repo-root
@@ -745,6 +746,20 @@ class TestFoo:
                       (pytest-pdb-break-mode -1)
                       (should-not (adchk))
                       (should-not (local-variable-p 'kill-buffer-hook))))))))
+
+(ert-deftest pytest-pdb-break-test-get-rootdir ()
+  ;; Eval: (compile "make PAT=get-rootdir")
+  (pytest-pdb-break-test-with-python-buffer
+   (setq pytest-pdb-break--config-info
+         '(:exe "/tmp/fake__/venv/bin/python"
+                :registered t
+                :rootdir "/tmp/fake__/repo"))
+   (should (local-variable-p 'pytest-pdb-break--config-info))
+   (let ((rv (pytest-pdb--get-rootdir)))
+     (should (directory-name-p rv))
+     (should (string-prefix-p (plist-get pytest-pdb-break--config-info
+                                         :rootdir)
+                              rv)))))
 
 ;; TODO find the proper built-in way to do this
 (defun pytest-pdb-break-test--expect-timeout (pattern &optional max-secs)

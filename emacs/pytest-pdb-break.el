@@ -151,7 +151,7 @@ With FORCE, always update. Return entry in config-info alist."
   "Return value of :rootdir from the active config-info plist.
 Ensure it has a trailing slash."
   (cl-assert (member :rootdir pytest-pdb-break--config-info) t)
-  (file-name-directory (plist-get pytest-pdb-break--config-info :rootdir)))
+  (file-name-as-directory (plist-get pytest-pdb-break--config-info :rootdir)))
 
 (defun pytest-pdb-break--check-command-p (command)
   "Run COMMAND in Python, return t if exit code is 0, nil otherwise."
