@@ -106,13 +106,17 @@ class TestEnv(unittest.TestCase):
             # ~ expanded, passes abspath check
             PATH = "~/fake/.virtualenvs/v/bin" + os.defpath
             self.assertEqual(shave_path(PATH), expected)
-        with patch("helpers.ensure_venv.is_venv", return_value=False):
-            with self.assertRaises(RuntimeError):
-                shave_path(PATH)
+        with patch("helpers.ensure_venv.is_venv", return_value=False) as m_iv:
+            # Returns orig when no venv provided and check returns false
+            self.assertEqual(shave_path(PATH), PATH)
+            maybs = Path(os.path.expanduser("~/fake/.virtualenvs/v"))
+            m_iv.assert_called_with(maybs)
+        with patch("helpers.ensure_venv.is_venv", return_value=False) as m_iv:
             vbin = wd / "venv" / "bin"
             venv = vbin.parent
             PATH = str(vbin) + os.defpath
             self.assertEqual(shave_path(PATH, venv), expected)
+            m_iv.assert_not_called()
 
     @patch.dict("helpers.ensure_venv.os.environ", os.environ.copy())
     def test_get_base_env(self):

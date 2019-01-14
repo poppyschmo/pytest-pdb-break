@@ -105,13 +105,13 @@ def shave_path(path, venv=None):
     maybe = Path(os.path.expanduser(maybe))
     assert maybe.is_absolute()
     if not venv:
-        venv = Path(maybe).parent
+        venv = maybe.parent
         if not is_venv(venv):
-            raise RuntimeError("venv could not be determined")
+            return path
         return rest
-    # Assume venv passes is_venv
     venv = Path(os.path.expanduser(venv))
-    assert venv.is_absolute()
+    if not venv.is_absolute():
+        venv = venv.resolve(True)
     if Path(os.path.commonpath((venv, maybe))) == venv or is_venv(maybe):
         return rest
     return path
