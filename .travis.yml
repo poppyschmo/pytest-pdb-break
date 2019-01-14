@@ -9,7 +9,7 @@ jobs:
       dist: xenial
       python: 3.7
       install:
-        - pyenv shell 3.6 3.7
+        - pyenv shell 3.7 3.6
         - pip install tox
       script: tox
     - &test-emacs
