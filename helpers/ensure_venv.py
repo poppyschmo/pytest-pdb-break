@@ -10,6 +10,8 @@ TMPROOT = os.getenv("PYTEST_PDB_BREAK_TEST_TEMPDIR") or DEFAULT
 SUBDIR = ".venvs"
 _project_root = None
 _tmp_venvdir = None
+SUBOUT = subprocess.DEVNULL
+SUBERR = subprocess.DEVNULL
 
 
 def get_project_root():
@@ -41,9 +43,7 @@ def _install_to_libpath(libdir, pyexe, opts=("--no-deps",)):
     assert libdir.exists()
     cmdline = [pyexe, "-mpip", "install"]
     cmdline += list(opts) + ["--target", libdir, project_dir]
-    return subprocess.check_call(cmdline,
-                                 stdout=subprocess.DEVNULL,
-                                 stderr=subprocess.DEVNULL)
+    return subprocess.check_call(cmdline, stdout=SUBOUT, stderr=SUBERR)
 
 
 def make_libpath(cwd=None, path="lib/site-packages", **install_kwargs):
@@ -224,21 +224,25 @@ def get_pyexe(name):
         env = get_base_env()
         if is_pyenv_shim(sysexe):
             update_shim_env(env, sysexe)
-        subprocess.check_call([sysexe, "-mvenv", venv], env=env)
+        subprocess.check_call([sysexe, "-mvenv", venv], env=env,
+                              stdout=SUBOUT, stderr=SUBERR)
         assert pyexe.exists(), f"{pyexe!r} exists"
         if not (venv / "bin" / "pip").exists():
             from warnings import warn
             warn(f"{sysexe} did not create a pip in {pyexe.parent}")
         if name != "bare":
             if name == "base":
-                subprocess.check_call([pyexe, "-mpip", "install", "pytest"])
+                subprocess.check_call([pyexe, "-mpip", "install", "pytest"],
+                                      stdout=SUBOUT, stderr=SUBERR)
             elif name == "self":
-                subprocess.check_call([pyexe, "-mpip",
-                                       "install", get_project_root()])
+                subprocess.check_call([pyexe, "-mpip", "install",
+                                       get_project_root()],
+                                      stdout=SUBOUT, stderr=SUBERR)
     return pyexe
 
 
 def _main():
+    global SUBERR, SUBOUT
     import argparse
     from inspect import signature
     from types import FunctionType
@@ -292,7 +296,14 @@ def _main():
         args = pargs.args
         kwargs = {}
 
-    rv = pargs.cmd(*args, **kwargs)
+    logfile = os.getenv("PYTEST_PDB_BREAK_ENSURE_VENV_LOGFILE")
+    if logfile:
+        with open(logfile, "w") as flow:
+            SUBOUT = flow
+            SUBERR = subprocess.STDOUT
+            rv = pargs.cmd(*args, **kwargs)
+    else:
+        rv = pargs.cmd(*args, **kwargs)
 
     sep = "\x00" if pargs.null else "\n"
 
