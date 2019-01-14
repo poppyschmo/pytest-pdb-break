@@ -94,7 +94,13 @@ Include any ARGS when calling external helper."
                                       (current-buffer) nil)
                                 (and args (cons "-" args)))))
           (progn (goto-char (point-min)) (json-read))
-        (error "Error calling %s: %s" helper (buffer-string))))))
+        (error "Error calling %s:\n%s\nexec-path: %s"
+               (mapconcat #'identity
+                          (append (list python-shell-interpreter helper)
+                                  (and args (cons "-" args)))
+                          " ")
+               (buffer-string)
+               exec-path)))))
 
 (defvar-local pytest-pdb-break--config-info nil
   "Value of active config-info-alist entry.")

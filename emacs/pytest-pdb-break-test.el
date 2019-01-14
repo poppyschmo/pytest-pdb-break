@@ -32,6 +32,13 @@
   (file-name-as-directory
    (file-truename (getenv "PYTEST_PDB_BREAK_TEST_REPO_ROOT"))))
 
+(defvar pytest-pdb-break-test-tempdir
+  (file-name-as-directory
+   (file-truename (getenv "PYTEST_PDB_BREAK_TEST_TEMPDIR"))))
+
+(defvar pytest-pdb-break-test-temp
+  (concat pytest-pdb-break-test-tempdir "emacs/"))
+
 (defvar pytest-pdb-break-test-lisp-root
   (concat pytest-pdb-break-test-repo-root "emacs/"))
 
@@ -45,9 +52,11 @@
   (concat pytest-pdb-break-test-lisp-root "pytest-pdb-break-test.el"))
 
 (ert-deftest pytest-pdb-break-test-ert-setup ()
+  ;; Eval: (compile "make PAT=ert-setup")
   (should (seq-set-equal-p (mapcar 'ert-test-name (ert-select-tests t t))
                            pytest-pdb-break-test-tests))
   (should (file-exists-p pytest-pdb-break-test-repo-root))
+  (should (file-exists-p pytest-pdb-break-test-tempdir))
   (should (file-exists-p pytest-pdb-break-test-lisp-root))
   (should (file-exists-p pytest-pdb-break-test-pytest-plugin))
   (should (file-exists-p pytest-pdb-break-test-lisp-main))
@@ -66,12 +75,6 @@
 
   (unless (fboundp 'sxhash-equal) ; 25
     (defalias 'sxhash-equal 'sxhash))
-
-  (defvar pytest-pdb-break-test-temp
-    (file-name-as-directory (concat (if (fboundp 'temporary-file-directory)
-                                        (temporary-file-directory)
-                                      temporary-file-directory) ; 25
-                                    "pytest-pdb-break-test")))
 
   (defun pytest-pdb-break-test--unprefix (name)
     "Return truncated test NAME (string)."
@@ -128,7 +131,14 @@ Note: this does *not* create and cd to a temp dir."
 (ert-deftest pytest-pdb-break-test-upstream-env-updaters ()
   "Describe expected behavior of built-in `python-mode' interface.
 Show that it doesn't restore environment to previous state. Certain
-options are idiosyncratic and unintuitive."
+options are idiosyncratic and unintuitive.
+
+Note: for local files, `python-shell-with-environment' calls both
+`process-environment' and `exec-path' \"calculate\" funcs, in that
+order. Re `python-shell-virtualenv-root': prepended exec path entry and
+generated VIRTUAL_ENV var never end in a /, even when orig does.
+"
+  ;; Eval: (compile "make PAT=upstream-env-updaters")
   (cl-macrolet ((before (&rest rest) `(ert-info ("Before") ,@rest))
                 (during (&rest rest) `(ert-info ("During") ,@rest))
                 (after (&rest rest) `(ert-info ("After") ,@rest))
@@ -138,8 +148,6 @@ options are idiosyncratic and unintuitive."
                           ,x (let (,b) ,y) ,z)
                          (pytest-pdb-break-test-with-python-buffer
                           ,x (python-shell-with-environment ,y) ,z))))
-    ;; For local files, `python-shell-with-environment' calls both
-    ;; `process-environment' and `exec-path' "calculate" funcs.
     (ert-info ((concat "Changes made via "
                        "`python-shell-calculate-process-environment' "
                        "persist for existing environment variables"))
@@ -189,7 +197,7 @@ options are idiosyncratic and unintuitive."
          "Only mutates PATH because it's present already in env"
          (process-environment (python-shell-calculate-process-environment))
          (before (should-not (getenv "VIRTUAL_ENV"))
-                 (should (getenv "PATH"))) ; obvious but affirsm claim
+                 (should (getenv "PATH"))) ; obvious but affirs claim
          (during (should (string= (getenv "PATH") "/tmp/foo:/the/rest"))
                  (should (string= (getenv "VIRTUAL_ENV") "/tmp/foo")))
          (after (should-not (getenv "VIRTUAL_ENV"))
@@ -291,24 +299,40 @@ DIR-BODY sets up build dir. INFO-MSG is passed to `ert-info'."
    ;; info-msg
    "No cloned repo (pytest plugin) found"))
 
-(defvar pytest-pdb-break-test--requirements
-  `((bare)
-    (base "pytest")
-    (pdbpp "pytest" "pdbpp")
-    (self ,pytest-pdb-break-test-repo-root)
-    (self_pdbpp "pdbpp" ,pytest-pdb-break-test-repo-root)))
+(defvar pytest-pdb-break-test--exes `((base) (bare) (self)))
 
-(defun pytest-pdb-break-test--get-venv-path (name)
-  "Return full path of temp venv given shorthand symbol NAME."
+(defun pytest-pdb-break-test--get-pyexe (name)
+  "Ask helper for canonical path to python exe in venv NAME.
+Returns true name to existing, versioned python exe with predefined
+requirements installed."
   (cl-assert (symbolp name))
-  (cl-assert (assq name pytest-pdb-break-test--requirements))
-  (concat pytest-pdb-break-test-temp
-          (format ".venv_%s" (symbol-name name)) "/"))
-
-(defun pytest-pdb-break-test--get-requirements (name)
-  "Return requirements for venv named by symbol NAME."
-  (cl-assert (symbolp name))
-  (cdr (assq name pytest-pdb-break-test--requirements)))
+  (cl-assert (assq name pytest-pdb-break-test--exes))
+  (let ((prog (concat pytest-pdb-break-test-repo-root
+                      "helpers/ensure_venv.py"))
+        (found (cdr (assq name pytest-pdb-break-test--exes)))
+        (pat (format "^%s\\.venvs/[[:digit:].]+/%s/bin/python[[:digit:].]+$"
+                     (regexp-quote pytest-pdb-break-test-tempdir)
+                     (symbol-name name)))
+        pipexe binpath basename)
+    (unless found
+      (cl-assert (file-exists-p prog))
+      (with-temp-buffer
+        (setenv "PYTEST_PDB_BREAK_ENSURE_VENV_LOGFILE" "pip.log")
+        (if (zerop (call-process "python3" nil (current-buffer) nil prog
+                                 "get_pyexe" (symbol-name name)))
+            (setq found (buffer-string))
+          (error "Error calling %s: %s" prog (buffer-string))))
+      (cl-assert (string-match-p pat found) t)
+      (cl-assert (file-executable-p found) t)
+      (setq binpath (file-name-directory found)
+            pipexe (concat binpath "pip")
+            basename (file-relative-name found binpath))
+      (cl-assert (file-executable-p pipexe))
+      ;; Should maybe also check if not an empty dummy file
+      (cl-assert (not (equal (executable-find "pip") pipexe)))
+      (cl-assert (not (equal (executable-find basename) found)))
+      (setcdr (assq name pytest-pdb-break-test--exes) found))
+    found))
 
 (defmacro pytest-pdb-break-test-ensure-venv (name &rest body)
   "Run BODY in a temp directory and temp environment.
@@ -317,35 +341,19 @@ NAME is a venv from --get-requirements Does not modify `PATH' or
 and `$venv'. The latter two have trailing slashes. Doesn't use pip3 or
 python3 because venvs are all created with python3 (not sure if this is
 a sound choice)."
-  (let ((piplog (make-symbol "piplog"))
-        (pipexe (make-symbol "pipexe"))
-        (requirements (make-symbol "requirements")))
-    `(pytest-pdb-break-test-with-tmpdir
-      (pytest-pdb-break-test-with-environment
-       (let* (($venv (pytest-pdb-break-test--get-venv-path ,name))
-              ($venvbin (concat $venv "bin/"))
-              ($pyexe (concat $venvbin "python"))
-              ;; XXX this is a conceit to prevent this variable from persisting
-              ;; between tests. It may need to be reset manually within body.
-              pytest-pdb-break-config-info-alist
-              ;;
-              ,pipexe ,piplog ,requirements)
-         (unless (file-exists-p $venv) ; trailing/ ok
-           (setq ,pipexe  (concat $venvbin "pip")
-                 ,piplog (concat default-directory "pip.out")
-                 ,requirements (pytest-pdb-break-test--get-requirements ,name))
-           (should (file-name-absolute-p ,piplog))
-           (should (zerop (call-process "python3" nil (list :file ,piplog) nil
-                                        "-mvenv" $venv)))
-           (should (file-executable-p ,pipexe ))
-           (should (file-executable-p $pyexe))
-           (should-not (equal (executable-find "pip") ,pipexe ))
-           (should-not (equal (executable-find "python") $pyexe))
-           (unless (eq ,name 'bare)
-             (should (zerop (apply #'call-process ,pipexe  nil
-                                   (list :file ,piplog) nil
-                                   "install" ,requirements)))))
-         ,@body)))))
+  `(pytest-pdb-break-test-with-tmpdir
+    (pytest-pdb-break-test-with-environment
+     (let* (($pyexe (pytest-pdb-break-test--get-pyexe ,name))
+            ($venvbin (file-name-directory $pyexe))
+            ($venv (file-name-directory (directory-file-name $venvbin)))
+            ;; XXX this is a conceit to prevent this variable from persisting
+            ;; between tests. It may need to be reset manually within body.
+            pytest-pdb-break-config-info-alist)
+       (should (file-exists-p $venv))
+       (should (file-exists-p $venvbin))
+       (should (directory-name-p $venv))
+       (should (directory-name-p $venvbin))
+       ,@body))))
 
 (defmacro pytest-pdb-break-test--query-wrap (&rest body)
   "Run BODY with common assertions/bindings for config-info-helper func."
@@ -358,6 +366,7 @@ a sound choice)."
      (should (string= $rootdir (plist-get $rv :rootdir)))))
 
 (ert-deftest pytest-pdb-break-test-query-helper-unregistered ()
+  ;; Eval: (compile "make PAT=query-helper-unregistered")
   (pytest-pdb-break-test-ensure-venv
    'base
    (with-temp-buffer
@@ -383,11 +392,14 @@ a sound choice)."
       (pytest-pdb-break-test-with-environment
        (setenv "PATH" (format "%s:%s" $venvbin (getenv "PATH")))
        (setq exec-path (cons $venvbin exec-path))
-       (should (string= (executable-find python-shell-interpreter) $pyexe))
+       ;; Still passes when string=
+       (should (string-prefix-p (executable-find python-shell-interpreter)
+                                $pyexe))  ;; ends with version, e.g. 3.7
        ($callit)
        (should-not (plist-get $rv :registered)))))))
 
 (ert-deftest pytest-pdb-break-test-query-helper-registered ()
+  ;; Eval: (compile "make PAT=query-helper-registered")
   (pytest-pdb-break-test-ensure-venv
    'self
    (let ((python-shell-interpreter $pyexe))
@@ -495,15 +507,17 @@ a sound choice)."
 
 (ert-deftest pytest-pdb-break-test-get-config-info-unregistered ()
   ;; Eval: (compile "make PAT=get-config-info-unregistered")
-  (cl-macrolet ((after (&rest rest) `(ert-info ("After") ,@rest)))
+  (cl-macrolet ((before (&rest rest) `(ert-info ("Before") ,@rest))
+                (after (&rest rest) `(ert-info ("After") ,@rest)))
     (pytest-pdb-break-test-ensure-venv
      'base
      (ert-info ("Set virtual environment root")
-       ;; See upstream test above re -= slash
+       ;; See upstream (python-mode) test above re -= slash
        (let ((python-shell-virtualenv-root $venv)
              (unslashed (directory-file-name $venvbin)))
          (pytest-pdb-break-test-get-config-info-fixture
-          (should-not (member unslashed exec-path))
+          (before
+           (should-not (member unslashed exec-path)))
           (after
            (should-not (directory-name-p
                         (plist-get pytest-pdb-break--config-info :rootdir)))

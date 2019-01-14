@@ -1,3 +1,4 @@
+PYTEST_PDB_BREAK_TEST_TEMPDIR ?= /tmp/pytest-pdb-break-test
 PROG ?= emacs
 FILE ?= pytest-pdb-break-test.el
 DIR ?= .
@@ -24,14 +25,18 @@ ifeq (x$(VIRTUAL_ENV),$(findstring x$(VIRTUAL_ENV),x$(PATH)))
 endif
 endif
 
+export PYTEST_PDB_BREAK_TEST_TEMPDIR
 export PYTEST_PDB_BREAK_TEST_REPO_ROOT = $(realpath ../)
 
 .PHONY: batch debug
 
-batch:
+batch: | $(PYTEST_PDB_BREAK_TEST_TEMPDIR)
 	$(PROG) -Q --batch -L $(DIR) -l $(FILE) \
 		--eval '(ert-run-tests-batch-and-exit $(SELECTOR))'
 
-debug:
+debug: | $(PYTEST_PDB_BREAK_TEST_TEMPDIR)
 	$(PROG) -Q -L $(DIR) -l $(FILE) \
 		--eval '(ert-run-tests-interactively $(SELECTOR))'
+
+$(PYTEST_PDB_BREAK_TEST_TEMPDIR):
+	mkdir -p $@
