@@ -1,6 +1,7 @@
 scriptencoding utf-8
 
 let s:file = expand('<sfile>')
+let s:initialized = v:false
 
 function! pytest_pdb_break#run(...) abort
 	return s:call('runner', a:000, 1)
@@ -18,34 +19,59 @@ function! s:call(name, args, ...) abort "{{{
 	return call(d[a:name], a:args, d)
 endfunction "}}}
 
-function! s:get_context() abort "{{{
-	" Save venv info in buffer-local dict, keyed by python executable
+" Unused
+function! s:_extract_python_exe() abort "{{{
+	try
+		let shebang = readfile(exepath('pytest'), '', 1)[0]
+		let exe = substitute(shebang, '^#!', '', '')
+	catch /^Vim\%((\a\+)\)\=:E/
+		let exe = ''
+	endtry
+	if !executable(exe)
+		let exe = exepath('python3')
+	endif
+	return exe
+endfunction "}}}
+
+function! s:init() abort "{{{
 	call assert_equal(&filetype, 'python')
-	if !exists('s:home')
-		let path = fnamemodify(s:file, ':h:p') . ';'
-		let plugin = findfile('pytest_pdb_break.py', path)
-		if empty(plugin)
-			throw 'Could not find plugin root above entry in &rtp'
-		endif
-		let s:plugin = fnamemodify(plugin, ':p') " covers the rare './plugin'
-		let s:home = fnamemodify(s:plugin, ':h:p') " no trailing/
-		let s:helper = simplify(s:home . '/helpers/get_config_info.py')
+	let path = fnamemodify(s:file, ':h:p') . ';'
+	let plugin = findfile('pytest_pdb_break.py', path)
+	if empty(plugin)
+		throw 'Could not find plugin root above entry in &rtp'
+	endif
+	let s:plugin = fnamemodify(plugin, ':p') " covers the rare './plugin'
+	let s:home = fnamemodify(s:plugin, ':h:p') " no trailing/
+	let s:helper = simplify(s:home . '/helpers/main.py')
+	let s:config_info_helper = simplify(s:home . '/helpers/get_config_info.py')
+	let s:isolib = tempname()
+	"
+	let cmdline = ['python3', s:helper, 'install_plugin', s:isolib]
+	if !has('nvim')
+		let cmdline = join(cmdline)
+	endif
+	call system(cmdline)
+	if !isdirectory(s:isolib)
+		throw 'Problem calling '. s:helper
+	endif
+	let s:initialized = v:true
+endfunction "}}}
+
+function! s:get_context() abort "{{{
+	" Save env info in buffer-local dict, keyed by pytest exe
+	if !s:initialized
+		call s:call('init', [])
 	endif
 	if !exists('b:pytest_pdb_break_context')
 		let b:pytest_pdb_break_context = {}
 	endif
-	if exists('b:pytest_pdb_break_python_exe')
-		let exe = b:pytest_pdb_break_python_exe
+	if exists('b:pytest_pdb_break_pytest_exe')
+		let exe = b:pytest_pdb_break_pytest_exe
 	else
-		try
-			let shebang = readfile(exepath('pytest'), '', 1)[0]
-			let exe = substitute(shebang, '^#!', '', '')
-		catch /^Vim\%((\a\+)\)\=:E/
-			let exe = ''
-		endtry
-		if !executable(exe)
-			let exe = exepath('python')
-		endif
+		let exe = exepath('pytest')
+	endif
+	if !executable(exe)
+		throw 'Cannot find pytest'
 	endif
 	if !has_key(b:pytest_pdb_break_context, exe)
 		let b:pytest_pdb_break_context[exe] = {'exe': exe}
@@ -102,14 +128,15 @@ function! s:get_node_id(...) abort "{{{
 	return a:0 && a:1 ? reverse(nodeid) : join(reverse(nodeid), '::')
 endfunction "}}}
 
+" Unused
 function! s:query_helper(ctx, ...) abort "{{{
 	" https://docs.pytest.org/en/latest/customize.html#finding-the-rootdir
 	let context = a:ctx
-	let cmdline = [context.exe, '-'] + a:000
+	let cmdline = [context.pyexe, '-'] + a:000
 	if !has('nvim')
 		let cmdline = join(cmdline)
 	endif
-	let lines = readfile(s:helper)
+	let lines = readfile(s:config_info_helper)
 	try
 		let result = system(cmdline, lines)
 		try
@@ -120,7 +147,7 @@ function! s:query_helper(ctx, ...) abort "{{{
 		call extend(context, decoded)
 	catch /.*/
 		echohl WarningMsg | echo 'Problem calling helper' | echohl None
-		echo 'path: '. s:helper
+		echo 'path: '. s:config_info_helper
 		echo 'cmdline: '. string(cmdline)
 		" Truncation often lops off final exc (most recent call last)
 		if exists('result') && stridx(v:exception, result) == -1
@@ -141,7 +168,8 @@ function! s:extend_python_path(ctx) abort "{{{
 		return ctx.PP
 	endif
 	let val = empty($PYTHONPATH) ? [] : split($PYTHONPATH, ':')
-	call insert(val, s:home)
+	let val = filter(val, 'v:val != s:isolib')
+	call insert(val, s:isolib)
 	let ctx.PP = join(val, ':')
 	return ctx.PP
 endfunction "}}}
@@ -149,26 +177,16 @@ endfunction "}}}
 function! s:runner(...) abort "{{{
 	let ctx = s:call('get_context', [])
 	let nid = s:call('get_node_id', [1])
-	let cmd = [ctx.exe, '-mpytest']
+	let cmd = [ctx.exe]
 	let arg = join(nid, '::')
 	let opts = []
 	let last = get(ctx, 'last', {})
-	if !has_key(ctx, 'registered') || a:000 != get(last, 'uopts', ["\u2049"])
-		try
-			call s:call('query_helper', [ctx] + a:000 + [arg])
-		catch /.*HelperError/
-			return
-		endtry
-	endif
-	let jd = {'cwd': ctx.rootdir}
-	if !ctx.registered
-		let preenv = s:call('extend_python_path', [ctx])
-		if has('nvim')
-			let cmd = ['env', printf('PYTHONPATH=%s', preenv)] + cmd
-		else
-			let jd.env = {'PYTHONPATH': preenv}
-		endif
-		let opts = ['-p', 'pytest_pdb_break']
+	let jd = {}
+	let preenv = s:call('extend_python_path', [ctx])
+	if has('nvim')
+		let cmd = ['env', printf('PYTHONPATH=%s', preenv)] + cmd
+	else
+		let jd.env = {'PYTHONPATH': preenv}
 	endif
 	call add(opts,  printf('--break=%s:%s', nid[0], line('.')))
 	let ctx.last = {
@@ -198,7 +216,7 @@ endfunction "}}}
 
 
 let s:defuncs = {'get_context': funcref('s:get_context'),
-				\ 'query_helper': funcref('s:query_helper'),
+				\ 'init': funcref('s:init'),
 				\ 'extend_python_path': funcref('s:extend_python_path'),
 				\ 'get_node_id': funcref('s:get_node_id'),
 				\ 'runner': funcref('s:runner'),
