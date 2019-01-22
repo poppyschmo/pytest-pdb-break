@@ -18,8 +18,9 @@ import subprocess
 from pathlib import Path
 from textwrap import dedent
 from _pytest.pytester import LineMatcher
-from .ensure_venv import (get_pyexe, get_base_pyexe, is_venv,
-                          make_libpath, get_base_env)
+
+from .common import copy_plugin, install_plugin
+from .ensure_venv import get_pyexe, get_base_pyexe, is_venv, get_base_env
 
 
 def run_with_input(cmdline, instr, tmpdir, prefix=None, env_vars=None):
@@ -52,6 +53,15 @@ def run_with_input(cmdline, instr, tmpdir, prefix=None, env_vars=None):
     return proc.returncode, out.decode(), errs.decode()
 
 
+def make_libpath(cwd=None, path="lib/site-packages"):
+    if cwd is None:
+        cwd = Path.cwd()
+    cwd, _cwd = Path(cwd), cwd
+    libdir = cwd / path
+    libdir.mkdir(parents=True)
+    return type(_cwd)(libdir)
+
+
 @pytest.fixture(scope="module")
 def module_tmpdir(tmpdir_factory):
     return tmpdir_factory.mktemp("external_lib", numbered=True)
@@ -62,6 +72,7 @@ def ext_plugin(module_tmpdir):
     """Return LocalPath to some lib/site-packages containing plugin
     """
     path = make_libpath(module_tmpdir / "sans_egg")
+    copy_plugin(path)
     # Should only contain pytest_pdb_break.py
     pit = Path(path).iterdir()
     assert list(p.name for p in pit) == ["pytest_pdb_break.py"]
@@ -70,7 +81,6 @@ def ext_plugin(module_tmpdir):
 
 @pytest.fixture(scope="module")
 def ext_fake(module_tmpdir):
-    from unittest.mock import patch
     content = dedent("""\
         def pytest_addoption(parser):
             group = parser.getgroup("pdb")
@@ -80,11 +90,9 @@ def ext_fake(module_tmpdir):
             wanted = config.getoption("pdb_break")
             if wanted:
                 print("fake-pdb-break:", wanted)
-    """).encode("utf-8")
-    from .ensure_venv import _copy_to_libpath as orig
-    with patch("helpers.ensure_venv._copy_to_libpath", src=content,
-               wraps=orig):
-        path = make_libpath(module_tmpdir / "fake")
+    """)
+    path = make_libpath(module_tmpdir / "fake")
+    copy_plugin(path, dummy_content=content)
     return path
 
 
@@ -92,7 +100,9 @@ def ext_fake(module_tmpdir):
 def ext_egg(module_tmpdir):
     """Like ext_plugin but with egg-/dist-info installed by 'bare'
     """
-    return make_libpath(module_tmpdir / "with_egg", pyexe=get_pyexe("bare"))
+    path = make_libpath(module_tmpdir / "with_egg")
+    install_plugin(path, pyexe=get_pyexe("bare"))
+    return path
 
 
 def test_baseline(testdir, request, ext_plugin):

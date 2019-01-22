@@ -1,69 +1,14 @@
 import os
 import sys
 import shutil
-from pathlib import Path
 import subprocess
+from pathlib import Path
 
 NAMES = ("bare", "base", "self")
 DEFAULT = "/tmp/pytest-pdb-break-test"
 TMPROOT = os.getenv("PYTEST_PDB_BREAK_TEST_TEMPDIR") or DEFAULT
 SUBDIR = ".venvs"
-_project_root = None
 _tmp_venvdir = None
-SUBOUT = subprocess.DEVNULL
-SUBERR = subprocess.DEVNULL
-
-
-def get_project_root():
-    """Return path to *this* project's root"""
-    global _project_root
-    if not _project_root:
-        # __file__ may be be empty or relative
-        root = Path(__file__).parent.parent
-        assert root.is_absolute(), f"root: {root}"
-        assert root.joinpath("tox.ini").exists()
-        _project_root = root
-    return _project_root
-
-
-def _copy_to_libpath(libdir):
-    if not hasattr(_copy_to_libpath, "src"):
-        project_dir = get_project_root()
-        src = project_dir / "pytest_pdb_break.py"
-        assert src.exists()
-        _copy_to_libpath.src = src.read_bytes()
-    assert libdir.exists()
-    plugin_copy = libdir / "pytest_pdb_break.py"
-    return plugin_copy.write_bytes(_copy_to_libpath.src)
-
-
-def _install_to_libpath(libdir, pyexe, opts=("--no-deps",)):
-    """Install this project into libdir using pyexe"""
-    project_dir = get_project_root()
-    assert libdir.exists()
-    cmdline = [pyexe, "-mpip", "install"]
-    cmdline += list(opts) + ["--target", libdir, project_dir]
-    return subprocess.check_call(cmdline, stdout=SUBOUT, stderr=SUBERR)
-
-
-def make_libpath(cwd=None, path="lib/site-packages", **install_kwargs):
-    """Copy or install plugin to <path>
-
-    Return path suitable for PYTHONPATH. With install_kwargs, install
-    instead of copy. Note: pathlib.Path objs passed as values in a
-    subprocess.Popen env dict are converted to strings by os.fsencode.
-    """
-    if cwd is None:
-        cwd = Path.cwd()
-    cwd, _cwd = Path(cwd), cwd
-    libdir = cwd / path
-    libdir.mkdir(parents=True)
-    if install_kwargs:
-        _install_to_libpath(libdir, **install_kwargs)
-    else:
-        _copy_to_libpath(libdir)
-    assert libdir.joinpath("pytest_pdb_break.py").exists()
-    return type(_cwd)(libdir)
 
 
 def is_pyenv_shim(path):
@@ -220,6 +165,7 @@ def get_pyexe(name):
     version = "%d.%d" % sys.version_info[:2]
     pyexe = venv / "bin" / f"python{version}"
     if not pyexe.exists():
+        from .common import SUBERR, SUBOUT, get_project_root
         sysexe = get_base_pyexe()
         env = get_base_env()
         if is_pyenv_shim(sysexe):
@@ -239,87 +185,3 @@ def get_pyexe(name):
                                        get_project_root()],
                                       stdout=SUBOUT, stderr=SUBERR)
     return pyexe
-
-
-def _main():
-    global SUBERR, SUBOUT
-    import argparse
-    from inspect import signature
-    from types import FunctionType
-    from collections.abc import MutableMapping, MutableSequence
-
-    def debug_cmdline(*args, **kwargs):
-        if not kwargs.get("quiet"):
-            print(f"--json: {pargs.json!r}",
-                  f"--kwargs: {pargs.kwargs!r}",
-                  f"--null: {pargs.null!r}",
-                  f"args: {args!r}",
-                  f"kwargs: {kwargs!r}",
-                  sep="\n")
-        return kwargs.get("rv")
-
-    commands = {k: v for k, v in globals().items() if
-                isinstance(v, FunctionType) and not k.startswith("_")}
-
-    ap = argparse.ArgumentParser(
-        prog="ensure_venv",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="\n".join(
-            f"  \x1b[1m{n}\x1b[m{signature(o)}" +
-            ("\n    {}".format(o.__doc__.strip().split("\n")[0])
-             if o.__doc__ else "") for n, o in commands.items()
-        ),
-        description="Helpers for integrations tests using virtual environments"
-    )
-
-    commands["debug_cmdline"] = debug_cmdline
-
-    ap.add_argument("--kwargs", action="store_true",
-                    help="interpret final arg as a dict")
-    ap.add_argument("--json", action="store_true",
-                    help="return json")
-    ap.add_argument("--null", action="store_true",
-                    help="return null-separated values")
-    ap.add_argument("cmd", type=lambda c: commands.get(c))
-    ap.add_argument("args", nargs="*")
-
-    pargs = ap.parse_args()
-
-    if not pargs.cmd:
-        ap.print_help()
-        return 1
-    if pargs.kwargs:
-        *args, kwargs = pargs.args
-        from ast import literal_eval
-        kwargs = literal_eval(kwargs)
-    else:
-        args = pargs.args
-        kwargs = {}
-
-    logfile = os.getenv("PYTEST_PDB_BREAK_ENSURE_VENV_LOGFILE")
-    if logfile:
-        with open(logfile, "w") as flow:
-            SUBOUT = flow
-            SUBERR = subprocess.STDOUT
-            rv = pargs.cmd(*args, **kwargs)
-    else:
-        rv = pargs.cmd(*args, **kwargs)
-
-    sep = "\x00" if pargs.null else "\n"
-
-    if pargs.json:
-        import json
-        json.dump(rv, sys.stdout)
-    elif isinstance(rv, MutableMapping):
-        print(*(f"{k}={v}" for k, v in rv.items()), sep=sep, end=sep)
-    elif isinstance(rv, (MutableSequence, tuple)):
-        print(*rv, sep=sep, end=sep)
-    elif isinstance(rv, bool):
-        return int(not rv)
-    elif rv:
-        print(rv, end="")
-
-
-if __name__ == "__main__":
-    __file__ = Path(__file__).resolve(True)
-    sys.exit(_main())

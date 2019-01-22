@@ -302,13 +302,6 @@ class TestGlobals(unittest.TestCase):
         import tempfile
         self.assertTrue(ensure_venv.TMPROOT.startswith(tempfile.gettempdir()))
 
-    def test_get_project_root(self):
-        from .ensure_venv import get_project_root
-        ensure_venv._project_root = None
-        self.assertEqual(get_project_root(), ensure_venv._project_root)
-        self.assertTrue(isinstance(ensure_venv._project_root, Path))
-        self.assertTrue(ensure_venv._project_root.is_absolute())
-
     def test_ensure_venvdir(self):
         from .ensure_venv import ensure_venvdir
         try:
@@ -353,6 +346,7 @@ class TestGetPyExe(unittest.TestCase):
     @patch("helpers.ensure_venv.subprocess.check_call")
     def test_pypi(self, m_cc, ensure_venvdir, get_base_env, is_pyenv_shim):
         from .ensure_venv import get_pyexe
+        from . import common
         wd = make_workdir("GetPyExe.pypi")
         m_cc.side_effect = self.fake_check_call
         ensure_venvdir.return_value = wd
@@ -369,18 +363,19 @@ class TestGetPyExe(unittest.TestCase):
         pyexe = wd.joinpath("base", "bin", versioned)
         m_cc.assert_has_calls([
             call([sysexe, "-mvenv", wd / "base"], env={"PATH": "foo:bar"},
-                 stdout=ensure_venv.SUBOUT, stderr=ensure_venv.SUBERR),
+                 stdout=common.SUBOUT, stderr=common.SUBERR),
             call([pyexe, "-mpip", "install", "pytest"],
-                 stdout=ensure_venv.SUBOUT, stderr=ensure_venv.SUBERR)
+                 stdout=common.SUBOUT, stderr=common.SUBERR)
         ])
 
-    @patch("helpers.ensure_venv.get_project_root", return_value="<proj root>")
+    @patch("helpers.common.get_project_root", return_value="<proj root>")
     @patch("helpers.ensure_venv.is_pyenv_shim", return_value=False)
     @patch("helpers.ensure_venv.get_base_env")
     @patch("helpers.ensure_venv.subprocess.check_call")
     @patch("helpers.ensure_venv.ensure_venvdir")
     def test_local(self, m_ev, m_cc, m_be, *m_args):
         from .ensure_venv import get_pyexe
+        from . import common
         wd = make_workdir("GetPyExe.local")
         m_cc.side_effect = self.fake_check_call
         m_ev.return_value = wd
@@ -395,71 +390,7 @@ class TestGetPyExe(unittest.TestCase):
         pyexe = wd.joinpath("self", "bin", versioned)
         m_cc.assert_has_calls([
             call([sysexe, "-mvenv", wd / "self"], env={"PATH": "foo:bar"},
-                 stdout=ensure_venv.SUBOUT, stderr=ensure_venv.SUBERR),
+                 stdout=common.SUBOUT, stderr=common.SUBERR),
             call([pyexe, "-mpip", "install", "<proj root>"],
-                 stdout=ensure_venv.SUBOUT, stderr=ensure_venv.SUBERR)
+                 stdout=common.SUBOUT, stderr=common.SUBERR)
         ])
-
-
-class TestMakeLibPath(unittest.TestCase):
-    def test_copy(self):
-        from .ensure_venv import _copy_to_libpath
-        wd = make_workdir("MakeLibPath.copy")
-        #
-        self.assertFalse(hasattr(_copy_to_libpath, "src"))
-        self.assertEqual(_copy_to_libpath(wd), len(_copy_to_libpath.src))
-        self.assertTrue((wd / "pytest_pdb_break.py").exists())
-
-    @patch("helpers.ensure_venv.get_project_root")
-    def test_install(self, m_pr):
-        from .ensure_venv import _install_to_libpath, get_base_pyexe
-        wd = make_workdir("MakeLibPath.install")
-        # Would be nice to use real project, but building lags
-        proj = wd / "project"
-        proj.mkdir()
-        (proj / "pytest_pdb_break.py").touch()
-        spy = proj / "setup.py"
-        # Note: real setup() must have a pytest11 entrypoints kwarg for
-        # PluginManager.load_setuptools_entrypoints to detect it
-        spy.write_text(dedent("""\
-            import setuptools
-            setuptools.setup(name="pytest_pdb_break",
-                             py_modules=["pytest_pdb_break"])
-        """))
-        m_pr.return_value = str(proj)
-        targ = wd / "target"
-        targ.mkdir()
-        #
-        pyexe = get_base_pyexe()
-        _install_to_libpath(targ, pyexe)
-        egg = next(targ.glob("*-info"))  # dist- (wheel) or egg-
-        self.assertTrue(egg.exists())
-        self.assertTrue((targ / "pytest_pdb_break.py").exists())
-
-    @patch("helpers.ensure_venv._install_to_libpath")
-    def test_full(self, m_i):
-        from .ensure_venv import make_libpath
-        wd = make_workdir("MakeLibPath.full")
-        #
-        result = make_libpath()
-        self.assertTrue(isinstance(result, Path))
-        self.assertTrue(result.exists())
-        self.assertTrue(result.is_absolute())
-        targ = result / "pytest_pdb_break.py"  # for below
-        self.assertTrue(targ.exists())
-        #
-        with self.assertRaises(FileExistsError):
-            make_libpath()
-        clean(result)
-        #
-        result = make_libpath(str(wd))
-        self.assertTrue(isinstance(result, str))
-        self.assertTrue(result.endswith("site-packages"))
-        self.assertTrue(targ.exists())
-        self.assertEqual(targ.parent, Path(result))
-        #
-        m_i.side_effect = lambda l, pyexe: l.joinpath(
-            "pytest_pdb_break.py").touch()
-        result = make_libpath(wd, "installed", pyexe="someexe")
-        m_i.assert_called_once_with(wd / "installed", pyexe="someexe")
-        self.assertTrue(result.name == "installed")
