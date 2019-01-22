@@ -81,6 +81,57 @@ This is the root path of cloned repo, not a \"lisp\" sub directory."
         (setq pytest-pdb-break--home root)
       (error "Cannot find pytest-pdb-break's home directory"))))
 
+(defvar pytest-pdb-break--tempdir nil
+  "Temporary directory for this session.
+Should be an absolute path ending in a slash.")
+
+(defvar pytest-pdb-break--isolated-lib nil
+  "Temporary directory containing plugin and metadata.
+Absolute path to a subdir of `pytest-pdb-break--tempdir'.
+Should end in a slash.")
+
+(defun pytest-pdb-break--on-kill-emacs ()
+  "Remove session tempdir `pytest-pdb-break--tempdir'."
+  ;; This needs to be redone if adding tramp support
+  (let ((pat (format "^%s[^/]+" (regexp-quote temporary-file-directory))))
+    (when (and pytest-pdb-break--tempdir
+               (string-match-p pat pytest-pdb-break--tempdir))
+      (delete-directory pytest-pdb-break--tempdir 'recursive))))
+
+(defun pytest-pdb-break--create-tempdir ()
+  "Return path to temporary directory."
+  (when pytest-pdb-break--tempdir
+    (error "pytest-pdb-break--tempdir already set to: %s"
+           pytest-pdb-break--tempdir))
+  (let ((prefix (format "emacs-%s-pytest-pdb-break-" (user-uid))))
+    (setq pytest-pdb-break--tempdir (file-name-as-directory
+                                     (make-temp-file prefix t)))
+    ;; `server-ensure-safe-dir' takes some extra pains, but requiring it may
+    ;; not be desirable. Hopefully setting user perms is enough.
+    (chmod pytest-pdb-break--tempdir #o0700)
+    (add-hook 'kill-emacs-hook #'pytest-pdb-break--on-kill-emacs))
+  pytest-pdb-break--tempdir)
+
+(defun pytest-pdb-break-get-isolated-lib (&optional interpreter)
+  "Return path to an isolated plugin installation.
+Use INTERPRETER or `python-shell-interpreter' to run the helper script."
+  (if pytest-pdb-break--isolated-lib
+      pytest-pdb-break--isolated-lib
+    (let* ((home (or pytest-pdb-break--home (pytest-pdb-break--homer)))
+           (tmpdir (or pytest-pdb-break--tempdir
+                       (pytest-pdb-break--create-tempdir)))
+           (name (file-name-as-directory (concat tmpdir "self")))
+           (script (concat home "helpers/main.py")))
+      (with-temp-buffer
+        (unless (zerop (call-process (or interpreter
+                                         python-shell-interpreter)
+                                     nil
+                                     (current-buffer) nil
+                                     script "install_plugin" name))
+          (error "Error calling %s\nscript: %s\nname: %s\noutput: ...\n%s"
+                 python-shell-interpreter script name (buffer-string))))
+      (setq pytest-pdb-break--isolated-lib name))))
+
 (defun pytest-pdb-break--query-config (&rest args)
   "Return a plist with items :registered BOOL and :rootdir STRING.
 Include any ARGS when calling external helper."

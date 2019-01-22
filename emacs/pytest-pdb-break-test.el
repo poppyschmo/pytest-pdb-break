@@ -15,6 +15,9 @@
     pytest-pdb-break-test-homer
     pytest-pdb-break-test-homer-symlink
     pytest-pdb-break-test-homer-missing
+    pytest-pdb-break-test-on-kill-emacs
+    pytest-pdb-break-test-create-tempdir
+    pytest-pdb-break-test-get-isolated-lib
     pytest-pdb-break-test-query-helper-unregistered
     pytest-pdb-break-test-query-helper-registered
     pytest-pdb-break-test-query-helper-error-import
@@ -67,11 +70,16 @@
 (eval-when-compile ; BEG
 
   (unless (fboundp 'seq-set-equal-p) ; 25
-    (defalias 'seq-set-equal-p (lambda (p q)
-                                 (not (cl-set-exclusive-or p q)))))
+    (defun seq-set-equal-p (p q) (not (cl-set-exclusive-or p q))))
+
+  (unless (fboundp 'file-attribute-user-id) ; 25
+    (defun file-attribute-user-id (a) (nth 2 a)))
+
+  (unless (fboundp 'file-attribute-modes) ; 25
+    (defun file-attribute-modes (a) (nth 8 a)))
 
   (unless (fboundp 'caddr) ; 25
-    (defalias 'caddr (apply-partially #'nth 2)))
+    (defun caddr (x) (nth 2 x)))
 
   (unless (fboundp 'sxhash-equal) ; 25
     (defalias 'sxhash-equal 'sxhash))
@@ -92,14 +100,15 @@
 (defmacro pytest-pdb-break-test-with-environment (&rest body)
   "Run BODY in a temporary environment.
 This is for modifying PATH, PYTHONPATH, VIRTUAL_ENV, etc."
-  ;; Consider unsetting all known PYTHON* env vars
-  (let ((orig (make-symbol "orig")))
-    `(let ((,orig (sxhash-equal (list process-environment exec-path))))
-       (let ((process-environment (append process-environment nil))
-             (exec-path (append exec-path nil)))
-         ,@body)
+  (let ((orig (make-symbol "orig"))
+        (rv (make-symbol "rv")))
+    `(let ((,orig (sxhash-equal (list process-environment exec-path)))
+           (,rv (let ((process-environment (append process-environment nil))
+                      (exec-path (append exec-path nil)))
+                  ,@body)))
        (should (= ,orig (sxhash-equal (list process-environment
-                                            exec-path)))))))
+                                            exec-path))))
+       ,rv)))
 
 (defmacro pytest-pdb-break-test-with-tmpdir (tail &rest body)
   "Run BODY in a temp directory, clobbering existing files.
@@ -118,6 +127,17 @@ should start with a dir sep."
        (when (file-exists-p ,tmpdir) (delete-directory ,tmpdir t))
        (make-directory ,tmpdir t)
        (let ((default-directory ,tmpdir)) ,@body))))
+
+(defmacro pytest-pdb-break-test-with-conditional-env-var (present absent)
+  "Run PRESENT if test's name has been exported as an env var.
+Otherwise, run ABSENT. Vars `$test-sym' and `$env-var' are bound to the
+current test func and its env-var-ized string. High risk of infinite
+looping."
+  `(let* (($test-sym (ert-test-name (ert-running-test)))
+          ($env-var (pytest-pdb-break-test--name-to-envvar $test-sym)))
+     (if (getenv $env-var)
+         ,present
+       ,@(macroexp-unprogn absent))))
 
 (defmacro pytest-pdb-break-test-with-python-buffer (&rest body)
   "Run BODY in a `python-mode' temp buffer with a temp environment.
@@ -245,37 +265,52 @@ generated VIRTUAL_ENV var never end in a /, even when orig does.
     (should-not (fboundp 'ffip-project-root))
     (pytest-pdb-break-test-homer-fixture)))
 
+(cl-defun pytest-pdb-break-test-run-ert-in-subprocess
+    (test-file selector &key load-path-dir env-vars logfile)
+  "Run SELECTOR in subproc and return exit code.
+If selector is a symbol, it must be quoted. Emacs option -L is set to
+LOAD-PATH-DIR or \".\", and option -l is passed TEST-FILE. Test output
+is printed to LOGFILE. Export ENV-VARS in alist of consed key-val
+strings ((NAME . VALUE) ...)."
+  (setq logfile (file-truename (or logfile
+                                   (format "%s-ert.out"
+                                           (file-name-base test-file)))))
+  (let* ((script `(ert-run-tests-batch-and-exit ,selector))
+         (args (list "-Q" "--batch" "-L" (or load-path-dir ".") "-l" test-file
+                     "--eval" (format "%S" script))))
+    (let ((process-environment (append process-environment nil)))
+      (dolist (pair env-vars)
+        (when (stringp (cdr pair))
+          (setenv (car pair) (cdr pair))))
+      (apply #'call-process "emacs" nil `(:file ,logfile) nil args))))
+
 (defmacro pytest-pdb-break-test-homer-setup-fixture (subform dir-body info-msg)
   "Run SUBFORM as the calling test in an Emacs ERT subprocess.
 DIR-BODY sets up build dir. INFO-MSG is passed to `ert-info'."
-  `(let* ((test-sym (ert-test-name (ert-running-test)))
-          (env-var (pytest-pdb-break-test--name-to-envvar test-sym)))
-     (if (getenv env-var)
-         ,subform
-       (pytest-pdb-break-test-with-tmpdir
-        "-setup"
-        (let* ((dir (pytest-pdb-break-test-with-tmpdir
-                     "-setup/build"
-                     ,dir-body
-                     (byte-compile-file "./pytest-pdb-break.el")
-                     default-directory))
-               (file (pytest-pdb-break-test-with-tmpdir
-                      "-setup/script"
-                      (copy-file pytest-pdb-break-test-lisp-this "./")
-                      (file-truename "./pytest-pdb-break-test.el")))
-               (logfile (file-truename "test.out"))
-               (script `(ert-run-tests-batch-and-exit ',test-sym))
-               (args (list "-Q" "--batch" "-L" dir "-l" file
-                           "--eval" (format "%S" script)))
-               (process-environment (append process-environment nil))
-               ec)
-          (ert-info (,info-msg)
-            (setenv env-var "1")
-            (setq ec (apply #'call-process "emacs" nil
-                            (list :file logfile) nil args))
-            (should (zerop ec))))))))
+  (setq info-msg (or info-msg (format "ERT subproc in %s" default-directory)))
+  `(pytest-pdb-break-test-with-conditional-env-var
+    ,subform
+    (pytest-pdb-break-test-with-tmpdir
+     "-setup"
+     (let ((file (pytest-pdb-break-test-with-tmpdir
+                  "-setup/script"
+                  (copy-file pytest-pdb-break-test-lisp-this "./")
+                  (file-truename "./pytest-pdb-break-test.el")))
+           (dir (pytest-pdb-break-test-with-tmpdir
+                 "-setup/build"
+                 ,dir-body
+                 (byte-compile-file "./pytest-pdb-break.el")
+                 default-directory)))
+       (ert-info (,info-msg)
+         (should (zerop (pytest-pdb-break-test-run-ert-in-subprocess
+                         file
+                         (list 'quote $test-sym)
+                         :load-path-dir dir
+                         :env-vars (list (cons $env-var "1"))
+                         :logfile "test.out"))))))))
 
 (ert-deftest pytest-pdb-break-test-homer-symlink ()
+  ;; Eval: (compile "make PAT=homer-symlink")
   (pytest-pdb-break-test-homer-setup-fixture
    ;; subform
    (progn
@@ -288,6 +323,7 @@ DIR-BODY sets up build dir. INFO-MSG is passed to `ert-info'."
    "Find home, resolving symlinks"))
 
 (ert-deftest pytest-pdb-break-test-homer-missing ()
+  ;; Eval: (compile "make PAT=homer-missing")
   (pytest-pdb-break-test-homer-setup-fixture
    ;; subform
    (let ((exc (should-error (pytest-pdb-break-test-homer-fixture)))
@@ -298,6 +334,54 @@ DIR-BODY sets up build dir. INFO-MSG is passed to `ert-info'."
    (copy-file pytest-pdb-break-test-lisp-main "./")
    ;; info-msg
    "No cloned repo (pytest plugin) found"))
+
+(ert-deftest pytest-pdb-break-test-on-kill-emacs ()
+  ;; Eval: (compile "make PAT=on-kill-emacs")
+  (pytest-pdb-break-test-with-conditional-env-var
+   (ert-info ("In subprocess")
+     (should (file-exists-p (file-truename "fake-isolib")))
+     (setq pytest-pdb-break--tempdir (file-truename "fake-isolib"))
+     (add-hook 'kill-emacs-hook #'pytest-pdb-break--on-kill-emacs))
+   (ert-info ("In setup")
+     (pytest-pdb-break-test-with-tmpdir
+      (should (string-match-p "on-kill-emacs/$" default-directory))
+      (make-directory "fake-isolib/fake-egg-info" t)
+      (with-temp-file "fake-isolib/fake.py" (insert "# foo"))
+      (should (file-exists-p (file-truename "fake-isolib")))
+      (should (zerop (pytest-pdb-break-test-run-ert-in-subprocess
+                      pytest-pdb-break-test-lisp-this
+                      (list 'quote $test-sym)
+                      :load-path-dir pytest-pdb-break-test-lisp-root
+                      :env-vars (list (cons $env-var "1"))
+                      :logfile "test.out")))
+      (should-not (file-exists-p (file-truename "fake-isolib")))))))
+
+(ert-deftest pytest-pdb-break-test-create-tempdir ()
+  ;; Eval: (compile "make PAT=create-tempdir")
+  (pytest-pdb-break-test-with-conditional-env-var
+   (ert-info ("In subprocess")
+     (let ((rv (pytest-pdb-break--create-tempdir))
+           attrs)
+       (should (file-exists-p rv))
+       (should (equal rv pytest-pdb-break--tempdir))
+       (setq attrs (file-attributes rv))
+       (should (eq (file-attribute-user-id attrs) (user-uid)))
+       (should (string= (file-attribute-modes attrs) "drwx------"))
+       (with-temp-file "tempdir-location.out"
+         (insert pytest-pdb-break--tempdir))))
+   (ert-info ("In setup")
+     (pytest-pdb-break-test-with-tmpdir
+      (should (zerop (pytest-pdb-break-test-run-ert-in-subprocess
+                      pytest-pdb-break-test-lisp-this
+                      (list 'quote $test-sym)
+                      :load-path-dir pytest-pdb-break-test-lisp-root
+                      :env-vars (list (cons $env-var "1"))
+                      :logfile "test.out")))
+      (let ((dirwas (with-temp-buffer (insert-file-contents-literally
+                                       "tempdir-location.out")
+                                      (buffer-string))))
+        (should (directory-name-p dirwas))
+        (should-not (file-exists-p dirwas)))))))
 
 (defvar pytest-pdb-break-test--exes `((base) (bare) (self)))
 
@@ -353,6 +437,26 @@ a sound choice)."
        (should (directory-name-p $venv))
        (should (directory-name-p $venvbin))
        ,@body))))
+
+(ert-deftest pytest-pdb-break-test-get-isolated-lib ()
+  ;; Eval: (compile "make PAT=get-isolated-lib")
+  (pytest-pdb-break-test-ensure-venv
+   'bare
+   (make-directory "fake-tmpdir")
+   (setenv "PYTEST_PDB_BREAK_INSTALL_LOGFILE" "helper.log")
+   (let* ((pytest-pdb-break--home pytest-pdb-break-test-repo-root)
+          (pytest-pdb-break--tempdir (file-name-as-directory
+                                      (file-truename "fake-tmpdir")))
+          pytest-pdb-break--isolated-lib
+          (rv (pytest-pdb-break-get-isolated-lib $pyexe)))
+     (should (file-exists-p rv))
+     (should (directory-name-p rv))
+     (should (string= rv pytest-pdb-break--isolated-lib))
+     (should (file-exists-p (concat rv "/pytest_pdb_break.py")))
+     (should (string-match-p (regexp-quote pytest-pdb-break--tempdir) rv))
+     (should-not (member #'pytest-pdb-break--on-kill-emacs kill-emacs-hook))
+     (should-not (null (directory-files rv nil "\\.*-info"))))
+   (should-not pytest-pdb-break--isolated-lib)))
 
 (defmacro pytest-pdb-break-test--query-wrap (&rest body)
   "Run BODY with common assertions/bindings for config-info-helper func."
