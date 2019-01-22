@@ -1,7 +1,7 @@
 NVIM ?= nvim
 VIM ?= vim
 PYTEST_PDB_BREAK_TEST_TEMPDIR ?= /tmp/pytest-pdb-break-test
-VENVDIR = $(shell python3 ../helpers/ensure_venv.py ensure_venvdir)
+VENVDIR = $(shell python3 ../helpers/main.py ensure_venvdir)
 ifeq (,$(findstring $(PYTEST_PDB_BREAK_TEST_TEMPDIR),$(VENVDIR)))
 $(error error asking helper for venv home in tempdir)
 endif
@@ -34,13 +34,13 @@ neovim: | $(VENVBARE) $(VENVBASE) $(VENVSELF)
 	$(NVIM) -n -u test_initrc -i NONE -S test_pytest_pdb_break.vim --headless
 
 $(VENVBARE): | $(PYTEST_PDB_BREAK_TEST_TEMPDIR)
-	python3 ../helpers/ensure_venv.py get_pyexe bare
+	python3 ../helpers/main.py get_pyexe bare >/dev/null
 
 $(VENVBASE): | $(PYTEST_PDB_BREAK_TEST_TEMPDIR)
-	python3 ../helpers/ensure_venv.py get_pyexe base
+	python3 ../helpers/main.py get_pyexe base >/dev/null
 
 $(VENVSELF): | $(PYTEST_PDB_BREAK_TEST_TEMPDIR)
-	python3 ../helpers/ensure_venv.py get_pyexe self
+	python3 ../helpers/main.py get_pyexe self >/dev/null
 
 $(PYTEST_PDB_BREAK_TEST_TEMPDIR):
 	mkdir -p $@
