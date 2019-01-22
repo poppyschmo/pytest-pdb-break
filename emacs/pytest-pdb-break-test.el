@@ -307,8 +307,7 @@ Returns true name to existing, versioned python exe with predefined
 requirements installed."
   (cl-assert (symbolp name))
   (cl-assert (assq name pytest-pdb-break-test--exes))
-  (let ((prog (concat pytest-pdb-break-test-repo-root
-                      "helpers/ensure_venv.py"))
+  (let ((prog (concat pytest-pdb-break-test-repo-root "helpers/main.py"))
         (found (cdr (assq name pytest-pdb-break-test--exes)))
         (pat (format "^%s\\.venvs/[[:digit:].]+/%s/bin/python[[:digit:].]+$"
                      (regexp-quote pytest-pdb-break-test-tempdir)
@@ -317,7 +316,7 @@ requirements installed."
     (unless found
       (cl-assert (file-exists-p prog))
       (with-temp-buffer
-        (setenv "PYTEST_PDB_BREAK_ENSURE_VENV_LOGFILE" "pip.log")
+        (setenv "PYTEST_PDB_BREAK_INSTALL_LOGFILE" "pip.log")
         (if (zerop (call-process "python3" nil (current-buffer) nil prog
                                  "get_pyexe" (symbol-name name)))
             (setq found (buffer-string))
