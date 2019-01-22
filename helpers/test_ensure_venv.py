@@ -419,6 +419,8 @@ class TestMakeLibPath(unittest.TestCase):
         proj.mkdir()
         (proj / "pytest_pdb_break.py").touch()
         spy = proj / "setup.py"
+        # Note: real setup() must have a pytest11 entrypoints kwarg for
+        # PluginManager.load_setuptools_entrypoints to detect it
         spy.write_text(dedent("""\
             import setuptools
             setuptools.setup(name="pytest_pdb_break",
