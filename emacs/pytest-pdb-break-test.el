@@ -18,17 +18,9 @@
     pytest-pdb-break-test-on-kill-emacs
     pytest-pdb-break-test-create-tempdir
     pytest-pdb-break-test-get-isolated-lib
-    pytest-pdb-break-test-query-helper-unregistered
-    pytest-pdb-break-test-query-helper-registered
-    pytest-pdb-break-test-query-helper-error-import
-    pytest-pdb-break-test-query-helper-error-opts
-    pytest-pdb-break-test-get-config-info-error
-    pytest-pdb-break-test-get-config-info-unregistered
-    pytest-pdb-break-test-get-config-info-registered
     pytest-pdb-break-test-get-node-id
     pytest-pdb-break-test-make-arg-string
     pytest-pdb-break-test-minor-mode
-    pytest-pdb-break-test-get-rootdir
     pytest-pdb-break-test-main-command))
 
 (defvar pytest-pdb-break-test-repo-root
@@ -428,10 +420,7 @@ a sound choice)."
     (pytest-pdb-break-test-with-environment
      (let* (($pyexe (pytest-pdb-break-test--get-pyexe ,name))
             ($venvbin (file-name-directory $pyexe))
-            ($venv (file-name-directory (directory-file-name $venvbin)))
-            ;; XXX this is a conceit to prevent this variable from persisting
-            ;; between tests. It may need to be reset manually within body.
-            pytest-pdb-break-config-info-alist)
+            ($venv (file-name-directory (directory-file-name $venvbin))))
        (should (file-exists-p $venv))
        (should (file-exists-p $venvbin))
        (should (directory-name-p $venv))
@@ -458,230 +447,6 @@ a sound choice)."
      (should-not (null (directory-files rv nil "\\.*-info"))))
    (should-not pytest-pdb-break--isolated-lib)))
 
-(defmacro pytest-pdb-break-test--query-wrap (&rest body)
-  "Run BODY with common assertions/bindings for config-info-helper func."
-  `(let (($rootdir (directory-file-name default-directory))
-         ($rv (cl-gensym)))
-     (cl-flet (($callit () (setq $rv (pytest-pdb-break--query-config))))
-       ,@body)
-     (should (json-plist-p $rv))
-     (should (= 4 (length $rv)))
-     (should (string= $rootdir (plist-get $rv :rootdir)))))
-
-(ert-deftest pytest-pdb-break-test-query-helper-unregistered ()
-  ;; Eval: (compile "make PAT=query-helper-unregistered")
-  (pytest-pdb-break-test-ensure-venv
-   'base
-   (with-temp-buffer
-     (insert "[pytest]\n")
-     (write-file "pytest.ini"))
-   (let ((python-shell-interpreter $pyexe))
-     (ert-info ("Explicit py-shell-int, unreg, curdir")
-       (pytest-pdb-break-test--query-wrap
-        ($callit)
-        (should-not (plist-get $rv :registered))))
-     (ert-info ("Explicit py-shell-int, unreg, subdir")
-       (pytest-pdb-break-test--query-wrap
-        (pytest-pdb-break-test-with-tmpdir
-         "/tests"
-         (should-not (string= $rootdir default-directory))
-         (with-temp-buffer
-           (insert "def test_foo():" "\n\t" "assert True")
-           (write-file "test_subdir.py"))
-         ($callit))
-        (should-not (plist-get $rv :registered)))))
-   (ert-info ("PATH, exec-path, unreg, curdir, no explicit py-shell-int")
-     (pytest-pdb-break-test--query-wrap
-      (pytest-pdb-break-test-with-environment
-       (setenv "PATH" (format "%s:%s" $venvbin (getenv "PATH")))
-       (setq exec-path (cons $venvbin exec-path))
-       ;; Still passes when string=
-       (should (string-prefix-p (executable-find python-shell-interpreter)
-                                $pyexe))  ;; ends with version, e.g. 3.7
-       ($callit)
-       (should-not (plist-get $rv :registered)))))))
-
-(ert-deftest pytest-pdb-break-test-query-helper-registered ()
-  ;; Eval: (compile "make PAT=query-helper-registered")
-  (pytest-pdb-break-test-ensure-venv
-   'self
-   (let ((python-shell-interpreter $pyexe))
-     (ert-info ("Explicit py-shell-int, curdir")
-       (pytest-pdb-break-test--query-wrap
-        ($callit)
-        (should (plist-get $rv :registered)))))))
-
-(ert-deftest pytest-pdb-break-test-query-helper-error-import ()
-  ;; Eval: (compile "make PAT=query-helper-error-import")
-  (pytest-pdb-break-test-ensure-venv
-   'bare
-   (let ((python-shell-interpreter $pyexe))
-     ;; The error is raised by --query-config
-     (ert-info ("No packages")
-       (let ((exc (should-error (pytest-pdb-break--query-config))))
-         (should (string-match-p "Error calling" (cadr exc)))
-         (should (string-match-p "No module named '_pytest'" (cadr exc)))
-         (with-temp-buffer
-           (insert (cadr exc))
-           (write-file "error.out")))))))
-
-(ert-deftest pytest-pdb-break-test-query-helper-error-opts ()
-  ;; Eval: (compile "make PAT=query-helper-error-opts")
-  (pytest-pdb-break-test-ensure-venv
-   'base
-   (let ((python-shell-interpreter $pyexe))
-     (ert-info ("Unknown args")
-       (let ((exc (should-error (pytest-pdb-break--query-config "--fake"))))
-         (should (string-match-p "Error calling" (cadr exc)))
-         (should (string-match-p "unrecognized arguments" (cadr exc)))
-         (with-temp-buffer
-           (insert (cadr exc))
-           (write-file "unknown-args-error.out"))))
-     (ert-info ("Unknown plugin")
-       (let ((exc (should-error (pytest-pdb-break--query-config "-p" "fake"))))
-         (should (string-match-p "Error calling" (cadr exc)))
-         (should (string-match-p "ModuleNotFound" (cadr exc)))
-         (should (string-match-p "importing plugin" (cadr exc)))
-         (with-temp-buffer
-           (insert (cadr exc))
-           (write-file "fake-plugin-error.out")))))))
-
-(ert-deftest pytest-pdb-break-test-get-config-info-error ()
-  ;; Eval: (compile "make PAT=get-config-info-error")
-  (cl-macrolet
-      ((fails
-        (setup logfile)
-        `(pytest-pdb-break-test-with-python-buffer
-          ,setup
-          (should (cl-notany python-shell-extra-pythonpaths
-                             python-shell-exec-path
-                             python-shell-virtualenv-root
-                             ;; ours
-                             pytest-pdb-break--config-info))
-          (let ((exc (should-error (pytest-pdb-break-get-config-info))))
-            (should (eq 'error (car exc)))
-            (should (string-match-p "Error calling" (cadr exc)))
-            (with-temp-buffer (insert (cadr exc)) (write-file ,logfile)))
-          (should-not pytest-pdb-break-config-info-alist)
-          (should-not pytest-pdb-break--config-info))))
-    (pytest-pdb-break-test-ensure-venv
-     'base
-     (ert-info ("System Python has no pytest")
-       (fails (progn (should-not python-shell-process-environment)
-                     (should-not pytest-pdb-break-config-info-alist))
-              "error_no_pytest.out"))
-     (ert-info ("Manually set VIRTUAL_ENV")
-       (fails (progn (should-not python-shell-process-environment)
-                     (should-not pytest-pdb-break-config-info-alist)
-                     (setenv "VIRTUAL_ENV" $venv))
-              "error_virtual_env_manual.out"))
-     (ert-info ("Set extra env vars to override")
-       (let ((python-shell-process-environment
-              (list (format "PATH=%s:%s" $venvbin (getenv "PATH"))
-                    (format "VIRTUAL_ENV=%s" $venvbin))))
-         (fails (should python-shell-process-environment)
-                "error_proc_env_api.out")))
-     (ert-info ("Invalid cdr for alist entry")
-       (let ((pytest-pdb-break-config-info-alist
-              (list (list (executable-find python-shell-interpreter)))))
-         (fails (progn
-                  (should-not python-shell-process-environment)
-                  (should pytest-pdb-break-config-info-alist))
-                "error_invalid_cdr.out")
-         (should-not pytest-pdb-break-config-info-alist))))))
-
-(cl-defmacro pytest-pdb-break-test-get-config-info-fixture (before
-                                                            after
-                                                            &key node-id)
-  `(let ((pytest-pdb-break-config-info-alist
-          (append pytest-pdb-break-config-info-alist nil))) ; otherwise global
-     (pytest-pdb-break-test-with-python-buffer
-      (should-not pytest-pdb-break--config-info)
-      ,before
-      (let ((rv (pytest-pdb-break-get-config-info ,node-id)))
-        (should (= 6 (length pytest-pdb-break--config-info)))
-        (should (eq (cdr rv) pytest-pdb-break--config-info))
-        (should (eq (car rv)
-                    (plist-get pytest-pdb-break--config-info :exe)))
-        (should pytest-pdb-break-config-info-alist)
-        (should (eq (assoc (car rv) pytest-pdb-break-config-info-alist)
-                    rv)))
-      ,after)))
-
-(ert-deftest pytest-pdb-break-test-get-config-info-unregistered ()
-  ;; Eval: (compile "make PAT=get-config-info-unregistered")
-  (cl-macrolet ((before (&rest rest) `(ert-info ("Before") ,@rest))
-                (after (&rest rest) `(ert-info ("After") ,@rest)))
-    (pytest-pdb-break-test-ensure-venv
-     'base
-     (ert-info ("Set virtual environment root")
-       ;; See upstream (python-mode) test above re -= slash
-       (let ((python-shell-virtualenv-root $venv)
-             (unslashed (directory-file-name $venvbin)))
-         (pytest-pdb-break-test-get-config-info-fixture
-          (before
-           (should-not (member unslashed exec-path)))
-          (after
-           (should-not (directory-name-p
-                        (plist-get pytest-pdb-break--config-info :rootdir)))
-           (should-not (member unslashed exec-path))))))
-     (ert-info ("Set extra `exec-path' items to prepend")
-       (let ((python-shell-exec-path (list $venvbin)))
-         (pytest-pdb-break-test-get-config-info-fixture
-          (should-not (member $venvbin exec-path))
-          (after
-           (should-not (directory-name-p
-                        (plist-get pytest-pdb-break--config-info :rootdir)))
-           (should-not (member $venvbin exec-path))))))
-     (ert-info ("Baseline for \"Don't shell out ...\"")
-       (let ((python-shell-interpreter $pyexe))
-         (pytest-pdb-break-test-get-config-info-fixture
-          (should-not pytest-pdb-break-config-info-alist)
-          (should (equal pytest-pdb-break--config-info
-                         (list :exe $pyexe
-                               :registered nil
-                               :rootdir (directory-file-name
-                                         default-directory)))))))
-     (ert-info ("Don't shell out when entry exists, even with invalid plist")
-       (let* ((python-shell-interpreter $pyexe)
-              (fake-entry (list $pyexe
-                                :exe $pyexe
-                                :fookey "fooval"
-                                :barkey "barval"))
-              (pytest-pdb-break-config-info-alist (list fake-entry)))
-         (pytest-pdb-break-test-get-config-info-fixture
-          (should pytest-pdb-break-config-info-alist)
-          (should (equal pytest-pdb-break--config-info (cdr fake-entry)))))))))
-
-(ert-deftest pytest-pdb-break-test-get-config-info-registered ()
-  ;; Eval: (compile "make PAT=get-config-info-registered")
-  (cl-macrolet ((rinse-repeat
-                 (&optional node-id)
-                 `(pytest-pdb-break-test-get-config-info-fixture
-                   (ignore)
-                   (ert-info ("After")
-                     (should (equal pytest-pdb-break--config-info
-                                    (list :exe $pyexe
-                                          :registered t
-                                          :rootdir (directory-file-name
-                                                    default-directory)))))
-                   :node-id ,node-id)))
-    (pytest-pdb-break-test-ensure-venv
-     'self
-     (insert "def test_foo():\n\tassert True\n")
-     (write-file "test_something.py")
-     (let ((pytest-pdb-break-alt-interpreter $pyexe)
-           (nid (list buffer-file-name "test_foo")))
-       (ert-info ("Extra opts")
-         (let ((pytest-pdb-break-extra-opts '("-p" "pytest_pdb_break")))
-           (rinse-repeat)))
-       (ert-info ("Node-id parts")
-         (rinse-repeat nid))
-       (ert-info ("Both node-id and extra-args")
-         (let ((pytest-pdb-break-extra-opts (list (format "--break=%s:2"
-                                                          buffer-file-name))))
-           (rinse-repeat nid)))))))
-
 (defvar pytest-pdb-break-test--get-node-id-sources
   '("
 def test_foo():
@@ -707,6 +472,7 @@ class TestFoo:
   "The first line (1) is a single newline char.")
 
 (ert-deftest pytest-pdb-break-test-get-node-id ()
+  ;; Eval: (compile "make PAT=get-node-id")
   ;; For now, assume Elpy branch is infallible, and just test ours
   (let ((source-one (nth 0 pytest-pdb-break-test--get-node-id-sources))
         (source-two (nth 1 pytest-pdb-break-test--get-node-id-sources))
@@ -760,31 +526,18 @@ class TestFoo:
           (should (equal exc '(error "No test found")))))))))
 
 (ert-deftest pytest-pdb-break-test-make-arg-string ()
+  ;; Eval: (compile "make PAT=make-arg-string")
   (let* ((file "/tmp/a.py")
          (node-info (list file "test_a")))
-    (ert-info ("Plugin present")
+    (ert-info ("No extras")
       (should-not pytest-pdb-break-extra-opts)
-      (should (string= (pytest-pdb-break--make-arg-string 9 node-info t)
-                       "-mpytest --break=/tmp/a.py:9 /tmp/a.py::test_a")))
-    (ert-info ("Plugin present, extras")
-      (let* ((pytest-pdb-break-extra-opts '("-p" "no:foo"))
-             (rv (pytest-pdb-break--make-arg-string 9 node-info t))
-             (x "-mpytest -p no:foo --break=/tmp/a.py:9 /tmp/a.py::test_a"))
-        (should (string= rv x))
-        (should (equal pytest-pdb-break-extra-opts '("-p" "no:foo")))))
-    (ert-info ("Plugin missing")
-      (should-not pytest-pdb-break-extra-opts)
-      (should (string= (pytest-pdb-break--make-arg-string 9 node-info nil)
-                       (concat "-mpytest -p pytest_pdb_break "
-                               "--break=/tmp/a.py:9 /tmp/a.py::test_a"))))
-    (ert-info ("Plugin missing, extras overlap")
-      (let* ((pytest-pdb-break-extra-opts '("-p" "pytest_pdb_break"))
-             (rv (pytest-pdb-break--make-arg-string 9 node-info nil)))
-        (should (string= rv (concat
-                             "-mpytest -p pytest_pdb_break "
-                             "--break=/tmp/a.py:9 /tmp/a.py::test_a")))
-        (should (equal pytest-pdb-break-extra-opts
-                       '("-p" "pytest_pdb_break")))))))
+      (should (string= (pytest-pdb-break--make-arg-string 9 node-info)
+                       "--break=/tmp/a.py:9 /tmp/a.py::test_a")))
+    (ert-info ("Extras")
+      (let ((pytest-pdb-break-extra-opts '("-p" "no:foo")))
+        (should (string= (pytest-pdb-break--make-arg-string 9 node-info)
+                         "-p no:foo --break=/tmp/a.py:9 /tmp/a.py::test_a"))
+        (should (equal pytest-pdb-break-extra-opts '("-p" "no:foo")))))))
 
 (ert-deftest pytest-pdb-break-test-minor-mode ()
   ;; Eval: (compile "make PAT=minor-mode")
@@ -831,19 +584,14 @@ class TestFoo:
                    (should (local-variable-p 'kill-buffer-hook))
                    (should-not (eq t (car kill-buffer-hook))))
            (outside (should-not (adchk))
-                    (should-not pytest-pdb-break-processes)
-                    (should-not (local-variable-p
-                                 'pytest-pdb-break--config-info)))))
+                    (should-not pytest-pdb-break-processes))))
     (ert-info ("Normal, with *--proc, parbuf prop")
       (let ((parbuf (current-buffer)))
-        (should-not (local-variable-p 'pytest-pdb-break--config-info))
         (rip (inside (setq pytest-pdb-break--process proc
                            pytest-pdb-break--parent-buffer parbuf)
                      (should (local-variable-p 'pytest-pdb-break--process))
                      (pytest-pdb-break-mode +1))
-             (outside (should-not pytest-pdb-break-processes)
-                      (should (local-variable-p
-                               'pytest-pdb-break--config-info))))))
+             (outside (should-not pytest-pdb-break-processes)))))
     (ert-info ("Deactivation behavior")
       (let ((s1 (start-process "s1" (current-buffer) "sleep" "30")))
         (set-process-query-on-exit-flag s1 nil)
@@ -864,20 +612,6 @@ class TestFoo:
                       (should-not (adchk))
                       (should-not (local-variable-p 'kill-buffer-hook))))))))
 
-(ert-deftest pytest-pdb-break-test-get-rootdir ()
-  ;; Eval: (compile "make PAT=get-rootdir")
-  (pytest-pdb-break-test-with-python-buffer
-   (setq pytest-pdb-break--config-info
-         '(:exe "/tmp/fake__/venv/bin/python"
-                :registered t
-                :rootdir "/tmp/fake__/repo"))
-   (should (local-variable-p 'pytest-pdb-break--config-info))
-   (let ((rv (pytest-pdb--get-rootdir)))
-     (should (directory-name-p rv))
-     (should (string-prefix-p (plist-get pytest-pdb-break--config-info
-                                         :rootdir)
-                              rv)))))
-
 ;; TODO find the proper built-in way to do this
 (defun pytest-pdb-break-test--expect-timeout (pattern &optional max-secs)
   "Dumb waiter. Wait MAX-SECS for PATTERN before process mark."
@@ -894,9 +628,8 @@ class TestFoo:
   (pytest-pdb-break-test-ensure-venv
    'base
    (let ((sample-source (nth 1 pytest-pdb-break-test--get-node-id-sources))
+         (python-shell-virtualenv-root $venv)
          (python-shell-interpreter $pyexe)
-         (pytest-pdb-break-config-info-alist
-          (append pytest-pdb-break-config-info-alist nil))
          (pytest-pdb-break-processes (append pytest-pdb-break-processes nil))
          (start-dir default-directory)
          case-fold-search)

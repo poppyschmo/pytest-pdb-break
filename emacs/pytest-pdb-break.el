@@ -23,6 +23,11 @@
 ;; TODO make completion wrapper work in "interactive" REPL
 ;; TODO tramp
 ;; TODO add option to inject pdb++
+;;
+;; If reverting to the `query-helper'/`config-info'-centered approach, see
+;; 2824cc74d1e05bdbd2aed580f4a5844c4cae0495 or earlier. These used python -m
+;; pytest, rootdir as cwd, etc.
+;;
 
 ;;; Code:
 
@@ -50,14 +55,6 @@ If set, overrides `python-shell-interpreter' when obtaining config info
 and running main command."
   :group 'pytest
   :type 'list)
-
-(defvar pytest-pdb-break-config-info-alist nil
-  "An alist with members ((INTERPRETER . PLIST) ...).
-Set by the main command the first time it's invoked in a buffer. PLIST
-is obtained by querying the external config-info helper. Entries are
-retrieved and modified with `python-shell-with-environment' active,
-meaning `python-shell-exec-path', `python-shell-virtualenv-root' etc.,
-all have an effect, unless `pytest-pdb-break-alt-interpreter' is set.")
 
 (defvar pytest-pdb-break-processes nil
   "List of processes started via `pytest-pdb-break-here'.")
@@ -132,62 +129,6 @@ Use INTERPRETER or `python-shell-interpreter' to run the helper script."
                  python-shell-interpreter script name (buffer-string))))
       (setq pytest-pdb-break--isolated-lib name))))
 
-(defun pytest-pdb-break--query-config (&rest args)
-  "Return a plist with items :registered BOOL and :rootdir STRING.
-Include any ARGS when calling external helper."
-  (let* ((home (or pytest-pdb-break--home (pytest-pdb-break--homer)))
-         (helper (concat home "helpers/get_config_info.py"))
-         (json-object-type 'plist)
-         json-false)
-    (with-temp-buffer
-      (if (zerop (apply #'call-process
-                        (append (list python-shell-interpreter helper
-                                      (current-buffer) nil)
-                                (and args (cons "-" args)))))
-          (progn (goto-char (point-min)) (json-read))
-        (error "Error calling %s:\n%s\nexec-path: %s"
-               (mapconcat #'identity
-                          (append (list python-shell-interpreter helper)
-                                  (and args (cons "-" args)))
-                          " ")
-               (buffer-string)
-               exec-path)))))
-
-(defvar-local pytest-pdb-break--config-info nil
-  "Value of active config-info-alist entry.")
-
-(defun pytest-pdb-break-get-config-info (&optional node-id-parts force)
-  "Maybe call config-info helper, respecting options and environment.
-Include `pytest-pdb-break-extra-opts', if any, along with NODE-ID-PARTS.
-With FORCE, always update. Return entry in config-info alist."
-  (python-shell-with-environment
-    (let* ((python-shell-interpreter (or pytest-pdb-break-alt-interpreter
-                                         python-shell-interpreter))
-           (pyexe-path (executable-find python-shell-interpreter))
-           (entry (assoc pyexe-path pytest-pdb-break-config-info-alist))
-           result)
-      (condition-case err
-          (if (and (not force) entry)
-              (if (cdr entry)
-                  (setq pytest-pdb-break--config-info (cdr entry))
-                (pytest-pdb-break-get-config-info node-id-parts 'force))
-            (let ((args (append pytest-pdb-break-extra-opts
-                                (and node-id-parts
-                                     (list (mapconcat #'identity
-                                                      node-id-parts "::"))))))
-              (setq result (apply #'pytest-pdb-break--query-config args)))
-            (unless entry
-              (push (setq entry (list pyexe-path))
-                    pytest-pdb-break-config-info-alist))
-            (setq pytest-pdb-break--config-info
-                  (setcdr entry (nconc (list :exe pyexe-path) result))))
-        (error
-         (when entry
-           (setq pytest-pdb-break-config-info-alist
-                 (delete entry pytest-pdb-break-config-info-alist)))
-         (signal (car err) (cdr err))))
-      entry)))
-
 (defun pytest-pdb-break--get-node-id ()
   "Return list of node-id components for test at point."
   (let (file test parts)
@@ -204,35 +145,12 @@ With FORCE, always update. Return entry in config-info alist."
       (setq parts (list (pop parts) (pop parts))))
     (cons file parts)))
 
-(defun pytest-pdb--get-rootdir ()
-  "Return value of :rootdir from the active config-info plist.
-Ensure it has a trailing slash."
-  (cl-assert (member :rootdir pytest-pdb-break--config-info) t)
-  (file-name-as-directory (plist-get pytest-pdb-break--config-info :rootdir)))
-
-(defun pytest-pdb-break--check-command-p (command)
-  "Run COMMAND in Python, return t if exit code is 0, nil otherwise."
-  (zerop (call-process python-shell-interpreter nil nil nil "-c" command)))
-
-(defun pytest-pdb-break--has-plugin-p ()
-  "Return non-nil if plugin is loadable."
-  ;; Allows bypassing get-info when running the command non-interactively,
-  ;; although config-info would still need populating by other means
-  (cl-assert (member :registered pytest-pdb-break--config-info) t)
-  (plist-get pytest-pdb-break--config-info :registered))
-
-(defun pytest-pdb-break--make-arg-string (line-no node-id-parts installed)
+(defun pytest-pdb-break--make-arg-string (line-no node-id-parts)
   "Prepare arg string for `python-shell-make-comint'.
-LINE-NO and NODE-ID-PARTS are as required by the main command. INSTALLED
-should be non-nil if pytest sees the plugin."
+LINE-NO and NODE-ID-PARTS are as required by the main command."
   (let* ((nodeid (mapconcat #'identity node-id-parts "::"))
          (break (format "--break=%s:%s" (car node-id-parts) line-no))
-         (xtra (append (unless (or installed
-                                   (member "pytest_pdb_break"
-                                           pytest-pdb-break-extra-opts))
-                         '("-p" "pytest_pdb_break"))
-                       pytest-pdb-break-extra-opts))
-         (args (append (cons "-mpytest" xtra) (list break nodeid))))
+         (args (append pytest-pdb-break-extra-opts (list break nodeid))))
     (combine-and-quote-strings args)))
 
 ;; FIXME only add this wrapper when pdb++ is detected. These amputee
@@ -261,9 +179,6 @@ If PROCESS is ours, prepend INPUT to results. With IMPORT, ignore."
 (define-minor-mode pytest-pdb-break-mode
   "A minor mode for Python comint buffers running a pytest PDB session."
   :group 'pytest-pdb-break
-  :after-hook (when (buffer-live-p pytest-pdb-break--parent-buffer)
-                (with-current-buffer pytest-pdb-break--parent-buffer
-                  (setq pytest-pdb-break--config-info nil)))
   (let ((proc (or pytest-pdb-break--process
                   (get-buffer-process (current-buffer)))))
     (if pytest-pdb-break-mode
@@ -286,28 +201,21 @@ If PROCESS is ours, prepend INPUT to results. With IMPORT, ignore."
                        'pytest-pdb-break-ad-around-get-completions)))))
 
 ;;;###autoload
-(defun pytest-pdb-break-here (line-no node-id-parts root-dir)
+(defun pytest-pdb-break-here (line-no node-id-parts)
   "Run pytest on the test at point and break at LINE-NO.
-NODE-ID-PARTS is a list of pytest node-id components. ROOT-DIR is
-normally a project/repo root directory containing a pytest config."
-  (interactive (let ((node-id-parts (pytest-pdb-break--get-node-id)))
-                 (pytest-pdb-break-get-config-info node-id-parts)
-                 (list (line-number-at-pos)
-                       node-id-parts
-                       (pytest-pdb--get-rootdir))))
-  (let* ((default-directory root-dir)
-         (process-environment (append process-environment nil))
-         (installed (pytest-pdb-break--has-plugin-p))
+NODE-ID-PARTS is a list of pytest node-id components."
+  (interactive (list (line-number-at-pos) (pytest-pdb-break--get-node-id)))
+  (let* ((process-environment (append process-environment nil))
          (python-shell-extra-pythonpaths
-          (append (unless installed (list pytest-pdb-break--home))
+          (append (list (pytest-pdb-break-get-isolated-lib))
                   python-shell-extra-pythonpaths))
          ;; Make pdb++ prompt trigger non-native-completion fallback
          (python-shell-prompt-pdb-regexp "[(<]*[Ii]?[Pp]db[+>)]+ ")
          ;; XXX warning in 25.x: Making ... local to ... while let-bound!
-         (python-shell-interpreter (or pytest-pdb-break-alt-interpreter
-                                       python-shell-interpreter))
+         (python-shell-interpreter (python-shell-with-environment
+                                    (executable-find "pytest")))
          (python-shell-interpreter-args (pytest-pdb-break--make-arg-string
-                                         line-no node-id-parts installed))
+                                         line-no node-id-parts))
          (python-shell-buffer-name "pytest-PDB")
          (proc (run-python nil 'dedicated 'show))
          (parbuf (current-buffer)))
