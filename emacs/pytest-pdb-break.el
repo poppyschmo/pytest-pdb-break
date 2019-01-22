@@ -15,18 +15,20 @@
 ;;
 ;; Usage: with point in the body of some test, run M-x `pytest-pdb-break-here'
 ;;
-;; Note: the completion modifications are useless without pdb++. No idea if
-;; they hold up when summoned by `company-capf'.
+;; This command can only handle the "console script"/entry-point invocation
+;; style (as opposed to "python -m pytest"). If a pytest executable doesn't
+;; appear in PATH, `pytest-pdb-break-pytest-executable' must be set.
 ;;
-;; TODO add tests for completion
+;; Regarding the completion modifications:
+;;
+;;   1. they're only meant for use with pdb++.
+;;   2. they may not respond correctly when summoned by third-party tools like
+;;      `company-capf'.
+;;
 ;; TODO detect presence of pdb++
 ;; TODO make completion wrapper work in "interactive" REPL
 ;; TODO tramp
 ;; TODO add option to inject pdb++
-;;
-;; If reverting to the `query-helper'/`config-info'-centered approach, see
-;; 2824cc74d1e05bdbd2aed580f4a5844c4cae0495 or earlier. These used python -m
-;; pytest, rootdir as cwd, etc.
 ;;
 
 ;;; Code:
@@ -48,13 +50,13 @@ entry unsets cmd-line options from a project ini:
   :group 'pytest
   :type 'list)
 
-;; FIXME change to alt-pytest-executable
-(defcustom pytest-pdb-break-alt-interpreter nil
-  "Path to an alternate Python executable.
-If set, overrides `python-shell-interpreter' when obtaining config info
-and running main command."
+(defcustom pytest-pdb-break-pytest-executable nil
+  "Path to an alternate pytest executable.
+If set, `executable-find' won't be consulted. For certain actions, like
+querying helpers, this script's shebanged Python may be used in place of
+`python-shell-interpreter'."
   :group 'pytest
-  :type 'list)
+  :type 'string)
 
 (defvar pytest-pdb-break-processes nil
   "List of processes started via `pytest-pdb-break-here'.")
@@ -77,6 +79,17 @@ This is the root path of cloned repo, not a \"lisp\" sub directory."
     (if (and root (file-exists-p (concat root "pytest_pdb_break.py")))
         (setq pytest-pdb-break--home root)
       (error "Cannot find pytest-pdb-break's home directory"))))
+
+(defun pytest-pdb-break-get-pytest-executable ()
+  "Return pytest executable"
+  (if pytest-pdb-break-pytest-executable
+      pytest-pdb-break-pytest-executable
+    (python-shell-with-environment
+     (let ((pytest-exe (executable-find "pytest")))
+       (if pytest-exe
+           pytest-exe
+         (error "pytest not found\nexec-path: %s\nprocess-environment: %s\n"
+                exec-path process-environment))))))
 
 (defvar pytest-pdb-break--tempdir nil
   "Temporary directory for this session.
@@ -128,6 +141,39 @@ Use INTERPRETER or `python-shell-interpreter' to run the helper script."
           (error "Error calling %s\nscript: %s\nname: %s\noutput: ...\n%s"
                  python-shell-interpreter script name (buffer-string))))
       (setq pytest-pdb-break--isolated-lib name))))
+
+(defun pytest-pdb-break--extract-shebang (pytest-exe)
+  "Extract PYTEST-EXE's shebanged interpreter."
+  (let (maybe)
+    (with-temp-buffer
+      (insert-file-contents-literally pytest-exe)
+      (goto-char (point-min))
+      (if (and (looking-at "#!\\([^\r\n]+\\)")
+               (setq maybe (match-string-no-properties 1))
+               (file-executable-p maybe))
+          maybe
+        (error "Cannot find python exe\npytest-exe: %s\nrejected: %s\n"
+               pytest-exe (buffer-substring (point) (point-at-eol)))))))
+
+(defvar pytest-pdb-break--exe-alist nil)
+
+(defun pytest-pdb-break-get-python-interpreter (pytest-exe &optional force)
+  "Return the python interpreter used by pytest-exe.
+With FORCE, update."
+  (let* ((entry (assoc pytest-exe pytest-pdb-break--exe-alist))
+         (value (cdr entry)))
+    (if (and (not force) value)
+        value
+      (condition-case err
+          (setq value (pytest-pdb-break--extract-shebang pytest-exe))
+        (error
+         (when entry
+           (setq pytest-pdb-break--exe-alist
+                 (delete entry pytest-pdb-break--exe-alist)))
+         (signal (car err) (cdr err))))
+      (unless entry
+        (push (setq entry (list pytest-exe)) pytest-pdb-break--exe-alist))
+      (setcdr entry value))))
 
 (defun pytest-pdb-break--get-node-id ()
   "Return list of node-id components for test at point."
@@ -213,8 +259,10 @@ NODE-ID-PARTS is a list of pytest node-id components."
     ;; Maybe pop to existing proc's buffer instead?
     (when (comint-check-proc proc-buffer-name)
       (error "%s is already running" proc-buffer-name))
-    (let* ((python-shell-extra-pythonpaths
-            (append (list (pytest-pdb-break-get-isolated-lib))
+    (let* ((pytest-exe (pytest-pdb-break-get-pytest-executable))
+           (pyexe (pytest-pdb-break-get-python-interpreter pytest-exe))
+           (python-shell-extra-pythonpaths
+            (append (list (pytest-pdb-break-get-isolated-lib pyexe))
                     python-shell-extra-pythonpaths))
            ;; Make pdb++ prompt trigger non-native-completion fallback
            (python-shell-prompt-pdb-regexp "[(<]*[Ii]?[Pp]db[+>)]+ ")
@@ -223,16 +271,12 @@ NODE-ID-PARTS is a list of pytest node-id components."
            ;; Produces warning in 25.x: Making foo local to bar while let-bound
            (python-shell--parent-buffer (current-buffer))
            (python-shell--interpreter-args fake-arg-string)
-           python-shell--interpreter
-           pytest-exe buffer)
+           (python-shell--interpreter pyexe)
+           buffer)
       (save-excursion
         ;; Allow "calculate-" funcs to consider "python-shell-" options and
         ;; modify process-environment and exec-path accordingly
         (python-shell-with-environment
-         (setq pytest-exe (executable-find "pytest"))
-         (unless pytest-exe
-           (error "pytest not found\nexec-path: %s\nprocess-environment: %s\n"
-                  exec-path process-environment))
          (setq buffer (apply #'make-comint-in-buffer proc-name proc-buffer-name
                              pytest-exe nil args))
          ;; Only python- prefixed local vars get cloned in child buffer

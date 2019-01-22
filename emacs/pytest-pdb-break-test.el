@@ -3,6 +3,12 @@
 ;;; Commentary:
 ;;
 ;; This leaves around 40M of junk under /tmp/pytest-pdb-break-test/
+;;
+;; If revisiting the `query-helper'/`config-info'-centered approach, see
+;; 2824cc74d1e05bdbd2aed580f4a5844c4cae0495 or earlier. These used -mpytest,
+;; rootdir as cwd, etc.
+;;
+;; TODO add tests for completion
 
 ;;; Code:
 
@@ -18,6 +24,8 @@
     pytest-pdb-break-test-on-kill-emacs
     pytest-pdb-break-test-create-tempdir
     pytest-pdb-break-test-get-isolated-lib
+    pytest-pdb-break-test-get-pytest-executable
+    pytest-pdb-break-test-get-python-interpreter
     pytest-pdb-break-test-get-node-id
     pytest-pdb-break-test-get-args
     pytest-pdb-break-test-minor-mode
@@ -446,6 +454,69 @@ a sound choice)."
      (should-not (member #'pytest-pdb-break--on-kill-emacs kill-emacs-hook))
      (should-not (null (directory-files rv nil "\\.*-info"))))
    (should-not pytest-pdb-break--isolated-lib)))
+
+(ert-deftest pytest-pdb-break-test-get-pytest-executable ()
+  ;; Eval: (compile "make PAT=get-pytest-executable")
+  (pytest-pdb-break-test-ensure-venv
+   'base
+   (ert-info ("Real exe found")
+     (let ((python-shell-virtualenv-root $venv)
+           pytest-pdb-break-pytest-executable)
+       (should (string= (concat $venvbin "pytest")
+                        (pytest-pdb-break-get-pytest-executable)))))
+   (ert-info ("Custom option, if set returned unconditionally")
+     (let ((pytest-pdb-break-pytest-executable "/tmp/foo"))
+       (should (string= "/tmp/foo"
+                        (pytest-pdb-break-get-pytest-executable)))))))
+
+(ert-deftest pytest-pdb-break-test-get-python-interpreter ()
+  ;; Eval: (compile "make PAT=get-python-interpreter")
+  (pytest-pdb-break-test-ensure-venv
+   'base
+   (let ((pytest-exe (concat default-directory "fake-pytest"))
+         (python-exe (concat default-directory "fake-python"))
+         pytest-pdb-break--exe-alist
+         exc)
+     (with-temp-file pytest-exe
+       (insert "#!" python-exe "\n"))
+     (ert-info ("Shebanged file not found")
+       (setq exc (should-error (pytest-pdb-break-get-python-interpreter
+                                pytest-exe)))
+       (should-not pytest-pdb-break--exe-alist)
+       (should (string-match-p "Cannot find.*" (cadr exc))))
+     (push (list pytest-exe) pytest-pdb-break--exe-alist)
+     (with-temp-file python-exe (insert "#!/bin/true\n"))
+     (ert-info ("Not executable, bad entry cleared from alist")
+       (setq exc (should-error (pytest-pdb-break-get-python-interpreter
+                                pytest-exe)))
+       (should-not pytest-pdb-break--exe-alist)
+       (should (string-match-p "Cannot find.*" (cadr exc))))
+     (chmod python-exe #o0700)
+     (ert-info ("Mocked path returned when target is executable")
+       (should (string= python-exe (pytest-pdb-break-get-python-interpreter
+                                    pytest-exe)))
+       (should (equal (alist-get pytest-exe pytest-pdb-break--exe-alist)
+                      python-exe)))
+     (setcdr (assoc pytest-exe pytest-pdb-break--exe-alist) "/tmp/foo")
+     (ert-info ("Existing alist value returned unconditionally")
+       (should (string= "/tmp/foo"
+                        (pytest-pdb-break-get-python-interpreter
+                         pytest-exe))))
+     (ert-info ("Existing alist value replaced with force option")
+       (should (string= python-exe
+                        (pytest-pdb-break-get-python-interpreter
+                         pytest-exe 'force)))
+       (should (equal pytest-pdb-break--exe-alist
+                      (list (cons pytest-exe python-exe))))))
+   (ert-info ("Real match returned successfully")
+     (let* ((python-shell-virtualenv-root $venv)
+            (pytest-exe (python-shell-with-environment
+                         (executable-find "pytest")))
+            rv)
+       (should (file-executable-p pytest-exe))
+       (setq rv (pytest-pdb-break-get-python-interpreter pytest-exe))
+       (ert-info ("Matches verified")
+         (should (string= rv $pyexe)))))))
 
 (defvar pytest-pdb-break-test--get-node-id-sources
   '("
