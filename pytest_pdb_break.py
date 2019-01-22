@@ -111,7 +111,6 @@ class PdbBreak:
         self.wanted = self._resolve_wanted(wanted)
         self.target = None
         self.last_pdb = None
-        self.last_func = None
 
     def _resolve_wanted(self, wanted):
         """Validate file component of user arg, if supplied"""
@@ -123,7 +122,7 @@ class PdbBreak:
         except FileNotFoundError:
             if file.is_absolute():
                 raise
-            # Can't use Path().cwd() because its .samefile() calls .stat() on
+            # Can't use Path.cwd() because its .samefile() calls .stat() on
             # other and expects returned obj to have .st_ino, but path.Stat
             # looks for st_st_ino
             # TODO find out if users of the plugin API are meant to fiddle with
@@ -202,15 +201,13 @@ class PdbBreak:
                     return inst.dispatch_line(frame)
         return self.trace_handoff
 
-    def runcall_until(self, *args, **kwargs):
-        """Run test with args, stopping at location.
+    def runcall_until(self, func, **testargs):
+        """Run test with testargs, stopping at location.
 
         Exceptions raised inside this function will be reported as test
         failures. For testing, this means report output is sent to stdout
         rather than stderr (INTERNALERROR).
         """
-        # If the "request" feature is in play, pyfuncitem.obj will be this
-        # function. Should see if reassigning makes sense.
         from _pytest.capture import capture_fixtures
         if hasattr(self, "pytest_enter_pdb"):
             pytestPDB.set_trace(set_break=False)
@@ -219,10 +216,9 @@ class PdbBreak:
             inst = self.last_pdb
         else:
             inst = self.last_pdb = pytestPDB._init_pdb()
-        func = self.last_func
         # XXX maybe only provide context for capsys, ignore others?
         try:
-            capfix = (kwargs.keys() & capture_fixtures).pop()
+            capfix = (testargs.keys() & capture_fixtures).pop()
         except KeyError:
             capfix = None
         self.debug and self._l.prinspotl("pre_capfix")
@@ -231,7 +227,7 @@ class PdbBreak:
             if capfix == "capsys" and not self.capman.is_globally_capturing():
                 raise RuntimeError("Cannot break inside tests using capsys "
                                    "when global capturing is disabled")
-            capfix = kwargs[capfix]
+            capfix = testargs[capfix]
 
             def preloop(_inst):
                 # XXX runs after .setup, but global capture still active?
@@ -249,37 +245,37 @@ class PdbBreak:
             capfix._resume()
             self.debug and self._l.prinspotl("cap_bot")
         from bdb import BdbQuit
-        res = None
         inst.reset()
         inst.botframe = sys._getframe()
         self.debug and self._l.prinspot("post_capfix")
         inst._set_stopinfo(inst.botframe, None, 0)
         sys.settrace(self.trace_handoff)
         try:
-            res = func(*args, **kwargs)
+            func(**testargs)
         except BdbQuit:
             pass
         finally:
             inst.quitting = True
             sys.settrace(None)
-            self.last_pdb = self.last_func = None
-        return res
+            self.last_pdb = None
 
-    @pytest.hookimpl(hookwrapper=True)
+    @pytest.hookimpl
     def pytest_pyfunc_call(self, pyfuncitem):
         if self.debug:
             assert self.last_pdb is None
-            assert self.last_func is None
             assert not pyfuncitem._isyieldedfunction()
             self._l.prinspot(1)
         if BreakLoc.from_pytest_item(pyfuncitem) == self.target:
-            self.last_func = pyfuncitem.obj
-            pyfuncitem.obj = self.runcall_until
-        yield
-        if pyfuncitem.obj.__func__ is type(self).runcall_until:
+            # Mimic primary hookimpl in _pytest/python.py
+            testargs = {arg: pyfuncitem.funcargs[arg] for
+                        arg in pyfuncitem._fixtureinfo.argnames}
+            self.runcall_until(pyfuncitem.obj, **testargs)
+            #
             if self.target and self.targets:
                 self.target = self.targets.popleft()
             self.debug and self._l.prinspot(2)
+            # Skip primary hookimpl for this pyfuncitem
+            return True
 
 
 def get_targets(filename, upper, locations):
