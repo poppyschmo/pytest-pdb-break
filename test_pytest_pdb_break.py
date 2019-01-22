@@ -314,6 +314,25 @@ def test_capsys_noglobal(testdir_setup):
     result.assert_outcomes(failed=1)  # this runs as function node obj
 
 
+def test_request_object(testdir_setup):
+    # Formerly, request.function (request._pyfuncitem.obj) would be set to
+    # inst.runcall_until, which interfered with tools like testdir._makefile,
+    # which uses this request.function.__name__ as a default filename.
+    testdir_setup.makepyfile("""
+        def test_rq(request):
+            assert True
+            assert request.function is test_rq
+    """)
+    pe = testdir_setup.spawn_pytest("--break=test_request_object.py:2")
+    pe.expect(prompt_re)
+    befs = LineMatcher(unansi(pe.before))
+    befs.fnmatch_lines("*>*/test_request_object.py(2)test_rq()")
+    pe.sendline("c")
+    afts = unansi(pe.read(-1))
+    lafts = LineMatcher(afts)
+    lafts.fnmatch_lines((".*[[]100%[]]", "*= 1 passed *"))
+
+
 @pytest.fixture
 def testdir_class(testdir_setup):
     testdir_setup.makepyfile("""
