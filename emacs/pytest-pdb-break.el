@@ -13,7 +13,7 @@
 ;;   '(:host github :repo "poppyschmo/pytest-pdb-break"
 ;;     :files (:defaults "emacs/*.el" (:exclude "emacs/*-test.el")))
 ;;
-;; Usage: with point in some test, run M-x `pytest-pdb-break-here'
+;; Usage: with point in the body of some test, run M-x `pytest-pdb-break-here'
 ;;
 ;; Note: the completion modifications are useless without pdb++. No idea if
 ;; they hold up when summoned by `company-capf'.
@@ -32,7 +32,6 @@
 ;;; Code:
 
 (require 'find-func)
-(require 'json)
 (require 'subr-x)
 (require 'python)
 
@@ -49,6 +48,7 @@ entry unsets cmd-line options from a project ini:
   :group 'pytest
   :type 'list)
 
+;; FIXME change to alt-pytest-executable
 (defcustom pytest-pdb-break-alt-interpreter nil
   "Path to an alternate Python executable.
 If set, overrides `python-shell-interpreter' when obtaining config info
@@ -145,13 +145,12 @@ Use INTERPRETER or `python-shell-interpreter' to run the helper script."
       (setq parts (list (pop parts) (pop parts))))
     (cons file parts)))
 
-(defun pytest-pdb-break--make-arg-string (line-no node-id-parts)
-  "Prepare arg string for `python-shell-make-comint'.
+(defun pytest-pdb-break--get-args (line-no node-id-parts)
+  "Generate args for subprocess.
 LINE-NO and NODE-ID-PARTS are as required by the main command."
-  (let* ((nodeid (mapconcat #'identity node-id-parts "::"))
-         (break (format "--break=%s:%s" (car node-id-parts) line-no))
-         (args (append pytest-pdb-break-extra-opts (list break nodeid))))
-    (combine-and-quote-strings args)))
+  (let ((nodeid (mapconcat #'identity node-id-parts "::"))
+        (break (format "--break=%s:%s" (car node-id-parts) line-no)))
+    (append pytest-pdb-break-extra-opts (list break nodeid))))
 
 ;; FIXME only add this wrapper when pdb++ is detected. These amputee
 ;; candidates most likely come courtesy of the fancycompleter package.
@@ -206,24 +205,43 @@ If PROCESS is ours, prepend INPUT to results. With IMPORT, ignore."
 NODE-ID-PARTS is a list of pytest node-id components."
   (interactive (list (line-number-at-pos) (pytest-pdb-break--get-node-id)))
   (let* ((process-environment (append process-environment nil))
-         (python-shell-extra-pythonpaths
-          (append (list (pytest-pdb-break-get-isolated-lib))
-                  python-shell-extra-pythonpaths))
-         ;; Make pdb++ prompt trigger non-native-completion fallback
-         (python-shell-prompt-pdb-regexp "[(<]*[Ii]?[Pp]db[+>)]+ ")
-         ;; XXX warning in 25.x: Making ... local to ... while let-bound!
-         (python-shell-interpreter (python-shell-with-environment
-                                    (executable-find "pytest")))
-         (python-shell-interpreter-args (pytest-pdb-break--make-arg-string
-                                         line-no node-id-parts))
          (python-shell-buffer-name "pytest-PDB")
-         (proc (run-python nil 'dedicated 'show))
-         (parbuf (current-buffer)))
-    ;; Only python- prefixed local vars get cloned in child buffer
-    (with-current-buffer (process-buffer proc)
-      (setq pytest-pdb-break--process proc
-            pytest-pdb-break--parent-buffer parbuf)
-      (pytest-pdb-break-mode +1))))
+         (proc-name (python-shell-get-process-name 'dedicated))
+         (proc-buffer-name (format "*%s*" proc-name)))
+    (defvar python-shell--interpreter)
+    (defvar python-shell--interpreter-args)
+    ;; Maybe pop to existing proc's buffer instead?
+    (when (comint-check-proc proc-buffer-name)
+      (error "%s is already running" proc-buffer-name))
+    (let* ((python-shell-extra-pythonpaths
+            (append (list (pytest-pdb-break-get-isolated-lib))
+                    python-shell-extra-pythonpaths))
+           ;; Make pdb++ prompt trigger non-native-completion fallback
+           (python-shell-prompt-pdb-regexp "[(<]*[Ii]?[Pp]db[+>)]+ ")
+           (args (pytest-pdb-break--get-args line-no node-id-parts))
+           (fake-arg-string (mapconcat #'identity (cons "-mpytest" args) " "))
+           ;; Produces warning in 25.x: Making foo local to bar while let-bound
+           (python-shell--parent-buffer (current-buffer))
+           (python-shell--interpreter-args fake-arg-string)
+           python-shell--interpreter
+           pytest-exe buffer)
+      (save-excursion
+        ;; Allow "calculate-" funcs to consider "python-shell-" options and
+        ;; modify process-environment and exec-path accordingly
+        (python-shell-with-environment
+         (setq pytest-exe (executable-find "pytest"))
+         (unless pytest-exe
+           (error "pytest not found\nexec-path: %s\nprocess-environment: %s\n"
+                  exec-path process-environment))
+         (setq buffer (apply #'make-comint-in-buffer proc-name proc-buffer-name
+                             pytest-exe nil args))
+         ;; Only python- prefixed local vars get cloned in child buffer
+         (with-current-buffer buffer
+           (inferior-python-mode)
+           (setq pytest-pdb-break--process (get-buffer-process buffer)
+                 pytest-pdb-break--parent-buffer python-shell--parent-buffer)
+           (pytest-pdb-break-mode +1))
+         (display-buffer buffer))))))
 
 
 (provide 'pytest-pdb-break)

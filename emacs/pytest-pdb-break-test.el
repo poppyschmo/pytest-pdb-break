@@ -19,7 +19,7 @@
     pytest-pdb-break-test-create-tempdir
     pytest-pdb-break-test-get-isolated-lib
     pytest-pdb-break-test-get-node-id
-    pytest-pdb-break-test-make-arg-string
+    pytest-pdb-break-test-get-args
     pytest-pdb-break-test-minor-mode
     pytest-pdb-break-test-main-command))
 
@@ -525,18 +525,20 @@ class TestFoo:
         (let ((exc (should-error (pytest-pdb-break--get-node-id))))
           (should (equal exc '(error "No test found")))))))))
 
-(ert-deftest pytest-pdb-break-test-make-arg-string ()
-  ;; Eval: (compile "make PAT=make-arg-string")
+(ert-deftest pytest-pdb-break-test-get-args ()
+  ;; Eval: (compile "make PAT=get-args")
   (let* ((file "/tmp/a.py")
          (node-info (list file "test_a")))
     (ert-info ("No extras")
       (should-not pytest-pdb-break-extra-opts)
-      (should (string= (pytest-pdb-break--make-arg-string 9 node-info)
-                       "--break=/tmp/a.py:9 /tmp/a.py::test_a")))
+      (should (equal (pytest-pdb-break--get-args 9 node-info)
+                     '("--break=/tmp/a.py:9" "/tmp/a.py::test_a"))))
     (ert-info ("Extras")
       (let ((pytest-pdb-break-extra-opts '("-p" "no:foo")))
-        (should (string= (pytest-pdb-break--make-arg-string 9 node-info)
-                         "-p no:foo --break=/tmp/a.py:9 /tmp/a.py::test_a"))
+        (should (equal (pytest-pdb-break--get-args 9 node-info)
+                       '("-p" "no:foo"
+                         "--break=/tmp/a.py:9"
+                         "/tmp/a.py::test_a")))
         (should (equal pytest-pdb-break-extra-opts '("-p" "no:foo")))))))
 
 (ert-deftest pytest-pdb-break-test-minor-mode ()
