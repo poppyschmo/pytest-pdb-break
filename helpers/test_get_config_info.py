@@ -1,14 +1,14 @@
 """
 Takeaways
-    1. The presence/veracity of (pytest) file/node-id args doesn't impact the
+    1. The presence/validity of (pytest) file/node-id args doesn't impact the
        result
     2. Options do affect the result
     3. If an egg for a plugin exists under a sys.path entry, pytest finds it
        without -p <plugin>
-    4. Otherwise the plugin must be declared explicitly somewhere, via via
-       cmdline, ini file, conftest, ``main(... plugins=[...])``, etc.  Just
+    4. Otherwise the plugin must be declared explicitly somewhere, via
+       cmdline, ini file, conftest, ``main(... plugins=[...])``, etc. Just
        being importable isn't enough (even if plugin exists in rootdir).
-    5. An exception is raised if a declared plugin isn't importable
+    5. An exception is raised if a requested plugin isn't importable
 """
 import os
 import sys
@@ -23,25 +23,6 @@ from .ensure_venv import (get_pyexe, get_base_pyexe, is_venv,
 
 
 def run_with_input(cmdline, instr, tmpdir, prefix=None, env_vars=None):
-    """
-    Note
-        ``subprocess.Popen`` env dict values can be pathlike objects.
-        Relevant for calling ``ensure_venv.make_libpath``.
-
-    >>> from unittest.mock import patch
-    >>> with patch("os.fsencode", wraps=os.fsencode) as m_of:
-    ...     d = dict(SOMEVAR=Path("/tmp/foo"))
-    ...     cmd = "bash", "-c", "declare -p SOMEVAR"
-    ...     out = subprocess.check_output(cmd, env=d)
-    ...     m_of.assert_any_call(d["SOMEVAR"])
-    ...     assert b"/tmp/foo" in out
-    ...     assert "Path(" in repr(d["SOMEVAR"])
-    ...     assert b"Path(" not in out
-    ...     try:
-    ...         os.fsencode(...)
-    ...     except TypeError:
-    ...         pass
-    """
     p = prefix and f"{prefix}." or ""
     env = get_base_env()
     if env_vars:
