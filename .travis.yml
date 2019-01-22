@@ -9,6 +9,11 @@ jobs:
       dist: xenial
       python: 3.7
       install:
+        - |
+          if ! test -e /opt/python3.6; then
+            three_six=$(ls -1 /opt/python | grep 3.6 | sort -Vr | head -n1)
+            cd /opt/python && ln -s "$three_six" 3.6 && cd -
+          fi
         - pyenv shell 3.7 3.6
         - pip install tox
       script: tox
