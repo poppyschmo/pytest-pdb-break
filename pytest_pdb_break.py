@@ -100,12 +100,22 @@ def pytest_configure(config):
 
 
 class PdbBreak:
-    debug = False
+    """A class namespace for this plugin, registered as "pdb_break".
+
+    Notes:
+    1. the entrypoint mechanism registers the module_ itself as a plugin
+    2. in printed pytest output (reports, etc.) the underscore may be
+       replaced with a hyphen
+
+    .. _module:
+       https://pluggy.readthedocs.io/en/latest/#define-and-collect-hooks
+    """
 
     def __init__(self, wanted, config):
         if module_logger:
             self._l = module_logger.helper.get_logger("PdbBreak")
-            self.debug = True
+        else:
+            self._l = None
         config.pluginmanager.register(self, "pdb_break")
         self.capman = config.pluginmanager.getplugin("capturemanager")
         self.config = config
@@ -141,21 +151,26 @@ class PdbBreak:
                 raise
         return wanted._replace(file=resolved)
 
-    def pytest_internalerror(self, excrepr, excinfo):
-        if self.debug:  # already prints to tw w/o cap
+    if module_logger:
+        def pytest_internalerror(self, excrepr, excinfo):
             self._l.pspell(1)
+
+    if not hasattr(pytestPDB, "_init_pdb"):
+        def pytest_enter_pdb(self, config, pdb):
+            """Stash pytest-wrapped pdb instance."""
+            self.last_pdb = pdb
 
     def pytest_runtestloop(self, session):
         """Find target or raise."""
         locs = [BreakLoc.from_pytest_item(i) for i in session.items]
-        self.debug and self._l.pspore(1)
+        self._l and self._l.pspore(1)
         if not self.wanted.file:
             locs_files = set(l.file for l in locs)
             # If solo, assume good
             if len(locs_files) == 1:
                 inferred = locs_files.pop()
                 self.wanted = self.wanted._replace(file=inferred)
-                self.debug and self._l.pspore(2)
+                self._l and self._l.pspore(2)
             else:
                 raise RuntimeError("breakpoint file couldn't be determined")
         self.targets = get_targets(self.wanted.file, self.wanted.lnum, locs)
@@ -164,16 +179,11 @@ class PdbBreak:
         except IndexError as exc:
             msg = "a valid breakpoint could not be determined"
             raise RuntimeError(msg) from exc
-        self.debug and self._l.pspore(3)
-
-    if not hasattr(pytestPDB, "_init_pdb"):
-        def pytest_enter_pdb(self, config, pdb):
-            """Stash pytest-wrapped pdb instance."""
-            self.last_pdb = pdb
+        self._l and self._l.pspore(3)
 
     def trace_handoff(self, frame, event, arg):
         if frame.f_code.co_filename == str(self.wanted.file):
-            if self.debug:  # ^~~~~ may be a description, e.g., <string>
+            if self._l:  # ^~~~~ may be a description, e.g., <string>
                 self._l.prinspect(event=event, frame=frame)
             if event == "call":
                 name = frame.f_code.co_name
@@ -185,7 +195,7 @@ class PdbBreak:
                 line = frame.f_lineno
                 if line >= self.wanted.lnum:
                     inst = self.last_pdb
-                    if self.debug:
+                    if self._l:
                         assert inst.botframe.f_code.co_filename == __file__
                         assert inst.botframe.f_code.co_name == "runcall_until"
                         assert inst.stopframe is inst.botframe
@@ -212,7 +222,7 @@ class PdbBreak:
         from _pytest.capture import capture_fixtures
         if hasattr(self, "pytest_enter_pdb"):
             pytestPDB.set_trace(set_break=False)
-            if self.debug:
+            if self._l:
                 assert self.last_pdb
             inst = self.last_pdb
         else:
@@ -222,9 +232,9 @@ class PdbBreak:
             capfix = (testargs.keys() & capture_fixtures).pop()
         except KeyError:
             capfix = None
-        self.debug and self._l.pspore("pre_capfix")
+        self._l and self._l.pspore("pre_capfix")
         if capfix:
-            self.debug and self._l.pspore("cap_top")
+            self._l and self._l.pspore("cap_top")
             if capfix == "capsys" and not self.capman.is_globally_capturing():
                 raise RuntimeError("Cannot break inside tests using capsys "
                                    "when global capturing is disabled")
@@ -244,11 +254,11 @@ class PdbBreak:
             # TODO figure out why resumed state isn't already active
             # Maybe we have to run some hooks?
             capfix._resume()
-            self.debug and self._l.pspore("cap_bot")
+            self._l and self._l.pspore("cap_bot")
         from bdb import BdbQuit
         inst.reset()
         inst.botframe = sys._getframe()
-        self.debug and self._l.pspell("post_capfix")
+        self._l and self._l.pspell("post_capfix")
         inst._set_stopinfo(inst.botframe, None, 0)
         sys.settrace(self.trace_handoff)
         try:
@@ -262,7 +272,7 @@ class PdbBreak:
 
     @pytest.hookimpl
     def pytest_pyfunc_call(self, pyfuncitem):
-        if self.debug:
+        if self._l:
             assert self.last_pdb is None
             assert not pyfuncitem._isyieldedfunction()
             self._l.pspell(1)
@@ -274,7 +284,7 @@ class PdbBreak:
             #
             if self.target and self.targets:
                 self.target = self.targets.popleft()
-            self.debug and self._l.pspell(2)
+            self._l and self._l.pspell(2)
             # Skip primary hookimpl for this pyfuncitem
             return True
 
