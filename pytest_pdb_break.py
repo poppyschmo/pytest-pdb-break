@@ -50,6 +50,10 @@ class BreakLoc:
     lnum = attr.ib(validator=attr.validators.instance_of(int))
     name = attr.ib()
 
+    class_name = attr.ib(default=None, repr=False, cmp=False, kw_only=True)
+    func_name = attr.ib(default=None, repr=False, cmp=False, kw_only=True)
+    param_id = attr.ib(default=None, repr=False, cmp=False, kw_only=True)
+
     def _replace(self, **kwargs):  # temporary
         for k, v in kwargs.items():
             object.__setattr__(self, k, v)
@@ -57,14 +61,31 @@ class BreakLoc:
 
     @classmethod
     def from_pytest_item(cls, item):
-        # Note: pytest.Item.location line numbers are zero-indexed, but pdb
-        # breakpoints aren't, and neither are linecache's.
+        """Return a BreakLoc instance from a pytest Function item.
+
+        Notes:
+        1. ``pytest.Item.location`` line numbers are zero-indexed, but pdb
+           breakpoints aren't, and neither are linecache's
+        2. ``lnum`` may be ``-1``, as returned by ``.reportinfo()``
+        3. ``name`` may be "Class.func[id]", with "id" accessible at
+           ``.callspec.id`` and the rest at ``.originalname``
+        4. ``name`` may be used later to target a specific call id; presently,
+           it's only used by ``get_targets`` for sorting
+        """
         file, lnum, name = item.location
         # Comment in ``Config.cwd_relative_nodeid`` says "nodeid's are relative
         # to the rootpath." Seems this also applies to .location names.
-        assert not Path(file).is_absolute()
-        file = item.session.config.rootdir.join(file)
-        return cls(file, lnum + 1, str(name))  # name is used for sorting
+        assert not Path(file).is_absolute(), file
+        file = item.config.rootdir.join(file)
+        assert item.fspath == file
+        kwargs = {}
+        # TODO see if OK to save reference to item instead of just constants
+        kwargs["func_name"] = item.function.__name__
+        if item.cls:
+            kwargs["class_name"] = item.cls.__name__
+        if item.originalname:
+            kwargs["param_id"] = item.callspec.id
+        return cls(file, lnum + 1, str(name), **kwargs)
 
     @classmethod
     def from_arg_spec(cls, string):
@@ -181,34 +202,40 @@ class PdbBreak:
         self._l and self._l.pspore(3)
 
     def trace_handoff(self, frame, event, arg):
-        if frame.f_code.co_filename == str(self.wanted.file):
-            if self._l:  # ^~~~~ may be a description, e.g., <string>
-                self._l.prinspect(event=event, frame=frame)
-            if event == "call":
-                name = frame.f_code.co_name
-                if name == self.target.name:
-                    # TODO verify is still correct when f_back is no longer
-                    # runcall_until (e.g., target called itself)
-                    frame.f_trace = self.trace_handoff
-            if event == "line":
-                line = frame.f_lineno
-                if line >= self.wanted.lnum:
-                    inst = self.last_pdb
-                    if self._l:
-                        assert inst.botframe.f_code.co_filename == __file__
-                        assert inst.botframe.f_code.co_name == "runcall_until"
-                        assert inst.stopframe is inst.botframe
-                    # This loop is meant to handle the recursive case;
-                    # otherwise, there's no need to reinstrument "backwards"
-                    # because those frames are internal to pytest.
-                    _frame = frame
-                    while _frame and _frame is not inst.botframe:
-                        _frame.f_trace = inst.trace_dispatch
-                        _frame = _frame.f_back
-                    inst.set_break(str(self.wanted.file), line, True)
-                    self.target = None
-                    sys.settrace(inst.trace_dispatch)  # handoff
-                    return inst.dispatch_line(frame)
+        """Defer to the "real" trace_dispatch after arriving at target.
+
+        This exists to accommodate initial breakpoints that would normally
+        "fall through" but are otherwise sensible.
+
+        """
+        if frame.f_code.co_filename != str(self.wanted.file):
+            # This ~~~~~^ may be a description, e.g., <string>
+            return self.trace_handoff
+
+        self._l and self._l.prinspect(event=event, frame=frame)
+
+        if frame.f_code.co_name != self.target.func_name:
+            return self.trace_handoff
+
+        if event != "line":
+            return self.trace_handoff
+
+        line = frame.f_lineno
+        if line >= self.wanted.lnum:
+            inst = self.last_pdb
+            if self._l:
+                assert inst.botframe.f_code.co_filename == __file__
+                assert inst.botframe.f_code.co_name == "runcall_until"
+                assert inst.stopframe is inst.botframe
+            # There's no need to reinstrument "backwards" by setting f_trace
+            # on prior frames since those are all internal to pytest.
+            #
+            # This is just for show, although it does make clear that this
+            # breakpoint hasn't been saved
+            inst.set_break(str(self.wanted.file), line, True)
+            self.target = None
+            sys.settrace(inst.trace_dispatch)  # hand off
+            return inst.dispatch_line(frame)
         return self.trace_handoff
 
     def runcall_until(self, func, **testargs):

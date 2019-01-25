@@ -53,10 +53,14 @@ def test_breakloc(request):
         # nodes.Item.location is a property
         #
         item.location = ("test_loc.py", 1, "test_loc_1")
+        item.function.__name__ = "test_loc.py"
+        item.cls = None
         expected = BreakLoc(rootdir / "test_loc.py", 2, "test_loc_1")
         assert BreakLoc.from_pytest_item(item) == expected
         #
         item.location = ("test_loc.py", 1, None)
+        item.function.__name__ = "test_loc.py"
+        item.cls = None
         expected = BreakLoc(rootdir / "test_loc.py", 2, "None")
         assert BreakLoc.from_pytest_item(item) == expected
         #
@@ -410,5 +414,25 @@ def test_class_gap_named(testdir_class):
     befs.fnmatch_lines([
         "*>*/test_class_gap_named.py(12)test_two()",
         "->*# line 12"
+    ])
+    pe.sendline("c")
+
+
+def test_lower_callee(testdir_setup):
+    # Regression
+    testdir_setup.makepyfile("""
+        def test_util():
+            result = util()
+            assert result              # <- line 3
+
+        def util():
+            return True
+    """)
+    pe = testdir_setup.spawn_pytest("--break=test_lower_callee.py:3")
+    pe.expect(prompt_re)
+    befs = LineMatcher(unansi(pe.before))
+    befs.fnmatch_lines([
+        "*>*/test_lower_callee.py(3)test_util()",
+        "->*# <- line 3",
     ])
     pe.sendline("c")
