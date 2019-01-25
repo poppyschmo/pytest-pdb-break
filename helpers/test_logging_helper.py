@@ -258,6 +258,7 @@ def test_from_logdefs(testdir):
                                  "exec": "foo = 1",
                                  "dict": {"foo": 1}}}
     )
+    assert "foo" not in globals()
 
 
 @pytest.fixture
@@ -368,8 +369,10 @@ def test_prinspect(monkeypatch):
     FakePpLogger = attr.make_class("PpLogger", ["name"])
     FakePpLogger.pfmt = lambda _i, _c, kw: repr(kw)
     FakePpLogger._log_as = lambda i, _f, msg: i.out.append(msg)
+    FakePpLogger._get_updated_globals = PpLogger._get_updated_globals
     inst = FakePpLogger("TEST")
     inst._prinspect_next = {}
+    inst.logdefs = {}
     inst.out = []
     curframe = sys._getframe()
 
@@ -451,6 +454,7 @@ def test_prinspect(monkeypatch):
 def test_pspell():
     FakePpLogger = attr.make_class("PpLogger", ["name"])
     FakePpLogger.prinspect = lambda i, *a, **kw: i.out.append((a, kw))
+    FakePpLogger._get_updated_globals = PpLogger._get_updated_globals
     inst = FakePpLogger("TEST")
     inst.logdefs = {}
     inst.out = []
@@ -460,7 +464,7 @@ def test_pspell():
     PpLogger.pspell(inst, "noop")
     assert not inst.out
 
-    # Non-empty logdefs but caller no key matching caller (unlikely)
+    # Non-empty logdefs but no key matching caller (unlikely)
     inst.logdefs["test_bogus"] = {}
     with pytest.raises(KeyError):
         PpLogger.pspell(inst, "noop")
@@ -485,6 +489,14 @@ def test_pspell():
     inst.out.clear()
     PpLogger.pspell(inst, "atag", defer=True)
     assert inst.out == [(("foo",), {"a label": foo, "defer": True})]
+
+    # Setup dict added to eval context for kwargs
+    inst.logdefs[LoggingHelper] = {"dict": {"somefunc": lambda: 1}}
+    inst.logdefs["test_pspell"] = {"atag": {"kwargs":
+                                            {"somefunc()": "somefunc()"}}}
+    inst.out.clear()
+    PpLogger.pspell(inst, "atag")
+    assert inst.out == [((), {"somefunc()": 1})]
 
 
 def test_pfmt():
@@ -513,9 +525,11 @@ def test_filter_input():
     from types import MappingProxyType
     from functools import partial
     FakePpLogger = attr.make_class("PpLogger", ["input_filters"])
+    FakePpLogger._get_updated_globals = PpLogger._get_updated_globals
     Foo = type("Foo", (object,), {})
     foo = Foo()
     inst = FakePpLogger({})
+    inst.logdefs = {}
     curframe = sys._getframe()
     filti = partial(PpLogger.filter_input, inst, curframe)
 
@@ -586,7 +600,9 @@ def test_filter_output():
     from helpers.logging_helper import OutputFilter
     from functools import partial
     FakePpLogger = attr.make_class("PpLogger", ["output_filters"])
+    FakePpLogger._get_updated_globals = PpLogger._get_updated_globals
     inst = FakePpLogger({})
+    inst.logdefs = {}
     curframe = sys._getframe()
     filto = partial(PpLogger.filter_output, inst, curframe)
 

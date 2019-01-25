@@ -14,17 +14,20 @@
       bl:
         type: BreakLoc
         exp: >
-          attr.asdict(v_)
+          non_none(attr.asdict(v_))
       bls:
         types: [list, deque]
         cond: all(isinstance(i, BreakLoc) for i in v_)
         exp: >
-          [attr.asdict(i) for i in v_]
+          [non_none(attr.asdict(i)) for i in v_]
     output:
       tmpdir:
         pat: !!python/object/new:re.compile ["/tmp/pytest-of[^/]+/pytest-\\d+"]
         new: "$T"
         method: sub
+  exec: |
+    def non_none(d):
+        return {k: v for k, v in d.items() if v is not None}
 
 pytest_internalerror:
   1:

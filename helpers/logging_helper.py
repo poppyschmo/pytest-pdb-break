@@ -59,6 +59,16 @@ class PpLogger(logging.Logger):
         )
         self.handle(record)
 
+    def _get_updated_globals(self, caller):
+        """Return caller's globals, maybe updated with setup-dict defs.
+        """
+        setup = self.logdefs.get(LoggingHelper)
+        if setup:
+            execdefs = setup.get("dict")
+            if execdefs:
+                return dict(caller.f_globals, **execdefs)
+        return caller.f_globals
+
     def filter_input(self, caller, items):
         """Maybe replace values in items.
 
@@ -90,7 +100,8 @@ class PpLogger(logging.Logger):
                 # ANY: defined(t1) x test(t1) + ...
                 op = all if filt.all else any
                 if op(maybe()):
-                    new = eval(filt.exp, caller.f_globals, locup)
+                    new = eval(filt.exp,
+                               self._get_updated_globals(caller), locup)
                     if filt.first:  # done with this filter
                         break
                     locup["r_"] = new
@@ -121,9 +132,9 @@ class PpLogger(logging.Logger):
                 else:
                     output = filt.pat.sub(filt.new, output)
             elif filt.method == "eval":
-                d = self.logdefs.get(LoggingHelper, {}).get("dict", {})
-                d.update(caller.f_locals, i_=items, g_=orig, o_=output)
-                output = eval(filt.new, caller.f_globals, d)
+                dl = dict(caller.f_locals, i_=items, g_=orig, o_=output)
+                dg = self._get_updated_globals(caller)
+                output = eval(filt.new, dg, dl)
             if filt.first:
                 break
         return output
@@ -162,7 +173,8 @@ class PpLogger(logging.Logger):
                         continue
                     self._log_as(c, "\n{}".format(self.pfmt(c, v)))
         if args:
-            kwargs.update((a, eval(a, caller.f_globals, caller.f_locals))
+            caller_globals = self._get_updated_globals(caller)
+            kwargs.update((a, eval(a, caller_globals, caller.f_locals))
                           if isinstance(a, str) else a for a in args)
         if defer:
             kwargs["defer"] = caller
@@ -173,7 +185,9 @@ class PpLogger(logging.Logger):
 
     def pspell(self, tag, defer=False):
         """Log an item from from logdefs dict.
-        This ignores prinspect's iterable arg form. Tag can be an int.
+
+        <tag> can be an int.  Setup dict objects, (those defined in
+        logdefs/LoggingHelper/exec), are added to eval context.
         """
         if not self.logdefs:
             return
@@ -183,7 +197,8 @@ class PpLogger(logging.Logger):
         if not defs:
             return
         args = defs.get("args", ())
-        kwargs = {k: eval(v, caller.f_globals, caller.f_locals) for
+        kwargs = {k: eval(v, self._get_updated_globals(caller),
+                          caller.f_locals) for
                   k, v in defs.get("kwargs", {}).items()}
         if defer:
             kwargs["defer"] = defer
