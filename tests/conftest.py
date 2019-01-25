@@ -1,33 +1,38 @@
-"""
-Helpers-related tests need to import a package named "helpers", which doesn't
-exist. In other words, this project's namesake package isn't meant to include
-any such subpackage.
-
-Of lesser import: testdir subprocesses need a copy of this plugin, which they
-``__import__`` directly via a conftest ``pytest_plugins`` global.
-
-"""
 import sys
 from pathlib import Path
+from contextlib import contextmanager
 
-is_installed = False
+# When True, don't inject this repo's root into the sys.path of testdir
+# subprocesses (as is otherwise done via mini conftest)
+installed = False
+
+reporoot = Path(__file__).parent.parent
+assert (reporoot / "tox.ini").exists()
+
+# Glob pat for installed (versioned) egg-/dist-info metadata dirs
+info_fnpat = "pytest_pdb_break-*.*-info"
+
+
+@contextmanager
+def prepended_root():
+    sys.path.insert(0, str(reporoot))
+    try:
+        yield
+    finally:
+        sys.path.remove(str(reporoot))
+
+
 try:
     import pytest_pdb_break
 except ImportError:
-    pass
+    # Assume local editing is in effect and src should be directly importable
+    sys.path.insert(0, str(reporoot))
 else:
-    is_installed = True
-
-
-_rootdir = Path(__file__).parent.parent
-assert (_rootdir / "tox.ini").exists()
-sys.path.insert(0, str(_rootdir))
-
-
-def pytest_sessionstart(session):
-    """Ensure installed version has precedence over src version."""
-    if is_installed:
-        plugin = session.config.pluginmanager.get_plugin("pytest_pdb_break")
-        assert pytest_pdb_break is plugin
-        # Perhaps better to glob for something like pytest_pdb_break*.*-info
-        assert Path(plugin.__file__).parent.name in ("site-packages", "self")
+    if next(Path(pytest_pdb_break.__file__).parent.glob(info_fnpat), None):
+        installed = True
+        # Since /helpers isn't bundled as a subpackage of the main plugin, it
+        # must be imported early on while still hiding everything else under /
+        with prepended_root():
+            import helpers  # noqa: F401
+    else:
+        "Repo root must already be in sys.path, likely via -m pytest"

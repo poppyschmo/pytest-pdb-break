@@ -152,12 +152,18 @@ def unansi(byte_string, as_list=True):
 
 @pytest.fixture
 def testdir_setup(testdir):
-    """Require main file."""
-    testdir.makeconftest("""
-        import sys
-        sys.path.insert(0, %r)
-        pytest_plugins = %r
-    """ % (str(Path(__file__).parent.parent), PdbBreak.__module__))
+    """Maybe add project root to a subtest's ``sys.path`` via conftest.
+
+    This only applies when this project's workdir hasn't been converted
+    to ``--editable``/develop mode.
+    """
+    from conftest import installed, reporoot
+    if not installed:
+        testdir.makeconftest("""
+            import sys
+            sys.path.insert(0, %r)
+            pytest_plugins = %r
+        """ % (str(reporoot), PdbBreak.__module__))
     return testdir
 
 
