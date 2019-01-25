@@ -157,7 +157,7 @@ def testdir_setup(testdir):
         import sys
         sys.path.insert(0, %r)
         pytest_plugins = %r
-    """ % (str(Path(__file__).parent), PdbBreak.__module__))
+    """ % (str(Path(__file__).parent.parent), PdbBreak.__module__))
     return testdir
 
 

@@ -7,7 +7,7 @@ from textwrap import dedent
 from unittest.mock import patch
 from unittest.mock import DEFAULT as m_D
 
-from . import ensure_venv
+from helpers import ensure_venv
 
 test_path = Path(ensure_venv.TMPROOT) / "ensure_venv"
 
@@ -60,7 +60,7 @@ def make_dummy_venv_tree(path, version=None, exes=None, cfg="pyvenv.cfg"):
 
 class TestEnv(unittest.TestCase):
     def test_is_venv(self):
-        from .ensure_venv import is_venv
+        from helpers.ensure_venv import is_venv
         wd = make_workdir("Env.is_venv")
         # Baseline
         v0 = wd.joinpath("venv_empty", "bin")
@@ -96,7 +96,7 @@ class TestEnv(unittest.TestCase):
             self.assertTrue(is_venv(venv))
 
     def test_shave_path(self):
-        from .ensure_venv import shave_path
+        from helpers.ensure_venv import shave_path
         wd = make_workdir("Env.shave_path")
         #
         self.assertEqual(os.pathsep, ":")
@@ -120,7 +120,7 @@ class TestEnv(unittest.TestCase):
 
     @patch.dict("helpers.ensure_venv.os.environ", os.environ.copy())
     def test_get_base_env(self):
-        from .ensure_venv import get_base_env
+        from helpers.ensure_venv import get_base_env
         wd = make_workdir("Env.get_base_env")
         #
         self.assertIs(ensure_venv.os.environ, os.environ)
@@ -164,7 +164,7 @@ class TestEnv(unittest.TestCase):
         return obin
 
     def test_get_pyvenv_cfg(self):
-        from .ensure_venv import get_pyvenv_cfg
+        from helpers.ensure_venv import get_pyvenv_cfg
         make_workdir("Env.get_pyvenv_cfg")
         #
         venv = make_dummy_venv_tree("venv", version="3.42")
@@ -193,7 +193,7 @@ class TestEnv(unittest.TestCase):
 
     @patch("helpers.ensure_venv.sys", version_info=(3, 42))
     def test_get_base_pyexe(self, m_sys):
-        from .ensure_venv import get_base_pyexe
+        from helpers.ensure_venv import get_base_pyexe
         wd = make_workdir("Env.get_base_pyexe")
         #
         make_dummy_venv_tree("venv")
@@ -237,7 +237,7 @@ class TestEnv(unittest.TestCase):
     @patch("helpers.ensure_venv.shave_path", return_value="")
     @patch("helpers.ensure_venv.sys", version_info=(3, 42))
     def test_get_base_pyexe_fallback(self, m_sys, *args):
-        from .ensure_venv import get_base_pyexe
+        from helpers.ensure_venv import get_base_pyexe
         wd = make_workdir("Env.get_base_pyexe_fallback")
         #
         obin = self.make_opt_bin(wd, "python3.42")
@@ -260,7 +260,7 @@ class TestEnv(unittest.TestCase):
             get_base_pyexe()
 
     def test_is_pyenv_shim(self):
-        from .ensure_venv import is_pyenv_shim
+        from helpers.ensure_venv import is_pyenv_shim
         wd = make_workdir("Env.is_pyenv_shim")
         #
         path = shutil.which("python", path=os.defpath)
@@ -277,7 +277,7 @@ class TestEnv(unittest.TestCase):
 
     @patch("helpers.ensure_venv.sys", version_info=(3, 42))
     def test_update_shim_env(self, *m_args):
-        from .ensure_venv import update_shim_env
+        from helpers.ensure_venv import update_shim_env
         wd = make_workdir("Env.update_shim_env")
         exe = wd / "bin" / "python3.33"
         env = {}
@@ -303,7 +303,7 @@ class TestGlobals(unittest.TestCase):
         self.assertTrue(ensure_venv.TMPROOT.startswith(tempfile.gettempdir()))
 
     def test_ensure_venvdir(self):
-        from .ensure_venv import ensure_venvdir
+        from helpers.ensure_venv import ensure_venvdir
         try:
             self.assertIsNone(ensure_venv._tmp_venvdir)
             result = ensure_venvdir()
@@ -317,7 +317,7 @@ class TestGlobals(unittest.TestCase):
 
 class TestGetPyExe(unittest.TestCase):
     def test_bad_name(self):
-        from .ensure_venv import get_pyexe
+        from helpers.ensure_venv import get_pyexe
         with self.assertRaises(ValueError):
             get_pyexe("fake")
 
@@ -325,7 +325,7 @@ class TestGetPyExe(unittest.TestCase):
     @patch("helpers.ensure_venv.get_base_pyexe", side_effect=RuntimeError)
     @patch("helpers.ensure_venv.ensure_venvdir")
     def test_exists(self, m_ev, m_grp, m_sys):
-        from .ensure_venv import get_pyexe
+        from helpers.ensure_venv import get_pyexe
         wd = make_workdir("GetPyExe.exists")
         #
         bare = make_dummy_venv_tree("bare", version=3.42)
@@ -345,8 +345,8 @@ class TestGetPyExe(unittest.TestCase):
                     get_base_env=m_D, ensure_venvdir=m_D, is_pyenv_shim=m_D)
     @patch("helpers.ensure_venv.subprocess.check_call")
     def test_pypi(self, m_cc, ensure_venvdir, get_base_env, is_pyenv_shim):
-        from .ensure_venv import get_pyexe
-        from . import common
+        from helpers.ensure_venv import get_pyexe
+        from helpers import common
         wd = make_workdir("GetPyExe.pypi")
         m_cc.side_effect = self.fake_check_call
         ensure_venvdir.return_value = wd
@@ -374,8 +374,8 @@ class TestGetPyExe(unittest.TestCase):
     @patch("helpers.ensure_venv.subprocess.check_call")
     @patch("helpers.ensure_venv.ensure_venvdir")
     def test_local(self, m_ev, m_cc, m_be, *m_args):
-        from .ensure_venv import get_pyexe
-        from . import common
+        from helpers.ensure_venv import get_pyexe
+        from helpers import common
         wd = make_workdir("GetPyExe.local")
         m_cc.side_effect = self.fake_check_call
         m_ev.return_value = wd

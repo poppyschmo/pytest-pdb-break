@@ -19,8 +19,9 @@ from pathlib import Path
 from textwrap import dedent
 from _pytest.pytester import LineMatcher
 
-from .common import copy_plugin, install_plugin
-from .ensure_venv import get_pyexe, get_base_pyexe, is_venv, get_base_env
+from helpers.common import copy_plugin, install_plugin
+from helpers.ensure_venv import (get_pyexe, get_base_pyexe,
+                                 is_venv, get_base_env)
 
 
 def run_with_input(cmdline, instr, tmpdir, prefix=None, env_vars=None):
@@ -150,7 +151,7 @@ def test_baseline(testdir, request, ext_plugin):
 
 @pytest.fixture(scope="module")
 def source():
-    from . import get_config_info  # noqa: F401
+    from helpers import get_config_info  # noqa: F401
     m = sys.modules["helpers.get_config_info"]
     return m.__loader__.get_source(m.__name__)
 

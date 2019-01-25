@@ -7,7 +7,7 @@ import attr
 import pytest
 
 from pathlib import Path
-from .logging_helper import LoggingHelper, logging, PpLogger
+from helpers.logging_helper import LoggingHelper, logging, PpLogger
 
 
 # TODO check if loggers persist when running inline rather than subproc
@@ -75,7 +75,7 @@ def test_helper_no_io(testdir):
 
 
 def test_logger_class():
-    from .logging_helper import logger_class
+    from helpers.logging_helper import logger_class
     assert logging._loggerClass is logging.Logger
     assert logging.Logger.manager.loggerClass is None
 
@@ -92,8 +92,8 @@ def test_logger_class():
 
 
 def test_load_logdefs(testdir, monkeypatch):
-    from . import logging_helper as module
-    from .logging_helper import load_logdefs
+    from helpers import logging_helper as module
+    from helpers.logging_helper import load_logdefs
 
     with monkeypatch.context() as m:
         m.setattr(module, "validate_logdefs", lambda _i, _a, l: l)
@@ -135,7 +135,7 @@ def test_load_logdefs(testdir, monkeypatch):
 
 
 def test_validate_logdefs(testdir):
-    from .logging_helper import validate_logdefs
+    from helpers.logging_helper import validate_logdefs
 
     # Wrong type
     with pytest.raises(TypeError) as excinfo:
@@ -219,7 +219,7 @@ def test_from_logdefs(testdir):
                          logdefs=logdefs)
 
     # Filters
-    from .logging_helper import InputFilter, OutputFilter
+    from helpers.logging_helper import InputFilter, OutputFilter
     logdefs = {
         LoggingHelper: {"init": {"LOGFILE": "/dev/tty"},
                         "filters": {"input": {"foo": {"type": "str",

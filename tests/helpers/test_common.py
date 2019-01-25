@@ -4,22 +4,23 @@ from pathlib import Path
 from textwrap import dedent
 from unittest.mock import patch
 
-from . import common
+from helpers import common
 
 
 def test_get_project_root():
-    from .common import get_project_root
+    from helpers.common import get_project_root
     common._project_root = None
     assert get_project_root() == common._project_root
     assert isinstance(common._project_root, Path)
     assert common._project_root.is_absolute()
+    assert common._project_root.joinpath("setup.py").exists()
 
 
 def test_version():
     import sys
-    from . import __version__
+    from helpers import __version__
     from subprocess import check_output
-    from .common import get_project_root
+    from helpers.common import get_project_root
     cmdline = [sys.executable,
                Path(get_project_root()) / "setup.py",
                "--version"]
@@ -28,7 +29,7 @@ def test_version():
 
 
 def test_copy_plugin(tmp_path):
-    from .common import copy_plugin, get_project_root
+    from helpers.common import copy_plugin, get_project_root
     wd = tmp_path
     src = get_project_root() / "pytest_pdb_break.py"
     dest = wd / "pytest_pdb_break.py"
@@ -51,7 +52,7 @@ setup_py_src = dedent("""\
 @pytest.mark.parametrize("func", [common._install_plugin_pip,
                                   common._install_plugin_setuptools])
 def test_install_plugin(tmp_path, func):
-    from .ensure_venv import get_base_pyexe
+    from helpers.ensure_venv import get_base_pyexe
 
     wd = tmp_path
     proj = wd / "project"

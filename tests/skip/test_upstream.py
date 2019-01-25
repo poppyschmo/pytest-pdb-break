@@ -1,3 +1,27 @@
+import pytest
+
+
+def test_py_local_stat(tmpdir, monkeypatch):
+    """LocalPath and pathlib.Path objects aren't fully compatible"""
+    import py
+    import pathlib
+
+    tmpdir.chdir()
+
+    p = pathlib.Path().cwd()
+    q = py.path.local()
+
+    with pytest.raises(AttributeError) as exc_info:
+        p.samefile(q)
+
+    assert exc_info.match("st_st_ino")
+
+    with monkeypatch.context() as m:
+        m.setattr(py._path.local.Stat, "__getattr__",
+                  lambda inst, name:
+                  getattr(inst._osstatresult,
+                          name if name.startswith("st_") else "st_" + name))
+        assert p.samefile(q) is True
 
 
 def test_pytest_configure_hook_cwd(testdir):
