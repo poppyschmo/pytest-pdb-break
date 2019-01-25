@@ -1,7 +1,7 @@
-import attr
 import pytest
 
 from pathlib import Path
+from unittest.mock import patch
 from _pytest.pytester import LineMatcher
 from pytest_pdb_break import BreakLoc, get_targets, PdbBreak
 # Most of these need pexpect
@@ -44,15 +44,25 @@ def test_breakloc(request):
         assert BreakLoc.from_arg_spec("a:b:c")
 
     # From pytest item
-    Item = attr.make_class("Item", ["location"])
-    Item.session = request.session
-    rootdir = request.config.rootdir
-    assert BreakLoc.from_pytest_item(Item(("test_loc.py", 1, "test_loc_1"))) \
-        == BreakLoc(rootdir / "test_loc.py", 2, "test_loc_1")
-    assert BreakLoc.from_pytest_item(Item(("test_loc.py", 1, None))) \
-        == BreakLoc(rootdir / "test_loc.py", 2, "None")
-    with pytest.raises(AssertionError):
-        BreakLoc.from_pytest_item(Item(("/tmp/test_loc.py", 1, "test_loc_1")))
+    with patch("_pytest.nodes.Item") as mI, \
+            patch("_pytest.python.Function") as mF:
+        item = mF("test_loc_1", parent=mI("some_module"))
+        rootdir = request.config.rootdir
+        item.config.rootdir = rootdir
+        item.fspath = rootdir.join("test_loc.py")
+        # nodes.Item.location is a property
+        #
+        item.location = ("test_loc.py", 1, "test_loc_1")
+        expected = BreakLoc(rootdir / "test_loc.py", 2, "test_loc_1")
+        assert BreakLoc.from_pytest_item(item) == expected
+        #
+        item.location = ("test_loc.py", 1, None)
+        expected = BreakLoc(rootdir / "test_loc.py", 2, "None")
+        assert BreakLoc.from_pytest_item(item) == expected
+        #
+        item.location = ("/tmp/test_loc.py", 1, "test_loc_1")
+        with pytest.raises(AssertionError):
+            BreakLoc.from_pytest_item(item)
 
 
 def test_get_targets():
@@ -86,12 +96,12 @@ def test_resolve_wanted(tmp_path, request):
     assert invocation_dir == Path().cwd() == request.config.invocation_dir
     assert invocation_dir.strpath == str(invocation_dir)
 
-    # PdbBreak stub with mocked .config dirs
-    Config = attr.make_class("Config", ["rootdir", "invocation_dir"])
-    PdbClass = attr.make_class("PdbClass", ["config"])
-    PdbClass._resolve_wanted = PdbBreak._resolve_wanted
+    from unittest.mock import Mock
     rootdir = tmp_path / "rootdir"
-    inst = PdbClass(Config(py.path.local(rootdir), invocation_dir))
+    inst = Mock()
+    inst.config = Mock(rootdir=py.path.local(rootdir),
+                       invocation_dir=invocation_dir)
+    _resolve_wanted = PdbBreak._resolve_wanted
 
     rootdir.mkdir()
     os.chdir(rootdir)
@@ -103,9 +113,9 @@ def test_resolve_wanted(tmp_path, request):
     assert not path.is_absolute()
     wanted = BreakLoc(path, 1, None)
     with pytest.raises(FileNotFoundError):
-        inst._resolve_wanted(wanted)
+        _resolve_wanted(inst, wanted)
     file.write_text("pass")
-    result = inst._resolve_wanted(wanted)
+    result = _resolve_wanted(inst, wanted)
     assert result.file.exists()
     assert result.file.is_absolute()
 
@@ -118,12 +128,12 @@ def test_resolve_wanted(tmp_path, request):
     wanted = BreakLoc(path, 1, None)
     #
     file.write_text("pass")
-    result = inst._resolve_wanted(wanted)
+    result = _resolve_wanted(inst, wanted)
     assert result.file.exists()
     assert result.file.is_absolute()
     #
     os.chdir(subdir)
-    result = inst._resolve_wanted(wanted)
+    result = _resolve_wanted(inst, wanted)
     assert result.file.exists()
     assert result.file.is_absolute()
 
