@@ -207,6 +207,37 @@ class PpLogger(logging.Logger):
     prinspool = partialmethod(prinspect, defer=True)
     pspore = partialmethod(pspell, defer=True)
 
+    def sertall(self, tag):
+        """Run assertions in logdefs.
+
+        Assertion items should be a list under ``func/tag/assertions``.
+        Each item can be an expression (string), or a list containing an
+        expression and an arg expression (must be quoted if it's just a
+        message).
+
+        Like normal ``assert`` statements, these depend on ``__debug__``.
+        """
+        if not self.logdefs:
+            return
+        caller = sys._getframe(1)
+        name = caller.f_code.co_name
+        defs = self.logdefs[name].get(tag)
+        if not defs:
+            return
+        exprs = defs.get("assertions", ())
+        try:
+            for exp in exprs:
+                if isinstance(exp, str):
+                    readable = f"assert {exp}, {repr(exp)}"
+                else:
+                    readable = f"assert {exp[0]}, {exp[1]}"
+                exec(readable, self._get_updated_globals(caller),
+                     caller.f_locals)
+        except AssertionError:
+            import traceback
+            self._log_as(caller, "\n{}".format(traceback.format_exc()))
+            raise
+
 
 def validate_logdefs(inst, attribute, logdefs):
     """Validate a logdefs dict.
@@ -232,12 +263,14 @@ def validate_logdefs(inst, attribute, logdefs):
             for k, v in args.items():
                 path = f"{pfx}: {func_name}.{tag}.{k}"
                 tv = type(v).__name__
-                if k not in ["args", "kwargs"]:
+                if k not in ["args", "kwargs", "assertions"]:
                     raise TypeError(f"{path} must be 'args' or 'kwargs'")
                 if k == "args" and not isinstance(v, MutableSequence):
                     raise TypeError(f"{path} must be a list, not {tv!r}")
                 if k == "kwargs" and not isinstance(v, MutableMapping):
                     raise TypeError(f"{path} must be a dict, not {tv!r}")
+                if k == "assertions" and not isinstance(v, MutableSequence):
+                    raise TypeError(f"{path} must be a list, not {tv!r}")
     return logdefs
 
 

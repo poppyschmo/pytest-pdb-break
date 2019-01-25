@@ -657,3 +657,53 @@ def test_filter_output():
     # First finishes no matter what unless conditions fail
     inst.output_filters["a"].first = True
     assert filto(items, output) == repr({"foo": ["123"]})
+
+
+def test__get_updated_globals():
+    FakePpLogger = attr.make_class("PpLogger", ["name"])
+    FakePpLogger._get_updated_globals = PpLogger._get_updated_globals
+    inst = FakePpLogger("TEST")
+    inst.logdefs = {LoggingHelper: {"dict": {"foo": 1}}}
+    gd = inst._get_updated_globals(caller=sys._getframe())
+    assert gd["foo"] == 1 and "os" in gd
+
+
+def test_sertall():
+    FakePpLogger = attr.make_class("PpLogger", ["name"])
+    FakePpLogger.sertall = PpLogger.sertall
+    FakePpLogger._get_updated_globals = PpLogger._get_updated_globals
+    FakePpLogger._log_as = lambda i, _f, msg: i.out.append(msg)
+    inst = FakePpLogger("TEST")
+    inst.out = []
+    inst.logdefs = {LoggingHelper: {"dict": {"foo": 1}},
+                    "test_sertall": {"atag": {"assertions": ["foo == 1"]}}}
+    #
+    serts = inst.logdefs["test_sertall"]["atag"]["assertions"]
+    inst.sertall("atag")
+    #
+    bar = 1  # noqa: F841
+    serts.append("foo == bar")
+    inst.sertall("atag")
+    #
+    serts.append("hasattr(attr, 'asdict')")
+    inst.sertall("atag")
+    #
+    serts.append("hasattr(attr, 'fake')")
+    with pytest.raises(AssertionError) as exc_info:
+        inst.sertall("atag")
+    assert exc_info.match("(fake)")
+    assert "Traceback" in inst.out[-1]
+    #
+    last = serts.pop()
+    serts.append([last, "'some message'"])
+    with pytest.raises(AssertionError) as exc_info:
+        inst.sertall("atag")
+    assert exc_info.match("some message")
+    assert "some message" in inst.out[-1]
+    #
+    serts.clear()
+    serts.append([last, "1 + 1"])
+    with pytest.raises(AssertionError) as exc_info:
+        inst.sertall("atag")
+    assert exc_info.match("(2)")
+    assert "AssertionError: 2" in inst.out[-1]
