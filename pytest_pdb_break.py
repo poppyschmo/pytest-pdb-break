@@ -199,6 +199,7 @@ class PdbBreak:
                 self._l and self._l.pspore(2)
             else:
                 raise RuntimeError("breakpoint file couldn't be determined")
+        # TODO skip when cmdline arg is a single nodeid with function component
         self.targets = get_targets(self.wanted.file, self.wanted.lnum, locs)
         try:
             self.target = self.targets.popleft()
@@ -229,12 +230,7 @@ class PdbBreak:
         line = frame.f_lineno
         if line >= self.wanted.lnum:
             inst = self.last_pdb
-            if self._l:
-                assert inst.botframe.f_code.co_filename == __file__
-                assert inst.botframe.f_code.co_name == "runcall_until"
-                assert inst.stopframe is inst.botframe
-
-            assert inst.botframe is frame.f_back
+            self._l and self._l.sertall(1)
             # Reinstrument "backwards" to show pytest frames in stack
             if self.bt_all:
                 _frame = frame
@@ -263,8 +259,7 @@ class PdbBreak:
         from _pytest.capture import capture_fixtures
         if hasattr(self, "pytest_enter_pdb"):
             pytestPDB.set_trace(set_break=False)
-            if self._l:
-                assert self.last_pdb
+            self._l and self._l.sertall("with_enter_pdb")
             inst = self.last_pdb
         else:
             inst = self.last_pdb = pytestPDB._init_pdb()
@@ -315,8 +310,7 @@ class PdbBreak:
     @pytest.hookimpl
     def pytest_pyfunc_call(self, pyfuncitem):
         if self._l:
-            assert self.last_pdb is None
-            assert not pyfuncitem._isyieldedfunction()
+            self._l.sertall(1)
             self._l.pspell(1)
         if BreakLoc.from_pytest_item(pyfuncitem) == self.target:
             # Mimic primary hookimpl in _pytest/python.py
@@ -345,7 +339,7 @@ def get_targets(filename, upper, locations):
             locs = sorted(locs, key=lnumgetter, reverse=True)
             if locs:
                 # Not sure if different arg bindings can affect whether trace
-                # is called, so just include all partialized variants for now
+                # is called, so just include all callspec variants now
                 out = [l for l in locs if l.lnum == locs[0].lnum] + out
         else:
             out += sorted(locs, key=lnumgetter)
