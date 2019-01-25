@@ -112,6 +112,11 @@ def pytest_addoption(parser):
                     type=BreakLoc.from_arg_spec,
                     help="run the test enclosing <line-no> and break there; "
                     "<file> may be omitted if obvious")
+    group.addoption("--bt-all",
+                    action="store_true",
+                    dest="pdb_break_bt_all",
+                    help="include internal pytest frames in the bt stack; "
+                    "default: %(default)s")
 
 
 def pytest_configure(config):
@@ -138,6 +143,7 @@ class PdbBreak:
         else:
             self._l = None
         config.pluginmanager.register(self, "pdb_break")
+        self.bt_all = config.getoption("pdb_break_bt_all")
         self.config = config
         self.wanted = self._resolve_wanted(wanted)
         self.target = None
@@ -227,9 +233,18 @@ class PdbBreak:
                 assert inst.botframe.f_code.co_filename == __file__
                 assert inst.botframe.f_code.co_name == "runcall_until"
                 assert inst.stopframe is inst.botframe
-            # There's no need to reinstrument "backwards" by setting f_trace
-            # on prior frames since those are all internal to pytest.
-            #
+
+            assert inst.botframe is frame.f_back
+            # Reinstrument "backwards" to show pytest frames in stack
+            if self.bt_all:
+                _frame = frame
+                while _frame.f_back:
+                    _frame.f_trace = inst.trace_dispatch
+                    _frame = _frame.f_back
+                inst.botframe = _frame
+            else:
+                inst.botframe = frame
+
             # This is just for show, although it does make clear that this
             # breakpoint hasn't been saved
             inst.set_break(str(self.wanted.file), line, True)

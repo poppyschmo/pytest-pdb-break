@@ -436,3 +436,41 @@ def test_lower_callee(testdir_setup):
         "->*# <- line 3",
     ])
     pe.sendline("c")
+
+
+def test_no_bt_all(testdir_setup):
+    testdir_setup.makepyfile(test_file="""
+        def test_foo():
+            assert True
+    """)
+    pe = testdir_setup.spawn_pytest("--break=test_file.py:2")
+    pe.expect(prompt_re)
+    befs = LineMatcher(unansi(pe.before))
+    befs.fnmatch_lines("*>*/test_file.py(2)test_foo()")
+    pe.sendline("w")
+    pe.expect(prompt_re)
+    befs = LineMatcher(unansi(pe.before))
+    assert "runcall_until" not in befs.str()
+    befs.fnmatch_lines("*>*/test_file.py(2)test_foo()")
+    pe.sendline("c")
+
+
+def test_bt_all(testdir_setup):
+    testdir_setup.makepyfile(test_file="""
+        def test_foo():
+            assert True
+    """)
+    pe = testdir_setup.spawn_pytest("--break=test_file.py:2 --bt-all")
+    pe.expect(prompt_re)
+    befs = LineMatcher(unansi(pe.before))
+    befs.fnmatch_lines("*>*/test_file.py(2)test_foo()")
+    pe.sendline("w")
+    pe.expect(prompt_re)
+    befs = LineMatcher(unansi(pe.before))
+    # Everythin shown
+    befs.fnmatch_lines([
+        "*/_pytest/config/__init__.py(*)main()",
+        "*/pytest_pdb_break.py(*)runcall_until()",
+        "*>*/test_file.py(2)test_foo()"
+    ])
+    pe.sendline("c")
