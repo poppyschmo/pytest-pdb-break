@@ -56,7 +56,7 @@ runcall_until:
   cap_bot:
     kwargs:
       stdout: type(sys.stdout)
-      cap_method: self.capman._method
+      cap_method: capman._method
   post_capfix:
     args:
       - inst.botframe

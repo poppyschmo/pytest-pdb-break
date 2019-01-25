@@ -117,7 +117,6 @@ class PdbBreak:
         else:
             self._l = None
         config.pluginmanager.register(self, "pdb_break")
-        self.capman = config.pluginmanager.getplugin("capturemanager")
         self.config = config
         self.wanted = self._resolve_wanted(wanted)
         self.target = None
@@ -234,8 +233,9 @@ class PdbBreak:
             capfix = None
         self._l and self._l.pspore("pre_capfix")
         if capfix:
+            capman = self.config.pluginmanager.getplugin("capturemanager")
             self._l and self._l.pspore("cap_top")
-            if capfix == "capsys" and not self.capman.is_globally_capturing():
+            if capfix == "capsys" and not capman.is_globally_capturing():
                 raise RuntimeError("Cannot break inside tests using capsys "
                                    "when global capturing is disabled")
             capfix = testargs[capfix]
@@ -243,7 +243,7 @@ class PdbBreak:
             def preloop(_inst):
                 # XXX runs after .setup, but global capture still active?
                 super((type(_inst)), _inst).preloop()
-                self.capman.suspend_global_capture(in_=True)
+                capman.suspend_global_capture(in_=True)
 
             def postloop(_inst):
                 super((type(_inst)), _inst).postloop()
