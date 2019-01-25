@@ -144,12 +144,11 @@ class PpLogger(logging.Logger):
             out = self.filter_output(caller, items, out)
         return out
 
-    # FIXME shorten or ditch prefix, rename spotl to spill
     def prinspect(self, *args, **kwargs):
         """Print stuff."""
         caller = sys._getframe(1)
         name = caller.f_code.co_name
-        if name == "prinspot":
+        if name == "pspell":
             caller = caller.f_back
             name = caller.f_code.co_name
         defer = kwargs.get("defer")
@@ -172,7 +171,7 @@ class PpLogger(logging.Logger):
         else:
             self._log_as(caller, "\n{}".format(self.pfmt(caller, kwargs)))
 
-    def prinspot(self, tag, defer=False):
+    def pspell(self, tag, defer=False):
         """Log an item from from logdefs dict.
         This ignores prinspect's iterable arg form. Tag can be an int.
         """
@@ -191,7 +190,7 @@ class PpLogger(logging.Logger):
         self.prinspect(*args, **kwargs)
 
     prinspool = partialmethod(prinspect, defer=True)
-    prinspotl = partialmethod(prinspot, defer=True)
+    pspore = partialmethod(pspell, defer=True)
 
 
 def validate_logdefs(inst, attribute, logdefs):

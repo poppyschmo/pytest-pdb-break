@@ -425,7 +425,7 @@ def test_prinspect(monkeypatch):
     def apply(f, *args, **kwargs):
         return f(*args, **kwargs)
 
-    def prinspot(f, *args, **kwargs):
+    def pspell(f, *args, **kwargs):
         return f(*args, **kwargs)
 
     # Backlog written out via _log_as prior to request
@@ -438,17 +438,17 @@ def test_prinspect(monkeypatch):
     expected = {"foo": foo}
     assert inst.out.pop() == f"\n{expected!r}"
 
-    # Unless caller's name is prinspot
+    # Unless caller's name is pspell
     assert not inst._prinspect_next
     assert not inst.out
     inst._prinspect_next["test_prinspect"] = {"defer": curframe, "foo": foo}
-    prinspot(PpLogger.prinspect, inst, "bar")
+    pspell(PpLogger.prinspect, inst, "bar")
     assert len(inst.out) == 1
     expected = {"foo": foo, "bar": bar}
     assert inst.out.pop() == f"\n{expected!r}"
 
 
-def test_prinspot():
+def test_pspell():
     FakePpLogger = attr.make_class("PpLogger", ["name"])
     FakePpLogger.prinspect = lambda i, *a, **kw: i.out.append((a, kw))
     inst = FakePpLogger("TEST")
@@ -457,33 +457,33 @@ def test_prinspot():
 
     # Empty logdefs
     # use case: LOGDEFS undefined but logfile open and spect calls exist
-    PpLogger.prinspot(inst, "noop")
+    PpLogger.pspell(inst, "noop")
     assert not inst.out
 
     # Non-empty logdefs but caller no key matching caller (unlikely)
     inst.logdefs["test_bogus"] = {}
     with pytest.raises(KeyError):
-        PpLogger.prinspot(inst, "noop")
+        PpLogger.pspell(inst, "noop")
 
     # Non-empty logdefs but no matching (or empty) tag
     inst.logdefs.clear()
-    assert sys._getframe().f_code.co_name == "test_prinspot"
-    inst.logdefs["test_prinspot"] = {"atag": {}}
-    PpLogger.prinspot(inst, "noop")
+    assert sys._getframe().f_code.co_name == "test_pspell"
+    inst.logdefs["test_pspell"] = {"atag": {}}
+    PpLogger.pspell(inst, "noop")
     assert not inst.out
-    PpLogger.prinspot(inst, "atag")
+    PpLogger.pspell(inst, "atag")
     assert not inst.out
 
     # Matching tag (only kwargs evaluated)
     foo = object()
-    inst.logdefs["test_prinspot"] = {"atag": {"args": ["foo"],
-                                              "kwargs": {"a label": "foo"}}}
-    PpLogger.prinspot(inst, "atag")
+    inst.logdefs["test_pspell"] = {"atag": {"args": ["foo"],
+                                            "kwargs": {"a label": "foo"}}}
+    PpLogger.pspell(inst, "atag")
     assert inst.out == [(("foo",), {"a label": foo})]
 
     # Defer only forwarded as kwarg if True
     inst.out.clear()
-    PpLogger.prinspot(inst, "atag", defer=True)
+    PpLogger.pspell(inst, "atag", defer=True)
     assert inst.out == [(("foo",), {"a label": foo, "defer": True})]
 
 

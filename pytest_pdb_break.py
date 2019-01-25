@@ -143,19 +143,19 @@ class PdbBreak:
 
     def pytest_internalerror(self, excrepr, excinfo):
         if self.debug:  # already prints to tw w/o cap
-            self._l.prinspot(1)
+            self._l.pspell(1)
 
     def pytest_runtestloop(self, session):
         """Find target or raise."""
         locs = [BreakLoc.from_pytest_item(i) for i in session.items]
-        self.debug and self._l.prinspotl(1)
+        self.debug and self._l.pspore(1)
         if not self.wanted.file:
             locs_files = set(l.file for l in locs)
             # If solo, assume good
             if len(locs_files) == 1:
                 inferred = locs_files.pop()
                 self.wanted = self.wanted._replace(file=inferred)
-                self.debug and self._l.prinspotl(2)
+                self.debug and self._l.pspore(2)
             else:
                 raise RuntimeError("breakpoint file couldn't be determined")
         self.targets = get_targets(self.wanted.file, self.wanted.lnum, locs)
@@ -164,7 +164,7 @@ class PdbBreak:
         except IndexError as exc:
             msg = "a valid breakpoint could not be determined"
             raise RuntimeError(msg) from exc
-        self.debug and self._l.prinspotl(3)
+        self.debug and self._l.pspore(3)
 
     if not hasattr(pytestPDB, "_init_pdb"):
         def pytest_enter_pdb(self, config, pdb):
@@ -222,9 +222,9 @@ class PdbBreak:
             capfix = (testargs.keys() & capture_fixtures).pop()
         except KeyError:
             capfix = None
-        self.debug and self._l.prinspotl("pre_capfix")
+        self.debug and self._l.pspore("pre_capfix")
         if capfix:
-            self.debug and self._l.prinspotl("cap_top")
+            self.debug and self._l.pspore("cap_top")
             if capfix == "capsys" and not self.capman.is_globally_capturing():
                 raise RuntimeError("Cannot break inside tests using capsys "
                                    "when global capturing is disabled")
@@ -244,11 +244,11 @@ class PdbBreak:
             # TODO figure out why resumed state isn't already active
             # Maybe we have to run some hooks?
             capfix._resume()
-            self.debug and self._l.prinspotl("cap_bot")
+            self.debug and self._l.pspore("cap_bot")
         from bdb import BdbQuit
         inst.reset()
         inst.botframe = sys._getframe()
-        self.debug and self._l.prinspot("post_capfix")
+        self.debug and self._l.pspell("post_capfix")
         inst._set_stopinfo(inst.botframe, None, 0)
         sys.settrace(self.trace_handoff)
         try:
@@ -265,7 +265,7 @@ class PdbBreak:
         if self.debug:
             assert self.last_pdb is None
             assert not pyfuncitem._isyieldedfunction()
-            self._l.prinspot(1)
+            self._l.pspell(1)
         if BreakLoc.from_pytest_item(pyfuncitem) == self.target:
             # Mimic primary hookimpl in _pytest/python.py
             testargs = {arg: pyfuncitem.funcargs[arg] for
@@ -274,7 +274,7 @@ class PdbBreak:
             #
             if self.target and self.targets:
                 self.target = self.targets.popleft()
-            self.debug and self._l.prinspot(2)
+            self.debug and self._l.pspell(2)
             # Skip primary hookimpl for this pyfuncitem
             return True
 
