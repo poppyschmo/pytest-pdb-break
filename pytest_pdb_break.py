@@ -221,33 +221,29 @@ class PdbBreak:
 
         self._l and self._l.prinspect(event=event, frame=frame)
 
-        if frame.f_code.co_name != self.target.func_name:
+        if (frame.f_code.co_name != self.target.func_name
+                or event != "line"
+                or frame.f_lineno < self.wanted.lnum):
             return self.trace_handoff
 
-        if event != "line":
-            return self.trace_handoff
+        inst = self.last_pdb
+        self._l and self._l.sertall(1)
+        # Reinstrument "backwards" to show pytest frames in stack
+        if self.bt_all:
+            _frame = frame
+            while _frame.f_back:
+                _frame.f_trace = inst.trace_dispatch
+                _frame = _frame.f_back
+            inst.botframe = _frame
+        else:
+            inst.botframe = frame
 
-        line = frame.f_lineno
-        if line >= self.wanted.lnum:
-            inst = self.last_pdb
-            self._l and self._l.sertall(1)
-            # Reinstrument "backwards" to show pytest frames in stack
-            if self.bt_all:
-                _frame = frame
-                while _frame.f_back:
-                    _frame.f_trace = inst.trace_dispatch
-                    _frame = _frame.f_back
-                inst.botframe = _frame
-            else:
-                inst.botframe = frame
-
-            # This is just for show, although it does make clear that this
-            # breakpoint hasn't been saved
-            inst.set_break(str(self.wanted.file), line, True)
-            self.target = None
-            sys.settrace(inst.trace_dispatch)  # hand off
-            return inst.dispatch_line(frame)
-        return self.trace_handoff
+        # This is just for show, although it does make clear that this
+        # breakpoint hasn't been saved
+        inst.set_break(str(self.wanted.file), frame.f_lineno, True)
+        self.target = None
+        sys.settrace(inst.trace_dispatch)  # hand off
+        return inst.dispatch_line(frame)
 
     def runcall_until(self, func, **testargs):
         """Run test with testargs, stopping at location.
