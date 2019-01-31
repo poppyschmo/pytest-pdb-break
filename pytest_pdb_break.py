@@ -290,9 +290,7 @@ class PdbBreak:
             self._l and self._l.pspore("cap_bot")
         from bdb import BdbQuit
         inst.reset()
-        inst.botframe = sys._getframe()
         self._l and self._l.pspell("post_capfix")
-        inst._set_stopinfo(inst.botframe, None, 0)
         sys.settrace(self.trace_handoff)
         try:
             func(**testargs)
