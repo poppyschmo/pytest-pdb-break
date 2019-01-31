@@ -59,6 +59,10 @@ def testdir_setup(testdir):
     This only applies when this project's workdir hasn't been converted
     to ``--editable``/develop mode.
     """
+    testdir.makeini("""
+        [pytest]
+        addopts = --no-print-logs
+    """)
     if not installed:
         testdir.makeconftest("""
             import sys
