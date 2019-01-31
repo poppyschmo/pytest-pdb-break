@@ -1,4 +1,6 @@
+import re
 import sys
+import pytest
 from pathlib import Path
 from contextlib import contextmanager
 
@@ -36,3 +38,31 @@ else:
             import helpers  # noqa: F401
     else:
         "Repo root must already be in sys.path, likely via -m pytest"
+
+
+prompt_re = r"\(Pdb[+]*\)\s?"
+unansi_pat = re.compile("\x1b\\[[\\d;]+m")
+
+
+def unansi(byte_string, as_list=True):
+    """Remove ANSI escape sequences from pexpect output."""
+    out = unansi_pat.sub("", byte_string.decode().strip())  # why strip?
+    if as_list:
+        return out.split("\r\n")
+    out
+
+
+@pytest.fixture
+def testdir_setup(testdir):
+    """Maybe add project root to a subtest's ``sys.path`` via conftest.
+
+    This only applies when this project's workdir hasn't been converted
+    to ``--editable``/develop mode.
+    """
+    if not installed:
+        testdir.makeconftest("""
+            import sys
+            sys.path.insert(0, %r)
+            pytest_plugins = "pytest_pdb_break"
+        """ % (str(reporoot)))
+    return testdir

@@ -1,4 +1,3 @@
-import re
 import pytest
 
 from pathlib import Path
@@ -8,7 +7,7 @@ from pytest_pdb_break import BreakLoc, get_targets, PdbBreak
 # Most of these need pexpect
 
 
-prompt_re = r"\(Pdb[+]*\)\s?"
+from conftest import prompt_re, unansi
 
 
 def test_breakloc(request):
@@ -141,33 +140,6 @@ def test_resolve_wanted(tmp_path, request):
     result = _resolve_wanted(inst, wanted)
     assert result.file.exists()
     assert result.file.is_absolute()
-
-
-unansi_pat = re.compile("\x1b\\[[\\d;]+m")
-
-
-def unansi(byte_string, as_list=True):
-    out = unansi_pat.sub("", byte_string.decode().strip())  # why strip?
-    if as_list:
-        return out.split("\r\n")
-    out
-
-
-@pytest.fixture
-def testdir_setup(testdir):
-    """Maybe add project root to a subtest's ``sys.path`` via conftest.
-
-    This only applies when this project's workdir hasn't been converted
-    to ``--editable``/develop mode.
-    """
-    from conftest import installed, reporoot
-    if not installed:
-        testdir.makeconftest("""
-            import sys
-            sys.path.insert(0, %r)
-            pytest_plugins = %r
-        """ % (str(reporoot), PdbBreak.__module__))
-    return testdir
 
 
 def test_invalid_arg(testdir_setup):
