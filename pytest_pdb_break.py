@@ -107,16 +107,16 @@ def pytest_addoption(parser):
     # have access to the fully initialized config object.
     group.addoption("--break",
                     action="store",
-                    metavar="[<file>:]<line-no>",
+                    metavar="[FILE:]LINE-NO",
                     dest="pdb_break",
                     type=BreakLoc.from_arg_spec,
-                    help="run the test enclosing <line-no> and break there; "
-                    "<file> may be omitted if obvious")
+                    help="run the test enclosing LINE-NO and break there; "
+                    "FILE may be omitted if obvious")
     group.addoption("--bt-all",
                     action="store_true",
                     dest="pdb_break_bt_all",
-                    help="include internal pytest frames in the bt stack; "
-                    "default: %(default)s")
+                    help="include internal pytest frames in the navigable "
+                    "stack; default: %(default)s")
 
 
 def pytest_configure(config):
