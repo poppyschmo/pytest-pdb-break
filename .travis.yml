@@ -1,13 +1,13 @@
 ---
 sudo: false
+dist: xenial
 language: python
+python: 3.7
 before_install: deactivate
 
 jobs:
   include:
     - name: tox
-      dist: xenial
-      python: 3.7
       install:
         - |
           if ! test -e /opt/python3.6; then
@@ -32,20 +32,16 @@ jobs:
     - <<: *test-emacs
       env: EVM_EMACS=emacs-25.1-travis
     - name: vim8
-      dist: trusty
-      python: 3.6
       install:
-        - pyenv shell 3.6
+        - pyenv shell 3.7
         - sudo add-apt-repository -y ppa:jonathonf/vim
         - sudo apt-get update -q
         - sudo apt-get install -y vim
         - vim --version | grep -q york
       script: cd vim && make vim8
     - name: neovim
-      dist: trusty
-      python: 3.6
       install:
-        - pyenv shell 3.6
+        - pyenv shell 3.7
         - |
           export TRAVIS_BUILD_DIR=/opt
           url=https://raw.githubusercontent.com/neovim/bot-ci
