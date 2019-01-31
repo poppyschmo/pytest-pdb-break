@@ -155,6 +155,15 @@ class PpLogger(logging.Logger):
             out = self.filter_output(caller, items, out)
         return out
 
+    def printback(self, caller=None, filter_out=False):
+        "Print a traceback as caller. Must be called from exc handler."
+        import traceback
+        caller = caller or sys._getframe(1)
+        out = traceback.format_exc()
+        if filter_out:
+            out = self.filter_output(caller, {}, out)
+        self._log_as(caller, f"\n{out}")
+
     def prinspect(self, *args, **kwargs):
         """Print stuff."""
         caller = sys._getframe(1)
@@ -234,8 +243,7 @@ class PpLogger(logging.Logger):
                 exec(readable, self._get_updated_globals(caller),
                      caller.f_locals)
         except AssertionError:
-            import traceback
-            self._log_as(caller, "\n{}".format(traceback.format_exc()))
+            self.printback(caller=caller)
             raise
 
 

@@ -672,6 +672,7 @@ def test_sertall():
     FakePpLogger = attr.make_class("PpLogger", ["name"])
     FakePpLogger.sertall = PpLogger.sertall
     FakePpLogger._get_updated_globals = PpLogger._get_updated_globals
+    FakePpLogger.printback = PpLogger.printback
     FakePpLogger._log_as = lambda i, _f, msg: i.out.append(msg)
     inst = FakePpLogger("TEST")
     inst.out = []
