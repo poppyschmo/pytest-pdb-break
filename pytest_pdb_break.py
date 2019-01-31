@@ -119,10 +119,15 @@ def pytest_addoption(parser):
                     "stack; default: %(default)s")
 
 
+@pytest.hookimpl(trylast=True)
 def pytest_configure(config):
     wanted = config.getoption("pdb_break")
-    if wanted:
-        PdbBreak(wanted, config)
+    if not wanted:
+        return
+    pdbtrace = config.pluginmanager.get_plugin("pdbtrace")
+    if pdbtrace and config.pluginmanager.is_registered(pdbtrace):
+        raise RuntimeError("--break is not compatible with --trace")
+    config.pluginmanager.register(PdbBreak(wanted, config), "pdb_break")
 
 
 class PdbBreak:
@@ -142,7 +147,6 @@ class PdbBreak:
             self._l = module_logger.helper.get_logger("PdbBreak")
         else:
             self._l = None
-        config.pluginmanager.register(self, "pdb_break")
         self.bt_all = config.getoption("pdb_break_bt_all")
         self.config = config
         self.wanted = self._resolve_wanted(wanted)
@@ -213,7 +217,6 @@ class PdbBreak:
 
         This exists to accommodate initial breakpoints that would normally
         "fall through" but are otherwise sensible.
-
         """
         if frame.f_code.co_filename != str(self.wanted.file):
             # This ~~~~~^ may be a description, e.g., <string>
@@ -227,7 +230,6 @@ class PdbBreak:
             return self.trace_handoff
 
         inst = self.last_pdb
-        self._l and self._l.sertall(1)
         # Reinstrument "backwards" to show pytest frames in stack
         if self.bt_all:
             _frame = frame
@@ -296,6 +298,9 @@ class PdbBreak:
             func(**testargs)
         except BdbQuit:
             pass
+        except Exception:
+            self._l and self._l.printback()
+            raise
         finally:
             inst.quitting = True
             sys.settrace(None)

@@ -49,14 +49,6 @@ pytest_runtestloop:
       - self.targets
       - self.target
 
-trace_handoff:
-  1:
-    assertions:
-      - inst.botframe.f_code.co_filename == __file__
-      - inst.botframe.f_code.co_name == "runcall_until"
-      - inst.stopframe is inst.botframe
-      - inst.botframe is frame.f_back
-
 runcall_until:
   with_enter_pdb:
     assertions:

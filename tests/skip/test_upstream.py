@@ -8,7 +8,7 @@ def test_py_local_stat(tmpdir, monkeypatch):
 
     tmpdir.chdir()
 
-    p = pathlib.Path().cwd()
+    p = pathlib.Path.cwd()
     q = py.path.local()
 
     with pytest.raises(AttributeError) as exc_info:

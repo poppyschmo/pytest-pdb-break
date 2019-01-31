@@ -1,3 +1,4 @@
+import re
 import pytest
 
 from pathlib import Path
@@ -97,7 +98,7 @@ def test_resolve_wanted(tmp_path, request):
     import py
     invocation_dir = py.path.local()
     assert Path(invocation_dir).is_absolute()
-    assert invocation_dir == Path().cwd() == request.config.invocation_dir
+    assert invocation_dir == Path.cwd() == request.config.invocation_dir
     assert invocation_dir.strpath == str(invocation_dir)
 
     from unittest.mock import Mock
@@ -109,7 +110,7 @@ def test_resolve_wanted(tmp_path, request):
 
     rootdir.mkdir()
     os.chdir(rootdir)
-    assert Path().cwd() == rootdir
+    assert Path.cwd() == rootdir
 
     # Relative, top-level
     file = Path(rootdir / "test_top.py")
@@ -142,9 +143,11 @@ def test_resolve_wanted(tmp_path, request):
     assert result.file.is_absolute()
 
 
+unansi_pat = re.compile("\x1b\\[[\\d;]+m")
+
+
 def unansi(byte_string, as_list=True):
-    import re
-    out = re.sub("\x1b\\[[\\d;]+m", "", byte_string.decode().strip())
+    out = unansi_pat.sub("", byte_string.decode().strip())  # why strip?
     if as_list:
         return out.split("\r\n")
     out
@@ -177,14 +180,13 @@ def test_invalid_arg(testdir_setup):
     # No line number (argparse error)
     result = td.runpytest("--break=test_invalid_arg.py")
     assert result.ret == 4
-    lines = LineMatcher(result.stderr.lines)
-    lines.fnmatch_lines(["usage:*", "*--break*invalid*value*"])
+    result.stderr.fnmatch_lines(["usage:*", "*--break*invalid*value*"])
 
     # Non-existent file
     result = td.runpytest("--break=foo:99")
     assert result.ret == 3
-    lines = LineMatcher(result.stderr.lines)
-    lines.fnmatch_lines("INTERNALERROR>*FileNotFoundError*")
+    result.stdout.fnmatch_lines("INTERNALERROR>*FileNotFoundError*")
+    # TODO usage msg appears in captured stderr but result.stderr is empty
 
     # Ambiguous case: no file named, but multiple given
     td.makepyfile(test_otherfile="""
@@ -193,9 +195,8 @@ def test_invalid_arg(testdir_setup):
     """)
     result = td.runpytest("--break=1")
     assert result.ret == 3
-    lines = LineMatcher(result.stdout.lines[-5:])
-    lines.fnmatch_lines("INTERNALERROR>*RuntimeError: "
-                        "breakpoint file couldn't be determined")
+    result.stdout.fnmatch_lines("INTERNALERROR>*RuntimeError: "
+                                "breakpoint file couldn't be determined")
 
     # No file named, but pytest arg names one
     pe = td.spawn_pytest("--break=1 test_otherfile.py")  # <- Two sep args
@@ -207,6 +208,84 @@ def test_invalid_arg(testdir_setup):
         "->*assert True"
     ])
     pe.sendline("c")  # requested line is adjusted to something breakable
+
+
+def test_compat_trace(testdir_setup):
+    result = testdir_setup.runpytest("--trace", "--break=2")
+    assert result.ret == 3
+    result.stdout.fnmatch_lines("INTERNALERROR>*RuntimeError*")
+
+
+def test_compat_invoke_same_before(testdir_setup):
+    td = testdir_setup
+    td.makepyfile(test_file="""
+        def test_foo():
+            assert False                  # <- line 2
+            # comment
+            assert True                   # <- line 4
+    """)
+    pe = td.spawn_pytest("--break=4 --pdb")
+    pe.expect(prompt_re)
+    befs = LineMatcher(unansi(pe.before))
+    befs.fnmatch_lines([
+        "*>*/test_file.py(2)test_foo()",
+        "->*assert False*"
+    ])
+    pe.sendline("c")  # our bp is never set, so that's that
+
+
+def test_compat_invoke_same_after(testdir_setup):
+    td = testdir_setup
+    td.makepyfile(test_file="""
+        def test_foo():
+            assert True                   # <- line 2
+            # comment
+            assert False                  # <- line 4
+    """)
+    pe = td.spawn_pytest("--break=2 --pdb")
+    pe.expect(prompt_re)
+    befs = LineMatcher(unansi(pe.before))
+    befs.fnmatch_lines([
+        "*>*/test_file.py(2)test_foo()",
+        "->*assert True*"
+    ])
+    pe.sendline("c")
+    pe.expect(prompt_re)
+    befs = LineMatcher(unansi(pe.before))
+    befs.fnmatch_lines([
+        "*entering PDB*",
+        "*>*/test_file.py(4)test_foo()",
+        "->*assert False*"
+    ])
+    pe.sendline("c")
+
+
+def test_compat_invoke_after_other(testdir_setup):
+    td = testdir_setup
+    td.makepyfile(test_a="""
+        def test_foo():
+            assert True                   # <- line 2
+    """)
+    td.makepyfile(test_b="""
+        def test_bar():
+            assert False                  # <- line 2
+    """)
+    pe = td.spawn_pytest("--break=test_a.py:2 --pdb")
+    pe.expect(prompt_re)
+    befs = LineMatcher(unansi(pe.before))
+    befs.fnmatch_lines([
+        "*>*/test_a.py(2)test_foo()",
+        "->*assert True*"
+    ])
+    pe.sendline("c")
+    pe.expect(prompt_re)
+    befs = LineMatcher(unansi(pe.before))
+    befs.fnmatch_lines([
+        "*entering PDB*",
+        "*>*/test_b.py(2)test_bar()",
+        "->*assert False*"
+    ])
+    pe.sendline("c")
 
 
 @pytest.fixture
@@ -329,8 +408,7 @@ def test_capsys_noglobal(testdir_setup):
     """)
     result = testdir_setup.runpytest("--break=test_capsys_noglobal.py:3",
                                      "--capture=no")
-    lout = LineMatcher(result.stdout.lines)
-    lout.fnmatch_lines("*RuntimeError*capsys*global*")
+    result.stdout.fnmatch_lines("*RuntimeError*capsys*global*")
     result.assert_outcomes(failed=1)  # this runs as function node obj
 
 
