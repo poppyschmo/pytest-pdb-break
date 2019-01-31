@@ -303,7 +303,18 @@ class PdbBreak:
             sys.settrace(None)
             self.last_pdb = None
 
-    @pytest.hookimpl
+    @pytest.hookimpl(tryfirst=True)
+    def pytest_runtest_call(self, item):
+        if (hasattr(item, "startTest")
+                and BreakLoc.from_pytest_item(item) == self.target):
+
+            def _runtest(inst):
+                self.runcall_until(inst._testcase, result=inst)
+                if self.target and self.targets:
+                    self.target = self.targets.popleft()
+
+            item.runtest = _runtest.__get__(item)
+
     def pytest_pyfunc_call(self, pyfuncitem):
         if self._l:
             self._l.sertall(1)

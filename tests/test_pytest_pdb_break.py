@@ -480,3 +480,18 @@ def test_bt_all(testdir_setup):
         "*>*/test_file.py(2)test_foo()"
     ])
     pe.sendline("c")
+
+
+def test_unittest(testdir_setup):
+    testdir_setup.makepyfile(test_file="""
+        import unittest
+        class TestFoo(unittest.TestCase):
+            def test_foo(self):
+                somevar = True            # <- line 4
+                self.assertTrue(somevar)
+    """)
+    pe = testdir_setup.spawn_pytest("--break=test_file.py:4")
+    pe.expect(prompt_re)
+    befs = LineMatcher(unansi(pe.before))
+    befs.fnmatch_lines("*>*/test_file.py(4)test_foo()")
+    pe.sendline("c")
