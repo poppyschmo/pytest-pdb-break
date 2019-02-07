@@ -11,6 +11,7 @@
 ;;; Code:
 
 (require 'ert)
+(require 'term)
 (require 'pytest-pdb-break)
 
 (defvar pytest-pdb-break-test-tests
@@ -29,6 +30,9 @@
     pytest-pdb-break-test-get-modified-setup-code
     pytest-pdb-break-test-get-proc-name
     pytest-pdb-break-test-minor-mode
+    pytest-pdb-break-test-interpret-prefix-arg
+    pytest-pdb-break-test-read-session-options
+    pytest-pdb-break-test-default-options-function
     pytest-pdb-break-test-main-command-basic
     pytest-pdb-break-test-main-command-completion))
 
@@ -605,18 +609,32 @@ class TestFoo:
 (ert-deftest pytest-pdb-break-test-get-args ()
   ;; Eval: (compile "make PAT=get-args")
   (let* ((file "/tmp/a.py")
-         (node-info (list file "test_a")))
+         (node-info (list file "test_a"))
+         (session '("-p" "my_plugin")))
     (ert-info ("No extras")
       (should-not pytest-pdb-break-extra-opts)
-      (should (equal (pytest-pdb-break--get-args 9 node-info)
+      (should (equal (pytest-pdb-break--get-args nil 9 node-info)
                      '("--break=/tmp/a.py:9" "/tmp/a.py::test_a"))))
+    (ert-info ("Session, no extras")
+      (should-not pytest-pdb-break-extra-opts)
+      (should (equal (pytest-pdb-break--get-args session 9 node-info)
+                     '("-p" "my_plugin"
+                       "--break=/tmp/a.py:9" "/tmp/a.py::test_a"))))
     (ert-info ("Extras")
       (let ((pytest-pdb-break-extra-opts '("-p" "no:foo")))
-        (should (equal (pytest-pdb-break--get-args 9 node-info)
+        (should (equal (pytest-pdb-break--get-args nil 9 node-info)
                        '("-p" "no:foo"
                          "--break=/tmp/a.py:9"
                          "/tmp/a.py::test_a")))
-        (should (equal pytest-pdb-break-extra-opts '("-p" "no:foo")))))))
+        (should (equal pytest-pdb-break-extra-opts '("-p" "no:foo")))))
+    (ert-info ("Session, extras")
+      (let ((pytest-pdb-break-extra-opts '("-p" "no:foo")))
+        (should (equal (pytest-pdb-break--get-args session 9 node-info)
+                       '("-p" "no:foo" "-p" "my_plugin"
+                         "--break=/tmp/a.py:9"
+                         "/tmp/a.py::test_a")))
+        (should (equal pytest-pdb-break-extra-opts '("-p" "no:foo")))))
+    ))
 
 (ert-deftest pytest-pdb-break-test-get-modified-setup-code ()
   ;; Eval: (compile "make PAT=get-modified-setup-code")
@@ -736,6 +754,20 @@ class TestFoo:
                       (should-not (codechk))
                       (should-not (local-variable-p 'kill-buffer-hook))))))))
 
+(ert-deftest pytest-pdb-break-test-interpret-prefix-arg ()
+  ;; Eval: (compile "make PAT=interpret-prefix-arg")
+  (ert-info ("Nothing")
+    (should-not (pytest-pdb-break--interpret-prefix-arg nil)))
+  (ert-info ("Digit arg")
+    (should (= (pytest-pdb-break--interpret-prefix-arg 0) 0))
+    (should (= (pytest-pdb-break--interpret-prefix-arg 4) 4)))
+  (ert-info ("Universal arg")
+    (should (= (pytest-pdb-break--interpret-prefix-arg '(4)) 4))
+    (should (= (pytest-pdb-break--interpret-prefix-arg '(16)) 16)))
+  (ert-info ("Negative arg")
+    (should (= (pytest-pdb-break--interpret-prefix-arg '-) -1))
+    (should (= (pytest-pdb-break--interpret-prefix-arg '-1) -1))))
+
 ;; TODO find the proper built-in way to do this
 (defun pytest-pdb-break-test--expect-timeout (pattern &optional max-secs)
   "Dumb waiter. Wait MAX-SECS for PATTERN before process mark."
@@ -749,6 +781,105 @@ class TestFoo:
       (and want-disp (redisplay t))
       (sleep-for 0.01))
     found))
+
+(ert-deftest pytest-pdb-break-test-read-session-options ()
+  ;; Eval: (compile "make PAT=read-session-options")
+  ;; Eval: (compile "make debug PAT=read-session-options")
+  (pytest-pdb-break-test-with-tmpdir
+   (pytest-pdb-break-test-with-environment
+    (with-temp-file "somefile.suffix" (insert "text"))
+    (with-temp-file "notherfile.suffix" (insert "more text"))
+    (add-hook 'term-mode-hook (lambda () (term-reset-size 20 80)))
+    (let* ((logfile (file-truename "ert.out")) ; must be bound here
+           ;; When called interactively, CWD reverts to this project's lisp dir
+           (src `(progn (require 'pytest-pdb-break)
+                        (with-current-buffer (messages-buffer)
+                          (setq default-directory ,default-directory))))
+           (args (list "-Q" "-nw" "-L" pytest-pdb-break-test-lisp-root
+                       "--eval" (format "%S" src)))
+           (buf (apply #'make-term "ert" "emacs" nil args))
+           (proc (get-buffer-process buf)))
+      (with-current-buffer buf
+        (unwind-protect
+            (ert-info ("Term subprocess")
+              (term-char-mode)
+              (goto-char (process-mark proc))
+              (term-send-raw-string "\e:")
+              (should (pytest-pdb-break-test--expect-timeout "Eval: ?"))
+              (term-send-string proc "(switch-to-buffer (messages-buffer))\n")
+              (term-send-raw-string "\e>")
+              (ert-info ("Completion of file in current directory")
+                (term-send-raw-string "\e:")
+                (should (pytest-pdb-break-test--expect-timeout "Eval: ?"))
+                (term-send-string
+                 proc "(pytest-pdb-break--read-session-options)\n")
+                (should (pytest-pdb-break-test--expect-timeout "options: ?"))
+                (term-send-string proc "--foo=./some\t")
+                (should (pytest-pdb-break-test--expect-timeout
+                         "file\\.suffix ?"))
+                (term-send-string proc "nothe\t")
+                (should (pytest-pdb-break-test--expect-timeout
+                         "notherfile\\.suffix ?"))
+                (term-send-string proc "\n"))
+              (ert-info ("Entry added to history")
+                (term-send-raw-string "\e:")
+                (should (pytest-pdb-break-test--expect-timeout "Eval: ?"))
+                (term-send-string proc "pytest-pdb-break--options-history\n")
+                (should (pytest-pdb-break-test--expect-timeout
+                         (concat  "(\"--foo=\\./somefile\\.suffix ?"
+                                  "notherfile\\.suffix ?\").*"))))
+              (term-send-raw-string "\C-x\C-c")
+              (sleep-for 0.1)
+              (goto-char (point-max))
+              (should (search-backward "Process ert finished")))
+          (unless (pytest-pdb-break-test-invoked-with-debug-p)
+            (write-file logfile)
+            (set-process-query-on-exit-flag proc nil)
+            (kill-buffer buf))))))))
+
+(ert-deftest pytest-pdb-break-test-default-options-function ()
+  ;; Eval: (compile "make PAT=default-options-function")
+  (let ((called 0)
+        pytest-pdb-break--options-history)
+    (ert-info ("Null hist, null arg")
+      (should-not (pytest-pdb-break-default-options-function nil))
+      (should-not pytest-pdb-break--options-history))
+    (ert-info ("Non-null hist, null arg")
+      (push "--foo" pytest-pdb-break--options-history)
+      (should (equal (pytest-pdb-break-default-options-function nil)
+                     '("--foo")))
+      (should (equal '("--foo") pytest-pdb-break--options-history)))
+    (ert-info ("Negative arg")
+      (push "--bar" pytest-pdb-break--options-history)
+      (should (equal (pytest-pdb-break-default-options-function -1)
+                     '("--foo")))
+      (push "--baz" pytest-pdb-break--options-history)
+      (should (equal (pytest-pdb-break-default-options-function -2)
+                     '("--foo")))
+      (ert-info ("Overshoot")
+        (should (equal (pytest-pdb-break-default-options-function -10)
+                       '("--foo")))))
+    (ert-info ("Zero arg")
+      (should-not (pytest-pdb-break-default-options-function 0))
+      (should-not (pytest-pdb-break-default-options-function nil))
+      (should (string= "" (car pytest-pdb-break--options-history)))
+      (should-not (string= "" (cadr pytest-pdb-break--options-history))))
+    (advice-add 'pytest-pdb-break--read-session-options
+                :override (lambda (&rest r)
+                            (should-not r)
+                            (push (format "%S" (setq called (1+ called)))
+                                  pytest-pdb-break--options-history)
+                            (car pytest-pdb-break--options-history))
+                '((name . over)))
+    (should (advice-member-p 'over 'pytest-pdb-break--read-session-options))
+    (ert-info ("Positive arg")
+      (should (equal (pytest-pdb-break-default-options-function 4) '("1")))
+      (should (equal (pytest-pdb-break-default-options-function 16) '("2")))
+      (should (equal (pytest-pdb-break-default-options-function nil) '("2"))))
+    (advice-remove 'pytest-pdb-break--read-session-options 'over)
+    (should-not (advice-member-p 'over
+                                 'pytest-pdb-break--read-session-options)))
+  (should-not pytest-pdb-break--options-history))
 
 (defmacro pytest-pdb-break--main-command-fixture (linepat &rest body)
   "Run main command assertions in BODY from LINEPAT."

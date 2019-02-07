@@ -25,10 +25,7 @@
 ;;   2. they may not respond correctly when summoned by third-party tools like
 ;;      `company-capf'.
 ;;
-;; TODO detect presence of pdb++
-;; TODO make completion wrapper work in "interactive" REPL
 ;; TODO tramp
-;; TODO add option to inject pdb++
 ;;
 
 ;;; Code:
@@ -43,10 +40,11 @@
   :group 'pytest)
 
 (defcustom pytest-pdb-break-extra-opts nil
-  "List of extra args passed to pytest.
-May be useful in a `dir-locals-file'. For example, this `python-mode'
-entry unsets cmd-line options from a project ini:
-\(pytest-pdb-break-extra-opts \"-o\" \"addopts=\")."
+  "List of extra args passed to all pytest invocations.
+For one-offs, it's easier to call this package's commands with one or
+more universal args. This option is best used in a `dir-locals-file'.
+For example, this `python-mode' entry unsets cmd-line options from a
+project ini: (pytest-pdb-break-extra-opts \"-o\" \"addopts=\")."
   :group 'pytest
   :type 'list)
 
@@ -57,6 +55,15 @@ querying helpers, this script's shebanged Python may be used in place of
 `python-shell-interpreter'."
   :group 'pytest
   :type 'string)
+
+(defcustom pytest-pdb-break-options-function
+  'pytest-pdb-break-default-options-function
+  "Function determining any additional options to pass to pytest.
+Handed a single arg, which, if non-nil, must be an integer like that
+provided by (interactive \"P\"). Must return a list of strings or nil.
+See `pytest-pdb-break-default-options-function'."
+  :group 'pytest
+  :type 'function)
 
 (defvar pytest-pdb-break-processes nil
   "List of processes started via `pytest-pdb-break-here'.")
@@ -191,12 +198,13 @@ With FORCE, update."
       (setq parts (list (pop parts) (pop parts))))
     (cons file parts)))
 
-(defun pytest-pdb-break--get-args (line-no node-id-parts)
+(defun pytest-pdb-break--get-args (session-opts line-no node-id-parts)
   "Generate args for subprocess.
-LINE-NO and NODE-ID-PARTS are as required by the main command."
+SESSION-OPTS, LINE-NO, and NODE-ID-PARTS are as required by the main
+command, `pytest-pdb-break-here' (which see)."
   (let ((nodeid (mapconcat #'identity node-id-parts "::"))
         (break (format "--break=%s:%s" (car node-id-parts) line-no)))
-    (append pytest-pdb-break-extra-opts (list break nodeid))))
+    (append pytest-pdb-break-extra-opts session-opts (list break nodeid))))
 
 (defvar pytest-pdb-break--setup-code-addendum nil)
 (defvar pytest-pdb-break--setup-code-reassignment "
@@ -260,11 +268,57 @@ del _wrap_pyel
 (defvar pytest-pdb-break-prompt-regexp  "[(<]*[Ii]?[Pp]db[+>)]+ "
   "The default `python-shell-prompt-pdb-regexp' with an extra +.")
 
+(defvar pytest-pdb-break--options-history nil)
+
+(defun pytest-pdb-break--read-session-options ()
+  "Ask for additional options and return the resulting string.
+Shell quoting won't work. Values containing spaces should be enclosed in
+double quotes, e.g., prompt: -foO \"--data={\\\"bar\\\": 1}\" ./baz/"
+  (let ((comint-file-name-chars
+         (replace-regexp-in-string "[,:=]" "" comint-file-name-chars))
+        minibuffer-allow-text-properties)
+    (minibuffer-with-setup-hook
+        (lambda nil (add-hook 'completion-at-point-functions
+                              'comint-completion-at-point nil t))
+      (read-from-minibuffer
+       "options: " nil minibuffer-local-shell-command-map
+       nil 'pytest-pdb-break--options-history
+       (car pytest-pdb-break--options-history) t))))
+
+(defun pytest-pdb-break-default-options-function (&optional n)
+  "Return a previously used options list or ask for a new one.
+Without N, return the most recent, which may be nil. When N is positive,
+ask for new options. When N is negative, return the N+1-th previous
+list. When N is 0, insert \"\" into history and return nil."
+  (let ((raw (cond
+              ((null n) (car pytest-pdb-break--options-history))
+              ((< n 0) (or (nth (- n) pytest-pdb-break--options-history)
+                           (car (last pytest-pdb-break--options-history))))
+              ((> n 0) (pytest-pdb-break--read-session-options))
+              (t (car (cl-pushnew "" pytest-pdb-break--options-history))))))
+    (and raw (split-string-and-unquote raw))))
+
+(defun pytest-pdb-break--interpret-prefix-arg (arg)
+  "Convert prefix ARG to number if non-nil."
+  ;; FIXME use `prefix-numeric-value' instead
+  ;; (pcase arg
+  ;;   (`(,u) u)
+  ;;   ((and u (pred numberp)) u)
+  ;;   ('- -1))
+  (and arg (prefix-numeric-value arg)))
+
 ;;;###autoload
-(defun pytest-pdb-break-here (line-no node-id-parts)
+(defun pytest-pdb-break-here (session-opts line-no node-id-parts)
   "Run pytest on the test at point and break at LINE-NO.
-NODE-ID-PARTS is a list of pytest node-id components."
-  (interactive (list (line-number-at-pos) (pytest-pdb-break--get-node-id)))
+When called non-interactively, NODE-ID-PARTS should be a list of pytest
+node-id components and SESSION-OPTS a list of additional options. See
+`pytest-pdb-break-default-options-function' for `prefix-arg' behavior."
+  (interactive
+   (list (funcall pytest-pdb-break-options-function
+                  (pytest-pdb-break--interpret-prefix-arg
+                   current-prefix-arg))
+         (line-number-at-pos)
+         (pytest-pdb-break--get-node-id)))
   (let* ((process-environment (append process-environment nil))
          (proc-name (pytest-pdb-break--get-proc-name)))
     (defvar python-shell--interpreter)
@@ -276,7 +330,8 @@ NODE-ID-PARTS is a list of pytest node-id components."
                     python-shell-extra-pythonpaths))
            ;; Make pdb++ prompt trigger non-native-completion fallback
            (python-shell-prompt-pdb-regexp pytest-pdb-break-prompt-regexp)
-           (args (pytest-pdb-break--get-args line-no node-id-parts))
+           (args (pytest-pdb-break--get-args session-opts
+                                             line-no node-id-parts))
            (fake-arg-string (mapconcat #'identity (cons "-mpytest" args) " "))
            ;; Produces warning in 25.x: Making foo local to bar while let-bound
            (python-shell--parent-buffer (current-buffer))
