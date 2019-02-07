@@ -4,8 +4,7 @@ from pathlib import Path
 from unittest.mock import patch
 from _pytest.pytester import LineMatcher
 from pytest_pdb_break import BreakLoc, get_targets, PdbBreak
-# Most of these need pexpect
-
+from pexpect import EOF  # No importskip
 
 from conftest import prompt_re, unansi
 
@@ -368,41 +367,42 @@ def test_capsys(testdir_setup, cap_method):
     lbefs = LineMatcher(befs)
     lbefs.fnmatch_lines(("*>*/test_capsys.py(5)test_print()", "->*# line 5"))
     pe.sendline("c")
-    afts = unansi(pe.read(-1))
-    lafts = LineMatcher(afts)
-    assert "bar" not in afts
-    lafts.fnmatch_lines((".*[[]100%[]]", "*= 1 passed in * seconds =*"))
+    pe.expect(EOF)
+    befs = unansi(pe.before)
+    assert "bar" not in befs
+    lbefs = LineMatcher(befs)
+    lbefs.fnmatch_lines(["*[[]100%[]]*", "*1 passed*"])
 
 
 def test_capsys_noglobal(testdir_setup):
-    testdir_setup.makepyfile(r"""
+    testdir_setup.makepyfile(test_file=r"""
         def test_print(capsys):
             print("foo")
             assert capsys.readouterr() == "foo\n"
     """)
-    result = testdir_setup.runpytest("--break=test_capsys_noglobal.py:3",
-                                     "--capture=no")
+    # Subsequent pty-based tests may fail when run "inprocess"
+    result = testdir_setup.runpytest_subprocess("--break=test_file.py:3",
+                                                "--capture=no")
     result.stdout.fnmatch_lines("*RuntimeError*capsys*global*")
-    result.assert_outcomes(failed=1)  # this runs as function node obj
+    result.assert_outcomes(failed=1)
 
 
 def test_request_object(testdir_setup):
     # Formerly, request.function (request._pyfuncitem.obj) would be set to
     # inst.runcall_until, which interfered with tools like testdir._makefile,
     # which uses this request.function.__name__ as a default filename.
-    testdir_setup.makepyfile("""
+    testdir_setup.makepyfile(test_file="""
         def test_rq(request):
             assert True
             assert request.function is test_rq
     """)
-    pe = testdir_setup.spawn_pytest("--break=test_request_object.py:2")
+    pe = testdir_setup.spawn_pytest("--break=test_file.py:2")
     pe.expect(prompt_re)
     befs = LineMatcher(unansi(pe.before))
-    befs.fnmatch_lines("*>*/test_request_object.py(2)test_rq()")
+    befs.fnmatch_lines("*>*/test_file.py(2)test_rq()")
     pe.sendline("c")
-    afts = unansi(pe.read(-1))
-    lafts = LineMatcher(afts)
-    lafts.fnmatch_lines((".*[[]100%[]]", "*= 1 passed *"))
+    pe.expect(r"\[100%\]")
+    pe.expect(r"\b1 passed")
 
 
 @pytest.fixture
