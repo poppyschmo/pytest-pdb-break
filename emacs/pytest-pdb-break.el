@@ -199,7 +199,7 @@ LINE-NO and NODE-ID-PARTS are as required by the main command."
     (append pytest-pdb-break-extra-opts (list break nodeid))))
 
 (defvar pytest-pdb-break--setup-code-addendum nil)
-(defvar pytest-pdb-break--setup-code-cleanup "
+(defvar pytest-pdb-break--setup-code-reassignment "
 __PYTHON_EL_get_completions = _wrap_pyel(__PYTHON_EL_get_completions)
 del _wrap_pyel
 ")
@@ -213,7 +213,7 @@ del _wrap_pyel
         (let ((coding-system-for-read "utf-8"))
           (insert-file-contents-literally srcfile))
         (goto-char (point-max))
-        (insert pytest-pdb-break--setup-code-cleanup)
+        (insert pytest-pdb-break--setup-code-reassignment)
         (setq pytest-pdb-break--setup-code-addendum
               (buffer-string)))))
   (concat python-shell-completion-setup-code
