@@ -117,6 +117,11 @@ def pytest_addoption(parser):
                     dest="pdb_break_bt_all",
                     help="include internal pytest frames in the navigable "
                     "stack; default: %(default)s")
+    group.addoption("--complete",
+                    action="store_true",
+                    dest="pdb_break_complete",
+                    help="complete object names in additon to commands; "
+                    "default: %(default)s")
 
 
 @pytest.hookimpl(trylast=True)
@@ -125,8 +130,14 @@ def pytest_configure(config):
     if not wanted:
         return
     pdbtrace = config.pluginmanager.get_plugin("pdbtrace")
+    pdbcls = config.pluginmanager.get_plugin("pdbtrace")
     if pdbtrace and config.pluginmanager.is_registered(pdbtrace):
         raise RuntimeError("--break is not compatible with --trace")
+    if config.getoption("pdb_break_complete"):
+        if pdbcls and config.pluginmanager.is_registered(pdbcls):
+            raise RuntimeError("--complete is not compatible with --pdbcls")
+        else:
+            add_completion(config)
     config.pluginmanager.register(PdbBreak(wanted, config), "pdb_break")
 
 
@@ -356,3 +367,58 @@ def get_targets(filename, upper, locations):
         else:
             out += sorted(locs, key=lnumgetter)
     return deque(out)
+
+
+def add_completion(config):
+    """Replace pytestPDB._pdb_cls with a completion-enabled subclass.
+    """
+    module_logger and module_logger.sertall(1)
+    orig = pytestPDB._pdb_cls
+
+    def restore():
+        pytestPDB._pdb_cls = orig
+
+    config.add_cleanup(restore)
+
+    import rlcompleter
+    from code import InteractiveConsole
+    from itertools import takewhile, count, filterfalse
+
+    class PdbComplete(orig):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self._l = (module_logger and
+                       module_logger.helper.get_logger("PdbComplete"))
+
+        def complete(self, text, state):
+            """Dispense object and command matches.
+            State caching stolen from pdb++ <https://github.com/antocuni/pdb>
+            """
+            try:
+                if state == 0:
+                    ns = self.curframe.f_globals.copy()
+                    ns.update(self.curframe.f_locals)
+                    icon = sys._getframe().f_back.f_locals.get("self")
+                    if icon and isinstance(icon, InteractiveConsole):
+                        ns.update(icon.locals)
+                    else:
+                        icon = False
+                    cp = rlcompleter.Completer(ns).complete
+                    first = takewhile(bool, (cp(text, m) for m in count()))
+                    self._completions = list(first)
+                    if not icon:
+                        cp = super().complete  # cmd.Cmd
+                        rest = takewhile(bool, (cp(text, m) for m in count()))
+                        dif = filterfalse(self._completions.__contains__, rest)
+                        self._completions.extend(dif)
+                    self._l and self._l.prinspect(text=text, icon=icon,
+                                                  size=len(self._completions))
+                try:
+                    return self._completions[state]
+                except IndexError:
+                    return None
+            except Exception:
+                self._l and self._l.printback()
+                return None
+
+    pytestPDB._pdb_cls = PdbComplete

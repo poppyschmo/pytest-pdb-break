@@ -89,3 +89,11 @@ find_breakable_line:
     args:
       - lineno
       - line
+
+add_completion:
+  1:
+    assertions:
+      - >
+        pytestPDB._pdb_cls is sys.modules["_pytest.debugging"].pdb.Pdb
+      - >
+        "complete" not in pytestPDB._pdb_cls.__dict__

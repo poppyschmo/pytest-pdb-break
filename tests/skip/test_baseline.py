@@ -56,3 +56,27 @@ def test_compat_invoke_same_after_baseline(testdir_setup):
         "->*assert False*"
     ])
     pe.sendline("c")
+
+
+def test_completion_commands(testdir_setup):
+    # Note: \x07 is the BEL char
+    testdir_setup.makepyfile(test_file="""
+        def test_foo():
+            assert True
+    """)
+    pe = testdir_setup.spawn_pytest("--break=test_file.py:2")
+    pe.expect(prompt_re)
+    befs = LineMatcher(unansi(pe.before))
+    befs.fnmatch_lines("*>*/test_file.py(2)test_foo()")
+    pe.send("hel\t")
+    pe.expect("hel\x07?p")
+    pe.send("\n")
+    pe.expect("Documented commands")
+    pe.expect(prompt_re)
+    pe.send("whe\t")
+    pe.expect("whe\x07?re")
+    pe.send("\n")
+    pe.expect(prompt_re)
+    befs = LineMatcher(unansi(pe.before))
+    befs.fnmatch_lines("*>*/test_file.py(2)test_foo()")
+    pe.sendline("c")

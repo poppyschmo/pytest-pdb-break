@@ -182,8 +182,10 @@ def test_invalid_arg(testdir_setup):
     pe.sendline("c")  # requested line is adjusted to something breakable
 
 
-def test_compat_trace(testdir_setup):
-    result = testdir_setup.runpytest("--trace", "--break=2")
+@pytest.mark.parametrize("opts", [("--trace",),
+                                  ("--pdbcls=pdb:Pdb", "--complete")])
+def test_compat_usage(testdir_setup, opts):
+    result = testdir_setup.runpytest(*opts, "--break=2")
     assert result.ret == 3
     result.stdout.fnmatch_lines("INTERNALERROR>*RuntimeError*")
 
@@ -544,4 +546,125 @@ def test_unittest(testdir_setup):
     pe.expect(prompt_re)
     befs = LineMatcher(unansi(pe.before))
     befs.fnmatch_lines("*>*/test_file.py(4)test_foo()")
+    pe.sendline("c")
+
+
+def test_completion_commands_basic(testdir_setup):
+    testdir_setup.makepyfile(test_file="""
+        def test_foo():
+            localvar = 42
+            assert True
+            assert localvar
+    """)
+
+    # Adding our completer doesn't break builtin cmd.Cmd completion
+    pe = testdir_setup.spawn_pytest("--complete --break=test_file.py:3",
+                                    expect_timeout=1.0)
+    pe.expect(prompt_re)
+    befs = LineMatcher(unansi(pe.before))
+    befs.fnmatch_lines("*>*/test_file.py(3)test_foo()")
+    pe.send("hel\t")
+    pe.expect("hel\x07?p")  # singleton autocompletes with intervening BEL
+    pe.send("\n")
+    pe.expect("Documented commands")
+    pe.expect(prompt_re)
+
+    # Local variable and keyword
+    pe.send("loc\t")
+    pe.expect("loc\x07?al")
+    pe.send("\t\t")
+    pe.expect(r"\s*locals\(?\s*localvar")  # multiline: leftmost \s is \r\n
+    pe.sendline("var")
+    pe.expect("42")
+
+    # Command completion persists (plain rlcompleter didn't replace us)
+    pe.send("whe\t")
+    pe.expect("whe\x07?re")
+    pe.send("\n")
+    pe.expect(prompt_re)
+    befs = LineMatcher(unansi(pe.before))
+    befs.fnmatch_lines("*>*/test_file.py(3)test_foo()")
+
+    # New local
+    pe.send("imp\t")
+    pe.expect("imp\x07?ort")
+    pe.send(" sys\n")
+    pe.expect("sys")
+    pe.expect(prompt_re)
+    pe.send("sys.\t\t")
+    pe.expect(r"\s*sys\.path.*sys\.version")
+    pe.send("version\t\t")
+    pe.expect(r"\s*sys\.version.*sys\.version_info")
+
+    # Chain
+    pe.send("_in\t")
+    pe.expect("sys.version_in\x07?fo")
+    pe.send(".m\t\t")
+    pe.expect(r"\s*sys\.version_info\.major.*sys\.version_info\.minor")
+    pe.send("ajor\n")
+    pe.expect("3")
+
+    # Command completion persists (plain rlcompleter didn't replace us)
+    pe.send("unti\t")
+    pe.expect("unti\x07?l")
+    pe.send(" 4\n")
+    pe.expect(prompt_re)
+    befs = LineMatcher(unansi(pe.before))
+    befs.fnmatch_lines("*>*/test_file.py(4)test_foo()")
+
+    pe.sendline("c")
+
+
+def test_completion_commands_interact(testdir_setup):
+    testdir_setup.makepyfile(test_file="""
+        def test_foo():
+            localvar = 42
+            assert True
+            assert localvar
+    """)
+
+    # Adding our completer doesn't break builtin cmd.Cmd completion
+    pe = testdir_setup.spawn_pytest("--complete --break=test_file.py:3",
+                                    expect_timeout=1.0)
+    pe.expect(prompt_re)
+    befs = LineMatcher(unansi(pe.before))
+    befs.fnmatch_lines("*>*/test_file.py(3)test_foo()")
+    pe.sendline("import sys")
+    pe.expect("sys")
+    pe.send("inter\t")
+    pe.expect("inter\x07?act")
+    pe.send("\n")
+    pe.expect("[*]interactive[*]")
+    pe.expect(">>> ")
+
+    # Local from test scope
+    pe.send("localv\t\t")
+    pe.expect("localv\x07?ar")
+    pe.send("\n")
+    pe.expect("42")
+
+    # Locals from pdb cmd loop
+    pe.expect(">>> ")
+    pe.send("sys.\t\t")
+    pe.expect(r"\s*sys\.path.*sys\.version")
+    pe.send("version_info\n")
+    pe.expect("3")
+
+    # New locals
+    pe.expect(">>> ")
+    pe.sendline("import os")
+    pe.expect("os")
+    pe.send("os.path.\t\t")
+    pe.expect(r"\s*os\.path\.curdir.*os\.path\.sep")
+    pe.send("sys is sys\n")
+    pe.expect("True")
+
+    # Interactive locals don't pollute pdb cmd loop
+    pe.send("\x04")  # ^D EOT
+    pe.expect(prompt_re)
+    pe.sendline("os")
+    pe.expect("NameError")
+    pe.sendline("localvar, sys")
+    pe.expect("[(]42.*sys.*[)]")
+
     pe.sendline("c")
