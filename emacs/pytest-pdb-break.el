@@ -244,6 +244,9 @@ del _wrap_pyel
             (seq-filter #'process-live-p ; proc may be nil
                         (remq proc pytest-pdb-break-processes))))))
 
+(defvar pytest-pdb-break-prompt-regexp  "[(<]*[Ii]?[Pp]db[+>)]+ "
+  "The default `python-shell-prompt-pdb-regexp' with an extra +.")
+
 ;;;###autoload
 (defun pytest-pdb-break-here (line-no node-id-parts)
   "Run pytest on the test at point and break at LINE-NO.
@@ -264,7 +267,7 @@ NODE-ID-PARTS is a list of pytest node-id components."
             (append (list (pytest-pdb-break-get-isolated-lib pyexe))
                     python-shell-extra-pythonpaths))
            ;; Make pdb++ prompt trigger non-native-completion fallback
-           (python-shell-prompt-pdb-regexp "[(<]*[Ii]?[Pp]db[+>)]+ ")
+           (python-shell-prompt-pdb-regexp pytest-pdb-break-prompt-regexp)
            (args (pytest-pdb-break--get-args line-no node-id-parts))
            (fake-arg-string (mapconcat #'identity (cons "-mpytest" args) " "))
            ;; Produces warning in 25.x: Making foo local to bar while let-bound
