@@ -298,9 +298,11 @@ class PdbBreak:
             func(**testargs)
         except BdbQuit:
             pass
-        except Exception:
-            self._l and self._l.printback()
-            raise
+        except Exception as exc:
+            from _pytest.outcomes import Exit
+            if not isinstance(exc, Exit) or exc.msg != "Quitting debugger":
+                self._l and self._l.printback()
+                raise
         finally:
             inst.quitting = True
             sys.settrace(None)

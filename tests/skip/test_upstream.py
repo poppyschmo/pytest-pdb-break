@@ -1,6 +1,22 @@
 import pytest
 
 
+def test_debugger_quit_msg(tmpdir):
+    """Ensure wording of msg
+    ``runcall_until`` may fail or mislead otherwise
+    """
+    from _pytest.debugging import pytestPDB
+    from unittest.mock import patch, Mock
+    with patch("_pytest.debugging.pytestPDB._pluginmanager"), \
+            patch("_pytest.config.create_terminal_writer"), \
+            patch("_pytest.outcomes.exit") as m_exit:
+        cls = pytestPDB
+        inst = cls._init_pdb()
+        inst.botframe = Mock()
+        inst.set_quit()
+        m_exit.assert_called_with("Quitting debugger")
+
+
 def test_py_local_stat(tmpdir, monkeypatch):
     """LocalPath and pathlib.Path objects aren't fully compatible"""
     import py
