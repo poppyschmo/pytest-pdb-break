@@ -708,3 +708,14 @@ def test_sertall():
         inst.sertall("atag")
     assert exc_info.match("(2)")
     assert "AssertionError: 2" in inst.out[-1]
+    #
+    # Whitespace
+    serts.clear()
+    serts.append("\nTrue\n")
+    inst.sertall("atag")
+    serts.clear()
+    serts.append(["\nFalse\n", "\n2 + 2\n"])
+    with pytest.raises(AssertionError) as exc_info:
+        inst.sertall("atag")
+    assert exc_info.match("(4)")
+    assert "AssertionError: 4" in inst.out[-1]

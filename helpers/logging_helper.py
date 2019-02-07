@@ -237,9 +237,10 @@ class PpLogger(logging.Logger):
         try:
             for exp in exprs:
                 if isinstance(exp, str):
+                    exp = exp.strip()
                     readable = f"assert {exp}, {repr(exp)}"
                 else:
-                    readable = f"assert {exp[0]}, {exp[1]}"
+                    readable = f"assert {exp[0].strip()}, {exp[1].strip()}"
                 exec(readable, self._get_updated_globals(caller),
                      caller.f_locals)
         except AssertionError:
