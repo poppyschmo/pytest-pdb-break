@@ -27,6 +27,7 @@
     pytest-pdb-break-test-get-node-id
     pytest-pdb-break-test-get-args
     pytest-pdb-break-test-get-modified-setup-code
+    pytest-pdb-break-test-get-proc-name
     pytest-pdb-break-test-minor-mode
     pytest-pdb-break-test-main-command-basic
     pytest-pdb-break-test-main-command-completion))
@@ -639,6 +640,28 @@ class TestFoo:
         (backward-char (length pytest-pdb-break--setup-code-reassignment))
         (should (looking-at-p (regexp-quote
                                pytest-pdb-break--setup-code-reassignment)))))))
+
+(ert-deftest pytest-pdb-break-test-get-proc-name ()
+  ;; Eval: (compile "make PAT=get-proc-name")
+  (pytest-pdb-break-test-with-tmpdir
+   (pytest-pdb-break-test-with-python-buffer
+    (let ((sample-source (nth 1 pytest-pdb-break-test--get-node-id-sources)))
+      (insert sample-source)
+      (write-file "sample.py"))
+    (ert-info ("Proc reflects buffer name")
+      (let ((rv (pytest-pdb-break--get-proc-name)))
+        (should-not (get-buffer "*pytest-PDB[sample.py]*"))
+        (should (string= rv  "pytest-PDB[sample.py]"))))
+    (ert-info ("Correct signal raised")
+      (let* ((buf (get-buffer-create "*pytest-PDB[sample.py]*"))
+             (proc (start-process "pytest-PDB[sample.py]" buf "sleep" "10"))
+             (exc (should-error (pytest-pdb-break--get-proc-name))))
+        (should (eq (car exc) 'pytest-pdb-break-process-exists))
+        (should (string= (process-name proc) (cadr exc)))
+        (when (process-live-p proc)
+          (set-process-query-on-exit-flag proc nil)
+          (kill-process proc)
+          (kill-buffer buf)))))))
 
 (ert-deftest pytest-pdb-break-test-minor-mode ()
   ;; Eval: (compile "make PAT=minor-mode")

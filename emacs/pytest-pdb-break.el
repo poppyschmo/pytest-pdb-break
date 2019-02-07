@@ -220,6 +220,19 @@ del _wrap_pyel
   (concat python-shell-completion-setup-code
           pytest-pdb-break--setup-code-addendum))
 
+(define-error 'pytest-pdb-break-process-exists
+  "Live process already exists" 'error)
+
+(defun pytest-pdb-break--get-proc-name ()
+  "Generate a process name and ensure it's available."
+  (let* ((python-shell-buffer-name "pytest-PDB")
+         (proc-name (python-shell-get-process-name 'dedicated))
+         (proc-buffer-name (format "*%s*" proc-name)))
+    ;; Caller may opt to pop to existing proc's buffer
+    (when (comint-check-proc proc-buffer-name)
+      (signal 'pytest-pdb-break-process-exists (list proc-name)))
+    proc-name))
+
 (defvar-local pytest-pdb-break--process nil)
 (defvar-local pytest-pdb-break--parent-buffer nil)
 
@@ -253,14 +266,9 @@ del _wrap_pyel
 NODE-ID-PARTS is a list of pytest node-id components."
   (interactive (list (line-number-at-pos) (pytest-pdb-break--get-node-id)))
   (let* ((process-environment (append process-environment nil))
-         (python-shell-buffer-name "pytest-PDB")
-         (proc-name (python-shell-get-process-name 'dedicated))
-         (proc-buffer-name (format "*%s*" proc-name)))
+         (proc-name (pytest-pdb-break--get-proc-name)))
     (defvar python-shell--interpreter)
     (defvar python-shell--interpreter-args)
-    ;; Maybe pop to existing proc's buffer instead?
-    (when (comint-check-proc proc-buffer-name)
-      (error "%s is already running" proc-buffer-name))
     (let* ((pytest-exe (pytest-pdb-break-get-pytest-executable))
            (pyexe (pytest-pdb-break-get-python-interpreter pytest-exe))
            (python-shell-extra-pythonpaths
@@ -279,7 +287,7 @@ NODE-ID-PARTS is a list of pytest node-id components."
         ;; Allow "calculate-" funcs to consider "python-shell-" options and
         ;; modify process-environment and exec-path accordingly
         (python-shell-with-environment
-         (setq buffer (apply #'make-comint-in-buffer proc-name proc-buffer-name
+         (setq buffer (apply #'make-comint-in-buffer proc-name nil
                              pytest-exe nil args))
          ;; Only python- prefixed local vars get cloned in child buffer
          (with-current-buffer buffer
