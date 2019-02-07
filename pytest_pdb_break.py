@@ -136,6 +136,11 @@ def pytest_configure(config):
     if config.getoption("pdb_break_complete"):
         if pdbcls and config.pluginmanager.is_registered(pdbcls):
             raise RuntimeError("--complete is not compatible with --pdbcls")
+        elif "complete" in pytestPDB._pdb_cls.__dict__:
+            from warnings import warn
+            cls = pytestPDB._pdb_cls
+            warn("Ignoring option --complete because "
+                 f"{cls.__module__}.{cls.__name__}.complete is defined")
         else:
             add_completion(config)
     config.pluginmanager.register(PdbBreak(wanted, config), "pdb_break")

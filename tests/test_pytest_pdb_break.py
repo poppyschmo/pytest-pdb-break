@@ -183,10 +183,15 @@ def test_invalid_arg(testdir_setup):
 
 @pytest.mark.parametrize("opts", [("--trace",),
                                   ("--pdbcls=pdb:Pdb", "--complete")])
-def test_compat_usage(testdir_setup, opts):
+def test_compat_usage(testdir_setup, recwarn, opts):
     result = testdir_setup.runpytest(*opts, "--break=2")
     assert result.ret == 3
     result.stdout.fnmatch_lines("INTERNALERROR>*RuntimeError*")
+
+    if ("--complete" in opts
+            and "complete" in pytest.set_trace.__self__._pdb_cls.__dict__):
+        w = recwarn.pop(UserWarning)
+        assert "Ignoring" in str(w.message)
 
 
 def test_compat_invoke_same_before(testdir_setup):
@@ -557,6 +562,12 @@ def test_completion_commands_basic(testdir_setup):
             assert localvar
     """)
 
+    # Complete method already present
+    if "complete" in pytest.set_trace.__self__._pdb_cls.__dict__:
+        result = testdir_setup.runpytest_subprocess("--complete", "--break=1")
+        result.stderr.fnmatch_lines("*UserWarning*Ignoring*--complete*")
+        return
+
     # Adding our completer doesn't break builtin cmd.Cmd completion
     pe = testdir_setup.spawn_pytest("--complete --break=test_file.py:3",
                                     expect_timeout=1.0)
@@ -622,6 +633,12 @@ def test_completion_commands_interact(testdir_setup):
             assert True
             assert localvar
     """)
+
+    # Complete method already present
+    if "complete" in pytest.set_trace.__self__._pdb_cls.__dict__:
+        result = testdir_setup.runpytest_subprocess("--complete", "--break=1")
+        result.stderr.fnmatch_lines("*UserWarning*Ignoring*--complete*")
+        return
 
     # Adding our completer doesn't break builtin cmd.Cmd completion
     pe = testdir_setup.spawn_pytest("--complete --break=test_file.py:3",
