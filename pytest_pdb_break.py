@@ -385,9 +385,13 @@ def add_completion(config):
 
     config.add_cleanup(restore)
 
+    import cmd
     import rlcompleter
-    from code import InteractiveConsole
+    from code import InteractiveConsole, InteractiveInterpreter  # lhs=subcls
     from itertools import takewhile, count, filterfalse
+    the_usual = [InteractiveConsole.raw_input.__code__,  # normal stdin
+                 InteractiveInterpreter.runcode.__code__,  # editor hacks
+                 cmd.Cmd.onecmd.__code__]  # "not interactive" sentinel
 
     class PdbComplete(orig):
         def __init__(self, *args, **kwargs):
@@ -403,15 +407,18 @@ def add_completion(config):
                 if state == 0:
                     ns = self.curframe.f_globals.copy()
                     ns.update(self.curframe.f_locals)
-                    icon = sys._getframe().f_back.f_locals.get("self")
+                    whence = sys._getframe().f_back
+                    while whence.f_back and whence.f_code not in the_usual:
+                        whence = whence.f_back
+                    icon = whence.f_locals.get("self")
                     if icon and isinstance(icon, InteractiveConsole):
                         ns.update(icon.locals)
                     else:
-                        icon = False
+                        icon = None
                     cp = rlcompleter.Completer(ns).complete
                     first = takewhile(bool, (cp(text, m) for m in count()))
                     self._completions = list(first)
-                    if not icon:
+                    if icon is None:
                         cp = super().complete  # cmd.Cmd
                         rest = takewhile(bool, (cp(text, m) for m in count()))
                         dif = filterfalse(self._completions.__contains__, rest)
