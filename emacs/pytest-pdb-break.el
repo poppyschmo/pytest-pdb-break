@@ -81,15 +81,15 @@ This is the root path of cloned repo, not a \"lisp\" sub directory."
       (error "Cannot find pytest-pdb-break's home directory"))))
 
 (defun pytest-pdb-break-get-pytest-executable ()
-  "Return pytest executable"
+  "Return the current pytest executable."
   (if pytest-pdb-break-pytest-executable
       pytest-pdb-break-pytest-executable
     (python-shell-with-environment
-     (let ((pytest-exe (executable-find "pytest")))
-       (if pytest-exe
-           pytest-exe
-         (error "pytest not found\nexec-path: %s\nprocess-environment: %s\n"
-                exec-path process-environment))))))
+      (let ((pytest-exe (executable-find "pytest")))
+        (if pytest-exe
+            pytest-exe
+          (error "Pytest not found\nexec-path: %s\nprocess-environment: %s\n"
+                 exec-path process-environment))))))
 
 (defvar pytest-pdb-break--tempdir nil
   "Temporary directory for this session.
@@ -111,7 +111,7 @@ Should end in a slash.")
 (defun pytest-pdb-break--create-tempdir ()
   "Return path to temporary directory."
   (when pytest-pdb-break--tempdir
-    (error "pytest-pdb-break--tempdir already set to: %s"
+    (error "Var pytest-pdb-break--tempdir already set to: %s"
            pytest-pdb-break--tempdir))
   (let ((prefix (format "emacs-%s-pytest-pdb-break-" (user-uid))))
     (setq pytest-pdb-break--tempdir (file-name-as-directory
@@ -158,7 +158,7 @@ Use INTERPRETER or `python-shell-interpreter' to run the helper script."
 (defvar pytest-pdb-break--exe-alist nil)
 
 (defun pytest-pdb-break-get-python-interpreter (pytest-exe &optional force)
-  "Return the python interpreter used by pytest-exe.
+  "Return the python interpreter used by PYTEST-EXE.
 With FORCE, update."
   (let* ((entry (assoc pytest-exe pytest-pdb-break--exe-alist))
          (value (cdr entry)))
@@ -198,8 +198,28 @@ LINE-NO and NODE-ID-PARTS are as required by the main command."
         (break (format "--break=%s:%s" (car node-id-parts) line-no)))
     (append pytest-pdb-break-extra-opts (list break nodeid))))
 
-;; FIXME only add this wrapper when pdb++ is detected. These amputee
-;; candidates most likely come courtesy of the fancycompleter package.
+(defvar pytest-pdb-break--setup-code-addendum nil)
+(defvar pytest-pdb-break--setup-code-cleanup "
+__PYTHON_EL_get_completions = _wrap_pyel(__PYTHON_EL_get_completions)
+del _wrap_pyel
+")
+
+(defun pytest-pdb-break--get-modified-setup-code ()
+  "Return revised completion setup-code."
+  (unless pytest-pdb-break--setup-code-addendum
+    (let ((srcfile (concat pytest-pdb-break--home
+                           "emacs/setup_code_wrapper.py")))
+      (with-temp-buffer
+        (let ((coding-system-for-read "utf-8"))
+          (insert-file-contents-literally srcfile))
+        (goto-char (point-max))
+        (insert pytest-pdb-break--setup-code-cleanup)
+        (setq pytest-pdb-break--setup-code-addendum
+              (buffer-string)))))
+  (concat python-shell-completion-setup-code
+          pytest-pdb-break--setup-code-addendum))
+
+;; XXX currently unused, likely to be removed
 (defun pytest-pdb-break-ad-around-get-completions (orig process import input)
   "Advice wrapper for ORIG `python-shell-completion-get-completions'.
 If PROCESS is ours, prepend INPUT to results. With IMPORT, ignore."
@@ -231,19 +251,16 @@ If PROCESS is ours, prepend INPUT to results. With IMPORT, ignore."
           (unless (process-live-p proc)
             (error "No live process associated with %S" (current-buffer)))
           (cl-pushnew proc pytest-pdb-break-processes)
-          (advice-add 'python-shell-completion-get-completions :around
-                      #'pytest-pdb-break-ad-around-get-completions)
           (setq-local python-shell-completion-native-enable nil)
+          (setq-local python-shell-completion-setup-code
+                      (pytest-pdb-break--get-modified-setup-code))
           (add-hook 'kill-buffer-hook
                     (lambda nil (pytest-pdb-break-mode -1))
                     nil t))
       ;; Forget proc even if it's still running
       (setq pytest-pdb-break-processes
             (seq-filter #'process-live-p ; proc may be nil
-                        (remq proc pytest-pdb-break-processes)))
-      (unless pytest-pdb-break-processes
-        (advice-remove 'python-shell-completion-get-completions
-                       'pytest-pdb-break-ad-around-get-completions)))))
+                        (remq proc pytest-pdb-break-processes))))))
 
 ;;;###autoload
 (defun pytest-pdb-break-here (line-no node-id-parts)
