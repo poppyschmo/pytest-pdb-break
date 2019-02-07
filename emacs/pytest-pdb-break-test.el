@@ -614,6 +614,7 @@ class TestFoo:
 
 (ert-deftest pytest-pdb-break-test-minor-mode ()
   ;; Eval: (compile "make PAT=minor-mode")
+  (setq pytest-pdb-break--setup-code-addendum nil)
   (should-not pytest-pdb-break-processes)
   (should-not (buffer-live-p nil)) ; reminder (no error)
   (should-not (process-live-p nil))
@@ -633,9 +634,8 @@ class TestFoo:
                            ,x)
                          (while (process-live-p proc) (sleep-for 0.01))
                          ,y)))
-                (adchk () '(advice-member-p
-                            'pytest-pdb-break-ad-around-get-completions
-                            #'python-shell-completion-get-completions)))
+                (codechk () '(local-variable-p
+                              'python-shell-completion-setup-code)))
     (ert-info ("Error when buffer has no process")
       (with-temp-buffer
         (let ((exc (should-error (pytest-pdb-break-mode +1))))
@@ -653,10 +653,10 @@ class TestFoo:
     (ert-info ("Normal, no *--proc var")
       (rip (inside (pytest-pdb-break-mode +1)
                    (should (memq proc pytest-pdb-break-processes))
-                   (should (adchk))
+                   (should (codechk))
                    (should (local-variable-p 'kill-buffer-hook))
                    (should-not (eq t (car kill-buffer-hook))))
-           (outside (should-not (adchk))
+           (outside (should-not (codechk))
                     (should-not pytest-pdb-break-processes))))
     (ert-info ("Normal, with *--proc, parbuf prop")
       (let ((parbuf (current-buffer)))
@@ -677,12 +677,12 @@ class TestFoo:
                        (should (seq-set-equal-p pytest-pdb-break-processes
                                                 (list proc s1 t1))))
                      (pytest-pdb-break-mode -1)
+                     (should (codechk))  ; buffer-local var not removed
                      (should (equal pytest-pdb-break-processes (list s1))))
              (outside (kill-process s1)
                       (should-not pytest-pdb-break--process)
-                      (should (adchk))
                       (pytest-pdb-break-mode -1)
-                      (should-not (adchk))
+                      (should-not (codechk))
                       (should-not (local-variable-p 'kill-buffer-hook))))))))
 
 ;; TODO find the proper built-in way to do this

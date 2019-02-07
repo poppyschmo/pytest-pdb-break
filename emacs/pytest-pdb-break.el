@@ -220,25 +220,6 @@ del _wrap_pyel
   (concat python-shell-completion-setup-code
           pytest-pdb-break--setup-code-addendum))
 
-;; XXX currently unused, likely to be removed
-(defun pytest-pdb-break-ad-around-get-completions (orig process import input)
-  "Advice wrapper for ORIG `python-shell-completion-get-completions'.
-If PROCESS is ours, prepend INPUT to results. With IMPORT, ignore."
-  (let ((rv (funcall orig process import input)))
-    (if (or import
-            (not (memq process pytest-pdb-break-processes))
-            (null rv)
-            (string= input "")
-            (not (memq ?. (append input nil)))) ; not dotty
-        rv
-      (when (not (cdr rv)) ; |rv| = 1
-        (if (string-match-p "\\.__$" (car rv))
-            (setq rv (funcall orig process import (car rv)))
-          (setq input "")))
-      (when (string-match "^\\(.+\\.\\)[^.]+$" input)
-        (setq input (match-string 1 input)))
-      (mapcar (apply-partially #'concat input) rv))))
-
 (defvar-local pytest-pdb-break--process nil)
 (defvar-local pytest-pdb-break--parent-buffer nil)
 
