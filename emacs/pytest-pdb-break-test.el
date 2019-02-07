@@ -28,6 +28,7 @@
     pytest-pdb-break-test-get-python-interpreter
     pytest-pdb-break-test-get-node-id
     pytest-pdb-break-test-get-args
+    pytest-pdb-break-test-get-modified-setup-code
     pytest-pdb-break-test-minor-mode
     pytest-pdb-break-test-main-command))
 
@@ -611,6 +612,29 @@ class TestFoo:
                          "--break=/tmp/a.py:9"
                          "/tmp/a.py::test_a")))
         (should (equal pytest-pdb-break-extra-opts '("-p" "no:foo")))))))
+
+(ert-deftest pytest-pdb-break-test-get-modified-setup-code ()
+  ;; Eval: (compile "make PAT=get-modified-setup-code")
+  (setq pytest-pdb-break--setup-code-addendum nil)
+  (pytest-pdb-break-test-with-tmpdir
+   (let ((orig-home pytest-pdb-break--home))
+     (ert-info ("Relies on homer, source file must exist")
+       (let* ((pytest-pdb-break--home default-directory)
+              (exc (should-error (pytest-pdb-break--get-modified-setup-code))))
+         (should (member (car exc) '(file-missing file-error)))))
+     ;; No condition-case handler for resetting to nil
+     (should (equal orig-home pytest-pdb-break--home))
+     (should-not pytest-pdb-break--setup-code-addendum)))
+  (ert-info ("Ordering of source snippets")
+    (with-temp-buffer
+      (insert (pytest-pdb-break--get-modified-setup-code))
+      (goto-char (point-min))
+      (ert-info ("Orig first, source second, call-snippet last")
+        (should (search-forward python-shell-completion-setup-code nil t))
+        (should (search-forward pytest-pdb-break--setup-code-addendum nil t))
+        (backward-char (length pytest-pdb-break--setup-code-reassignment))
+        (should (looking-at-p (regexp-quote
+                               pytest-pdb-break--setup-code-reassignment)))))))
 
 (ert-deftest pytest-pdb-break-test-minor-mode ()
   ;; Eval: (compile "make PAT=minor-mode")
