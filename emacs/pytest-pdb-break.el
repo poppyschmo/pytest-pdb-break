@@ -207,7 +207,8 @@ del _wrap_pyel
 (defun pytest-pdb-break--get-modified-setup-code ()
   "Return revised completion setup-code."
   (unless pytest-pdb-break--setup-code-addendum
-    (let ((srcfile (concat pytest-pdb-break--home
+    (let ((srcfile (concat (or pytest-pdb-break--home
+                               (pytest-pdb-break--homer))
                            "emacs/setup_code_wrapper.py")))
       (with-temp-buffer
         (let ((coding-system-for-read "utf-8"))
