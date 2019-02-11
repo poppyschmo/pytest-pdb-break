@@ -152,7 +152,9 @@ def test_fortify_location(testdir_ast):
     assert filename.exists()
     rv = fortify_location(filename, 2)
     assert rv.equals(BreakLoc(filename, 2, None,
-                              class_name=None, func_name="somefunc"))
+                              class_name=None,
+                              func_name="somefunc",
+                              decked=None))
     rv = fortify_location(filename, 6)
     assert rv.equals(BreakLoc(filename, 6, None,
                               class_name="C", func_name="f"))
@@ -161,6 +163,11 @@ def test_fortify_location(testdir_ast):
                               class_name="TestClass", func_name="test_foo"))
     rv = fortify_location(filename, 17)
     assert rv is None
+    rv = fortify_location(filename, 21)
+    assert rv.equals(BreakLoc(filename, 21, None,
+                              class_name=None,
+                              func_name="wrapped",
+                              decked=True))
 
 
 def test_invalid_arg(testdir_setup):
@@ -185,6 +192,9 @@ def test_invalid_arg(testdir_setup):
     td.makepyfile(test_otherfile="""
         def test_bar():
             assert True
+
+        def not_a_test():
+            return 1
     """)
     result = td.runpytest("--break=1")
     assert result.ret == 3
@@ -201,6 +211,13 @@ def test_invalid_arg(testdir_setup):
         "->*assert True"
     ])
     pe.sendline("c")  # requested line is adjusted to something breakable
+    pe.expect(EOF)
+
+    # Provided location is not a test
+    result = td.runpytest("--break=5", "test_otherfile.py")
+    assert result.ret == 3
+    result.stdout.fnmatch_lines("INTERNALERROR>*RuntimeError: "
+                                "*outside of test function*")
 
 
 @pytest.mark.parametrize("opts", [("--trace",),
@@ -554,6 +571,52 @@ def test_unittest(testdir_setup):
     befs.fnmatch_lines("*>*/test_file.py(4)test_foo()")
     pe.sendline("c")
     pe.expect(EOF)
+
+
+def test_elsewhere_fixture_simple(testdir_setup):
+    testdir_setup.makepyfile(test_file="""
+        import pytest
+
+        @pytest.fixture
+        def fixie():
+            return True        # <- line 5
+
+        def test_foo(fixie):
+            assert fixie
+    """)
+    pe = testdir_setup.spawn_pytest("--break=test_file.py:5")
+    pe.expect(prompt_re)
+    befs = LineMatcher(unansi(pe.before))
+    befs.fnmatch_lines(["*>*/test_file.py(5)fixie()", "->*# <- line 5"])
+    pe.sendline("c")
+    pe.expect(EOF)
+    befs = LineMatcher(unansi(pe.before))
+    befs.fnmatch_lines("*1 passed*")
+
+
+@pytest.mark.parametrize("lnum", [5, 7])
+def test_elsewhere_fixture_with_yield(testdir_setup, lnum):
+    testdir_setup.makepyfile(test_file="""
+        import pytest
+
+        @pytest.fixture
+        def fixie():
+            somevar = 1        # <- line 5
+            yield somevar
+            del somevar        # <- line 7
+
+        def test_foo(fixie):
+            assert fixie
+    """)
+    pe = testdir_setup.spawn_pytest(f"--break=test_file.py:{lnum}")
+    pe.expect(prompt_re)
+    befs = LineMatcher(unansi(pe.before))
+    befs.fnmatch_lines([f"*>*/test_file.py({lnum})fixie()",
+                        f"->*# <- line {lnum}"])
+    pe.sendline("c")
+    pe.expect(EOF)
+    befs = LineMatcher(unansi(pe.before))
+    befs.fnmatch_lines("*1 passed*")
 
 
 def test_completion_commands_basic(testdir_setup):

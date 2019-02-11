@@ -18,7 +18,7 @@ import ast
 import pytest
 import attr
 from pathlib import Path
-
+from _pytest.runner import runtestprotocol
 
 try:
     if tuple(int(s) for s in pytest.__version__.split(".")) < (4, 0):
@@ -55,6 +55,7 @@ class BreakLoc:
     class_name = attr.ib(default=None, repr=False, cmp=False, kw_only=True)
     func_name = attr.ib(default=None, repr=False, cmp=False, kw_only=True)
     param_id = attr.ib(default=None, repr=False, cmp=False, kw_only=True)
+    decked = attr.ib(default=None, repr=False, cmp=False, kw_only=True)
 
     def equals(self, other):
         """True if class, func, param fields are equal.
@@ -173,6 +174,7 @@ class PdbBreak:
         self.config = config
         self.wanted = self._resolve_wanted(wanted)
         self.targets = None
+        self.elsewhere = None
         self.last_pdb = None
 
     def _resolve_wanted(self, wanted):
@@ -233,13 +235,26 @@ class PdbBreak:
                 msg = "unable to determine breakpoint item"
                 raise RuntimeError(msg)
             self._l and self._l.pspore("targets")
+        elif (not session.config.option.collectonly
+              and self.wanted.decked
+              and self.wanted.func_name in
+              session._fixturemanager._arg2fixturedefs):
+            self.elsewhere = [i for i in session.items if
+                              self.wanted.func_name in i.fixturenames]
         else:
-            # TODO make these happen:
-            # 1. For fixtures, enter pdb in pytest_fixture_setup
-            # 2. For hooks (pytest_*), enter right here
-            # 3. Otherwise raise
             msg = "unable to handle breakpoints outside of test functions"
             raise RuntimeError(msg)
+
+    def pytest_runtest_protocol(self, item, nextitem):
+        if not self.elsewhere or item not in self.elsewhere:
+            return None
+        item.ihook.pytest_runtest_logstart(nodeid=item.nodeid,
+                                           location=item.location)
+        self.runcall_until(runtestprotocol, item=item, nextitem=nextitem)
+        item.ihook.pytest_runtest_logfinish(nodeid=item.nodeid,
+                                            location=item.location)
+        self.elsewhere.remove(item)
+        return True
 
     def trace_handoff(self, frame, event, arg):
         """Defer to the "real" trace_dispatch after arriving at target.
@@ -295,28 +310,28 @@ class PdbBreak:
         except KeyError:
             capfix = None
         self._l and self._l.pspore("pre_capfix")
-        if capfix:
+        if capfix or func is runtestprotocol:
             capman = self.config.pluginmanager.getplugin("capturemanager")
             self._l and self._l.pspore("cap_top")
-            if capfix == "capsys" and not capman.is_globally_capturing():
-                raise RuntimeError("Cannot break inside tests using capsys "
-                                   "when global capturing is disabled")
-            capfix = testargs[capfix]
+            if capfix:
+                if capfix == "capsys" and not capman.is_globally_capturing():
+                    raise RuntimeError("Cannot break inside tests using capsys"
+                                       " while global capturing is disabled")
+                capfix = testargs[capfix]
 
             def preloop(_inst):
-                # XXX runs after .setup, but global capture still active?
                 super((type(_inst)), _inst).preloop()
+                capman._global_capturing.pop_outerr_to_orig()
                 capman.suspend_global_capture(in_=True)
 
             def postloop(_inst):
                 super((type(_inst)), _inst).postloop()
-                capfix._resume()
+                capfix and capfix._resume()
 
             inst.__dict__["preloop"] = preloop.__get__(inst)
             inst.__dict__["postloop"] = postloop.__get__(inst)
-            # TODO figure out why resumed state isn't already active
-            # Maybe we have to run some hooks?
-            capfix._resume()
+            # TODO add test to show that resumed isn't already active
+            capfix and capfix._resume()
             self._l and self._l.pspore("cap_bot")
         from bdb import BdbQuit
         inst.reset()
@@ -422,7 +437,8 @@ def fortify_location(filename, line_no):
     return BreakLoc(file=filename, lnum=line_no, name=None,
                     class_name=cls.name if cls else None,
                     func_name=func.name,
-                    param_id=None)
+                    param_id=None,
+                    decked=bool(func.decorator_list))
 
 
 def add_completion(config):

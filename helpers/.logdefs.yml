@@ -55,15 +55,18 @@ runcall_until:
     assertions:
       - self.last_pdb
   pre_capfix:
-    kwargs:
-      testargs: testargs
+    args:
+      - func
+      - testargs
   cap_top:
     kwargs:
-      prevstdout: sys.stdout
+      "global_cap": vars(capman._global_capturing)
+      "sys.stdout (before)": sys.stdout
   cap_bot:
+    args:
+      - capman._method
     kwargs:
-      stdout: type(sys.stdout)
-      cap_method: capman._method
+      "sys.stdout (after)": type(sys.stdout)
   post_capfix:
     args:
       - inst.botframe
@@ -71,7 +74,7 @@ runcall_until:
 pytest_pyfunc_call:
   1:
     assertions:
-      - self.last_pdb is None
+      # - self.last_pdb is None
       - not pyfuncitem._isyieldedfunction()
     args:
       - pyfuncitem.name

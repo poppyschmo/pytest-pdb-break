@@ -140,3 +140,27 @@ def test_fortify_location_against_parso(testdir_ast):
                               class_name="TestClass", func_name="test_foo"))
     rv = fortify_location(filename, 17)
     assert rv is None
+
+
+def test_compat_pdb_cls_init(testdir_setup):
+    # _pytest.debugging.pytest_configure runs before ours does
+    testdir_setup.makepyfile(test_file="""
+        def test_foo():
+            assert True
+    """)
+
+    def standin(w, c):
+        from _pytest.debugging import pytestPDB
+        assert pytestPDB._pluginmanager
+        assert pytestPDB._pluginmanager is c.pluginmanager
+        print(c.pluginmanager)
+        return object()
+
+    from unittest.mock import patch
+    with patch("pytest_pdb_break.PdbBreak", wraps=standin):
+        result = testdir_setup.runpytest("--capture=no",
+                                         "--break=test_file.py:2")
+    result.assert_outcomes(passed=1)
+    result.stdout.fnmatch_lines("<*PytestPluginManager object at *>")
+    outfile = testdir_setup.tmpdir.join("stdout.out")
+    outfile.write("\n".join(result.outlines))

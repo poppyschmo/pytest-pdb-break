@@ -129,7 +129,11 @@ def source_ast():
 
         SOME_GLOBAL = "test"
 
-        if __name__ == "__main__":     # <- line 19
+        @wrapper.attr                  # <- line 19
+        def wrapped():
+            print("wrapped")
+
+        if __name__ == "__main__":     # <- line 23
             pass
     """).strip()
     return source
