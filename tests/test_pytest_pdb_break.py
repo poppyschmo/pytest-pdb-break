@@ -476,6 +476,9 @@ def test_class_gap(testdir_class):
         "->*# line 12"
     ])
     pe.sendline("c")
+    pe.expect(EOF)
+    befs = LineMatcher(unansi(pe.before))
+    befs.fnmatch_lines("*1 failed*")
 
 
 def test_class_gap_named(testdir_class):
@@ -494,6 +497,8 @@ def test_class_gap_named(testdir_class):
     ])
     pe.sendline("c")
     pe.expect(EOF)
+    befs = LineMatcher(unansi(pe.before))
+    befs.fnmatch_lines("*1 failed*")
 
 
 def test_lower_callee(testdir_setup):

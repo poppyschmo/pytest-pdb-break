@@ -304,13 +304,13 @@ class PdbBreak:
             inst = self.last_pdb
         else:
             inst = self.last_pdb = pytestPDB._init_pdb()
-        # XXX maybe only provide context for capsys, ignore others?
         try:
             capfix = (testargs.keys() & capture_fixtures).pop()
         except KeyError:
             capfix = None
         self._l and self._l.pspore("pre_capfix")
         if capfix or func is runtestprotocol:
+            # XXX this is currently a mess; assumes a lot, e.g., no rcLines
             capman = self.config.pluginmanager.getplugin("capturemanager")
             self._l and self._l.pspore("cap_top")
             if capfix:
@@ -320,17 +320,22 @@ class PdbBreak:
                 capfix = testargs[capfix]
 
             def preloop(_inst):
+                # TODO figure out why suspend from pytest's pdb.setup() gets
+                # undone. This usually runs soon afterwards.
                 super((type(_inst)), _inst).preloop()
                 capman._global_capturing.pop_outerr_to_orig()
                 capman.suspend_global_capture(in_=True)
 
             def postloop(_inst):
+                # Runs after do_* cmds that return 1, like next, step,
+                # continue, until (but not jump)
                 super((type(_inst)), _inst).postloop()
                 capfix and capfix._resume()
 
             inst.__dict__["preloop"] = preloop.__get__(inst)
             inst.__dict__["postloop"] = postloop.__get__(inst)
-            # TODO add test to show that resumed isn't already active
+            # TODO add test showing that fixture may be suspended; we need it
+            # to continue capturing till handoff
             capfix and capfix._resume()
             self._l and self._l.pspore("cap_bot")
         from bdb import BdbQuit

@@ -164,3 +164,49 @@ def test_compat_pdb_cls_init(testdir_setup):
     result.stdout.fnmatch_lines("<*PytestPluginManager object at *>")
     outfile = testdir_setup.tmpdir.join("stdout.out")
     outfile.write("\n".join(result.outlines))
+
+
+setup_source = """
+    import sys
+    import pytest
+    from _pytest.debugging import pytestPDB
+
+    def wrap_init(orig):
+        def wrapper(*args, **kwargs):
+            def _setup(i, *a):
+                wrap_init.last_f = sys._getframe()
+                return old_setup(*a)
+
+            inst = orig(*args, **kwargs)
+            old_setup = inst.setup
+            inst.setup = _setup.__get__(inst)
+            return inst
+        return wrapper
+
+    @pytest.hookimpl(tryfirst=True)
+    def pytest_runtestloop(*args):
+        pytestPDB._init_pdb = wrap_init(pytestPDB._init_pdb)
+"""
+
+
+@pytest.mark.parametrize("argstr", ["--trace", "--break=3"])
+def test_pdb_setup_calls(testdir_setup, argstr):
+    """Pytest's modified ``pdb.setup`` is called as expected
+    From dispatch_line -> user_line -> interaction -> this"""
+    from conftest import extend_conftest
+    extend_conftest(testdir_setup, setup_source)
+    stackout = testdir_setup.tmpdir.join("args.out")
+    testdir_setup.makepyfile(test_file="""
+        from traceback import print_stack
+        def test_foo():
+            from conftest import wrap_init
+            with open(%r, "w") as outfile:
+                print_stack(wrap_init.last_f, 5, file=outfile)
+    """ % stackout.strpath)
+    from pexpect import EOF
+    pe = testdir_setup.spawn_pytest(argstr)
+    pe.expect(prompt_re)
+    pe.sendline("c")
+    pe.expect(EOF)
+    lines = LineMatcher(stackout.readlines())
+    lines.fnmatch_lines(["*user_line*", "*interaction*"])

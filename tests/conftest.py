@@ -72,6 +72,14 @@ def testdir_setup(testdir):
     return testdir
 
 
+def extend_conftest(td, rest):
+    # TD is a testdir intance
+    from textwrap import dedent
+    conftest = td.tmpdir.join("conftest.py")
+    data = dedent(rest).strip()
+    conftest.write(data=f"\n{data}", mode="a")
+
+
 @pytest.fixture
 def testdir_two_funcs(testdir_setup):
     # Note: unlike breakpoints, location line numbers are 0 indexed
