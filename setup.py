@@ -1,7 +1,7 @@
 from setuptools import setup
 
 setup(
-    name="pytest_pdb_break",
+    name="pytest-pdb-break",
     version="0.0.1",
     license="Apache 2.0",
     description="A pytest command-line option for pdb breakpoints",
