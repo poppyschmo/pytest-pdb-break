@@ -105,3 +105,37 @@ def testdir_class(testdir_setup):
             assert hasattr(x, 'check')
     """)
     return testdir_setup
+
+
+@pytest.fixture
+def source_ast():
+    from textwrap import dedent
+    source = dedent("""
+        def somefunc():                # <- line 1
+            print("somefunc")
+
+        class C:                       # <- line 4
+            def f(self):
+                return True
+
+        class TestClass:               # <- line 8
+            def test_foo(self):
+                somevar = False
+
+                def inner(x):          # <- line 12
+                    return not x
+
+                assert inner(somevar)
+
+        SOME_GLOBAL = "test"
+
+        if __name__ == "__main__":     # <- line 19
+            pass
+    """).strip()
+    return source
+
+
+@pytest.fixture
+def testdir_ast(testdir_setup, source_ast):
+    testdir_setup.makepyfile(source_ast)
+    return testdir_setup

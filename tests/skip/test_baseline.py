@@ -80,3 +80,63 @@ def test_completion_commands(testdir_setup):
     befs = LineMatcher(unansi(pe.before))
     befs.fnmatch_lines("*>*/test_file.py(2)test_foo()")
     pe.sendline("c")
+
+
+def fortify_location_with_parso(filename, line_no):
+    """Use parso to find function (and maybe class) name."""
+    try:
+        import parso
+    except ImportError:
+        return None
+    from pytest_pdb_break import BreakLoc
+    root = parso.parse(filename.read_text())
+    leaf = root.get_leaf_for_position((line_no, 0))
+
+    def find(node, tipo):
+        while node.type != tipo:
+            if node is root:
+                return None
+            node = node.parent
+        return node
+
+    func = find(leaf, "funcdef")
+    if func is None:
+        return None
+
+    cand = func
+    while cand and not cand.name.value.startswith("test_"):
+        cand = find(cand.parent, "funcdef")
+    if cand:
+        func = cand
+
+    cls = find(func, "classdef")
+
+    return BreakLoc(file=filename, lnum=line_no, name=None,
+                    class_name=cls.name.value if cls else None,
+                    func_name=func.name.value,
+                    param_id=None)
+
+
+def test_fortify_location_against_parso(testdir_ast):
+    try:
+        import parso  # noqa: F401
+    except ImportError:
+        pytest.skip("Parso not installed")
+    fortify_location = fortify_location_with_parso
+    from pathlib import Path
+    from pytest_pdb_break import BreakLoc
+    filename = Path(
+        testdir_ast.tmpdir / "test_fortify_location_against_parso.py"
+    )
+    assert filename.exists()
+    rv = fortify_location(filename, 2)
+    assert rv.equals(BreakLoc(filename, 2, None,
+                              class_name=None, func_name="somefunc"))
+    rv = fortify_location(filename, 6)
+    assert rv.equals(BreakLoc(filename, 6, None,
+                              class_name="C", func_name="f"))
+    rv = fortify_location(filename, 13)
+    assert rv.equals(BreakLoc(filename, 13, None,
+                              class_name="TestClass", func_name="test_foo"))
+    rv = fortify_location(filename, 17)
+    assert rv is None

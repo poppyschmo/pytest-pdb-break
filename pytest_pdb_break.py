@@ -13,6 +13,8 @@
 # limitations under the License.
 import os
 import sys
+import ast
+
 import pytest
 import attr
 from pathlib import Path
@@ -58,6 +60,16 @@ class BreakLoc:
         for k, v in kwargs.items():
             object.__setattr__(self, k, v)
         return self
+
+    def equals(self, other):
+        """True if class, func, param fields are equal.
+        This is the same as comparing ``attr.astuple()`` values but
+        leaves room for the likely addition of extraneous attrs.
+        """
+        relevant = ("class_name", "func_name", "param_id")
+        return (self == other
+                and all(getattr(self, a) == getattr(other, a) for
+                        a in relevant))
 
     @classmethod
     def from_pytest_item(cls, item):
@@ -372,6 +384,63 @@ def get_targets(filename, upper, locations):
         else:
             out += sorted(locs, key=lnumgetter)
     return deque(out)
+
+
+def _get_node_at_pos(target_line_no, node, parent=None):
+    """Return first ast node at target_line_no.
+    This is ``ast.NodeVisitor.generic_visit`` with extra breadcrumb
+    business for cycling back later, if necessary.
+    """
+    node.parent = parent
+    if hasattr(node, "lineno") and node.lineno >= target_line_no:
+        return node
+    for field, value in ast.iter_fields(node):
+        rv = None
+        if isinstance(value, list):
+            for item in value:
+                if isinstance(item, ast.AST):
+                    rv = _get_node_at_pos(target_line_no, item, node)
+                    if rv:
+                        return rv
+        elif isinstance(value, ast.AST):
+            rv = _get_node_at_pos(target_line_no, value, node)
+            if rv:
+                return rv
+
+
+def fortify_location(filename, line_no):
+    """Try to flesh out location with more specific info.
+    On success, return new BreakLoc object. Otherwise, return None.
+    """
+    try:
+        root = ast.parse(Path(filename).read_text(), filename=filename)
+    except Exception:
+        return None
+    leaf = _get_node_at_pos(line_no, root, None)
+
+    def find(node, tipo):
+        while type(node) is not tipo:
+            if node is root:
+                return None
+            node = node.parent
+        return node
+
+    func = find(leaf, ast.FunctionDef)
+    if func is None:
+        return None
+
+    cand = func
+    while cand and not cand.name.startswith("test_"):
+        cand = find(cand.parent, ast.FunctionDef)
+    if cand:
+        func = cand
+
+    cls = find(func, ast.ClassDef)
+
+    return BreakLoc(file=filename, lnum=line_no, name=None,
+                    class_name=cls.name if cls else None,
+                    func_name=func.name,
+                    param_id=None)
 
 
 def add_completion(config):

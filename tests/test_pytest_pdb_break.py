@@ -23,6 +23,17 @@ def test_breakloc(request):
     assert not loc.file.is_absolute()
     assert not loc.file.exists()
 
+    # Equality
+    assert BreakLoc("fake.py", 1, None) \
+        == BreakLoc("fake.py", 1, None, func_name="test_fake")
+    assert BreakLoc("fake.py", 1, None, func_name="test_fake") \
+        == BreakLoc("fake.py", 1, None, class_name="test_fake")
+
+    # Equals method
+    loc = BreakLoc("fake.py", 1, None, func_name="test_fake")
+    assert loc.equals(BreakLoc("fake.py", 1, None, func_name="test_fake"))
+    assert not loc.equals(BreakLoc("fake.py", 1, None))
+
     # From arg spec
     assert BreakLoc.from_arg_spec("test_loc.py:1") \
         == BreakLoc(file="test_loc.py", lnum=1, name=None)
@@ -139,6 +150,34 @@ def test_resolve_wanted(tmp_path, request):
     result = _resolve_wanted(inst, wanted)
     assert result.file.exists()
     assert result.file.is_absolute()
+
+
+def test_get_node_at_pos(source_ast):
+    from pytest_pdb_break import _get_node_at_pos
+    import ast
+    root = ast.parse(source_ast)
+    node = _get_node_at_pos(6, root)
+    assert type(node.parent) is ast.FunctionDef
+    assert node.parent.name == "f"
+    assert type(node.parent.parent) is ast.ClassDef
+    assert node.parent.parent.name == "C"
+
+
+def test_fortify_location(testdir_ast):
+    from pytest_pdb_break import fortify_location
+    filename = Path(testdir_ast.tmpdir / "test_fortify_location.py")
+    assert filename.exists()
+    rv = fortify_location(filename, 2)
+    assert rv.equals(BreakLoc(filename, 2, None,
+                              class_name=None, func_name="somefunc"))
+    rv = fortify_location(filename, 6)
+    assert rv.equals(BreakLoc(filename, 6, None,
+                              class_name="C", func_name="f"))
+    rv = fortify_location(filename, 13)
+    assert rv.equals(BreakLoc(filename, 13, None,
+                              class_name="TestClass", func_name="test_foo"))
+    rv = fortify_location(filename, 17)
+    assert rv is None
 
 
 def test_invalid_arg(testdir_setup):
