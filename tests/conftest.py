@@ -70,3 +70,38 @@ def testdir_setup(testdir):
             pytest_plugins = "pytest_pdb_break"
         """ % (str(reporoot)))
     return testdir
+
+
+@pytest.fixture
+def testdir_two_funcs(testdir_setup):
+    # Note: unlike breakpoints, location line numbers are 0 indexed
+    testdir_setup.makepyfile("""
+        def test_true_int():
+            # some comment
+            somevar = True
+            assert isinstance(True, int)   # <- line 4
+
+        def test_false_int():              # <- line 6
+            assert isinstance(False, int)
+    """)
+    return testdir_setup
+
+
+@pytest.fixture
+def testdir_class(testdir_setup):
+    testdir_setup.makepyfile("""
+    class TestClass:
+        class_attr = 1
+
+        def test_one(self):
+            '''multi
+            line docstring
+            '''
+            x = "this"                        # line 8
+            assert "h" in x
+
+        def test_two(self):
+            x = "hello"                       # line 12
+            assert hasattr(x, 'check')
+    """)
+    return testdir_setup

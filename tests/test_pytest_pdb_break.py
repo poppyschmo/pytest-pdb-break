@@ -266,21 +266,6 @@ def test_compat_invoke_after_other(testdir_setup):
     pe.sendline("c")
 
 
-@pytest.fixture
-def testdir_two_funcs(testdir_setup):
-    # Note: unlike breakpoints, location line numbers are 0 indexed
-    testdir_setup.makepyfile("""
-        def test_true_int():
-            # some comment
-            somevar = True
-            assert isinstance(True, int)   # <- line 4
-
-        def test_false_int():              # <- line 6
-            assert isinstance(False, int)
-    """)
-    return testdir_setup
-
-
 def test_two_funcs_simple(testdir_two_funcs):
     pe = testdir_two_funcs.spawn_pytest("--break=test_two_funcs_simple.py:4")
     pe.expect(prompt_re)
@@ -408,26 +393,6 @@ def test_request_object(testdir_setup):
     pe.sendline("c")
     pe.expect(r"\[100%\]")
     pe.expect(r"\b1 passed")
-
-
-@pytest.fixture
-def testdir_class(testdir_setup):
-    testdir_setup.makepyfile("""
-    class TestClass:
-        class_attr = 1
-
-        def test_one(self):
-            '''multi
-            line docstring
-            '''
-            x = "this"                        # line 8
-            assert "h" in x
-
-        def test_two(self):
-            x = "hello"                       # line 12
-            assert hasattr(x, 'check')
-    """)
-    return testdir_setup
 
 
 def test_class_simple(testdir_class):
