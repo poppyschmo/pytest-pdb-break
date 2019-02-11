@@ -150,16 +150,14 @@ def pytest_configure(config):
                  f"{cls.__module__}.{cls.__name__}.complete is defined")
         else:
             add_completion(config)
-    config.pluginmanager.register(PdbBreak(wanted, config), "pdb_break")
+    config.pluginmanager.register(PdbBreak(wanted, config), "pdb-break")
 
 
 class PdbBreak:
-    """A class namespace for this plugin, registered as "pdb_break".
+    """A class namespace for this plugin, registered as "pdb-break".
 
-    Notes:
-    1. the entrypoint mechanism registers the module_ itself as a plugin
-    2. in printed pytest output (reports, etc.) the underscore may be
-       replaced with a hyphen
+    Note: the entrypoint mechanism registers the module_ itself as a
+    plugin (meaning this module).
 
     .. _module:
        https://pluggy.readthedocs.io/en/latest/#define-and-collect-hooks
