@@ -273,7 +273,7 @@ def test_registered_pip_nopopt(testdir, source, ext_egg):
     assert rc == 0 and out and not errs
     assert json.loads(out) == {"rootdir": repo, "registered": True}
 
-    rc, out, errs = run_with_input([pyexe, "-mpytest", "--break=99"],
+    rc, out, errs = run_with_input([pyexe, "-mpytest", "--break=1"],
                                    "", repo, "pt",
                                    env_vars=dict(PYTHONPATH=ext_egg))
     assert rc == 0 and out and not errs
@@ -301,7 +301,7 @@ def test_registered_nopip_popt(testdir, source, ext_plugin, ext_fake):
 
     # Plugin not mentioned in in report
     rc, out, errs = run_with_input([pyexe, "-mpytest",
-                                    "-p", "pytest_pdb_break", "--break=99"],
+                                    "-p", "pytest_pdb_break", "--break=1"],
                                    "", repo, "pt_opt",
                                    env_vars=dict(PYTHONPATH=ext_plugin))
     assert rc == 0 and out and not errs
@@ -333,7 +333,7 @@ def test_registered_nopip_iniopt(testdir, source, ext_plugin, ext_fake):
     LineMatcher(out.splitlines()).fnmatch_lines("*--break=*")
 
     # Plugin not mentioned in in report
-    rc, out, errs = run_with_input([pyexe, "-mpytest", "--break=99"],
+    rc, out, errs = run_with_input([pyexe, "-mpytest", "--break=1"],
                                    "", repo, "pt_opt",
                                    env_vars=dict(PYTHONPATH=ext_plugin))
     assert rc == 0 and out and not errs
