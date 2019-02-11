@@ -36,18 +36,19 @@ pytest_internalerror:
       - excinfo.value
 
 pytest_runtestloop:
-  1:
+  enter:
     args:
       - self.wanted
       - locs
-  2:
-    kwargs:
-      "wanted.file": >
-        "'' -> {}".format(self.wanted.file)
-  3:
+  fortified:
+    args:
+      - self.wanted.func_name
+  rewrite:
+    args:
+      - inferred
+  targets:
     args:
       - self.targets
-      - self.target
 
 runcall_until:
   with_enter_pdb:
@@ -76,12 +77,11 @@ pytest_pyfunc_call:
       - pyfuncitem.name
       - pyfuncitem.location
       - pyfuncitem.funcargs
-      - self.target
     kwargs:
-      "loc equals target": BreakLoc.from_pytest_item(pyfuncitem) == self.target
+      "loc equals target": >
+        self.targets and BreakLoc.from_pytest_item(pyfuncitem) == self.targets[0]
   2:
     args:
-      - self.target
       - self.targets
 
 find_breakable_line:

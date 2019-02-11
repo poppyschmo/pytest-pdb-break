@@ -3,7 +3,7 @@ import pytest
 from pathlib import Path
 from unittest.mock import patch
 from _pytest.pytester import LineMatcher
-from pytest_pdb_break import BreakLoc, get_targets, PdbBreak
+from pytest_pdb_break import BreakLoc, PdbBreak
 from pexpect import EOF  # No importskip
 
 from conftest import prompt_re, unansi
@@ -77,23 +77,6 @@ def test_breakloc(request):
         item.location = ("/tmp/test_loc.py", 1, "test_loc_1")
         with pytest.raises(AssertionError):
             BreakLoc.from_pytest_item(item)
-
-
-def test_get_targets():
-    # XXX this assumes parametrized variants, whether their names are
-    # auto-assigned or not, always appear in the order they'll be called.
-    items = [BreakLoc(file="file_a", lnum=1, name="test_notfoo"),
-             BreakLoc(file="file_b", lnum=1, name="test_foo"),
-             BreakLoc(file="file_b", lnum=10, name="test_bar[one-1]"),
-             BreakLoc(file="file_b", lnum=10, name="test_bar[two-2]"),
-             BreakLoc(file="file_b", lnum=10, name="test_bar[three-3]"),
-             BreakLoc(file="file_b", lnum=99, name="test_baz"),
-             BreakLoc(file="file_c", lnum=1, name="test_notbaz")]
-    assert get_targets(Path("file_b"), 30, items).popleft() == items[2]
-    assert items[2].name == "test_bar[one-1]"
-    items.reverse()
-    assert get_targets(Path("file_b"), 30, items).popleft() == items[2]
-    assert items[2].name == "test_bar[three-3]"
 
 
 def test_resolve_wanted(tmp_path, request):
@@ -206,7 +189,7 @@ def test_invalid_arg(testdir_setup):
     result = td.runpytest("--break=1")
     assert result.ret == 3
     result.stdout.fnmatch_lines("INTERNALERROR>*RuntimeError: "
-                                "breakpoint file couldn't be determined")
+                                "unable to determine breakpoint file*")
 
     # No file named, but pytest arg names one
     pe = td.spawn_pytest("--break=1 test_otherfile.py")  # <- Two sep args

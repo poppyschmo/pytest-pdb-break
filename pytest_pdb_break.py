@@ -76,8 +76,7 @@ class BreakLoc:
         2. ``lnum`` may be ``-1``, as returned by ``.reportinfo()``
         3. ``name`` may be "Class.func[id]", with "id" accessible at
            ``.callspec.id`` and the rest at ``.originalname``
-        4. ``name`` may be used later to target a specific call id; presently,
-           it's only used by ``get_targets`` for sorting
+        4. ``name`` is presently unused
         """
         file, lnum, name = item.location
         # Comment in ``Config.cwd_relative_nodeid`` says "nodeid's are relative
@@ -173,7 +172,7 @@ class PdbBreak:
         self.bt_all = config.getoption("pdb_break_bt_all")
         self.config = config
         self.wanted = self._resolve_wanted(wanted)
-        self.target = None
+        self.targets = None
         self.last_pdb = None
 
     def _resolve_wanted(self, wanted):
@@ -215,26 +214,40 @@ class PdbBreak:
             self.last_pdb = pdb
 
     def pytest_runtestloop(self, session):
-        """Find target or raise."""
+        """Find a suitable target or raise RuntimeError."""
         locs = [BreakLoc.from_pytest_item(i) for i in session.items]
-        self._l and self._l.pspore(1)
+        self._l and self._l.pspore("enter")
         if not self.wanted.file:
             locs_files = set(l.file for l in locs)
-            # If solo, assume good
             if len(locs_files) == 1:
                 inferred = locs_files.pop()
                 self.wanted.file = inferred
-                self._l and self._l.pspore(2)
+                self._l and self._l.pspore("rewrite")
             else:
-                raise RuntimeError("breakpoint file couldn't be determined")
-        # TODO skip when cmdline arg is a single nodeid with function component
-        self.targets = get_targets(self.wanted.file, self.wanted.lnum, locs)
-        try:
-            self.target = self.targets.popleft()
-        except IndexError as exc:
-            msg = "a valid breakpoint could not be determined"
-            raise RuntimeError(msg) from exc
-        self._l and self._l.pspore(3)
+                msg = "unable to determine breakpoint file"
+                raise RuntimeError(msg)
+        fortified = fortify_location(self.wanted.file, self.wanted.lnum)
+        if not fortified:
+            msg = "unable to determine breakpoint location"
+            raise RuntimeError(msg)
+        self.wanted = fortified
+        self._l and self._l.pspore("fortified")
+        # A test item's function name matches that of self.wanted
+        if self.wanted.func_name.startswith("test_"):
+            self.targets = [l for l in locs if
+                            l.file == self.wanted.file and
+                            l.func_name == self.wanted.func_name]
+            if not self.targets:
+                msg = "unable to determine breakpoint item"
+                raise RuntimeError(msg)
+            self._l and self._l.pspore("targets")
+        else:
+            # TODO make these happen:
+            # 1. For fixtures, enter pdb in pytest_fixture_setup
+            # 2. For hooks (pytest_*), enter right here
+            # 3. Otherwise raise
+            msg = "unable to handle breakpoints outside of test functions"
+            raise RuntimeError(msg)
 
     def trace_handoff(self, frame, event, arg):
         """Defer to the "real" trace_dispatch after arriving at target.
@@ -248,8 +261,8 @@ class PdbBreak:
 
         self._l and self._l.prinspect(event=event, frame=frame)
 
-        if (frame.f_code.co_name != self.target.func_name
-                or event != "line"
+        if (event != "line"
+                or frame.f_code.co_name != self.wanted.func_name
                 or frame.f_lineno < self.wanted.lnum):
             return self.trace_handoff
 
@@ -267,7 +280,6 @@ class PdbBreak:
         # This is just for show, although it does make clear that this
         # breakpoint hasn't been saved
         inst.set_break(str(self.wanted.file), frame.f_lineno, True)
-        self.target = None
         sys.settrace(inst.trace_dispatch)  # hand off
         return inst.dispatch_line(frame)
 
@@ -335,12 +347,13 @@ class PdbBreak:
     @pytest.hookimpl(tryfirst=True)
     def pytest_runtest_call(self, item):
         if (hasattr(item, "startTest")
-                and BreakLoc.from_pytest_item(item) == self.target):
+                and self.targets
+                and BreakLoc.from_pytest_item(item) == self.targets[0]):
 
             def _runtest(inst):
                 self.runcall_until(inst._testcase, result=inst)
-                if self.target and self.targets:
-                    self.target = self.targets.popleft()
+                if self.targets:
+                    self.targets.pop(0)
 
             item.runtest = _runtest.__get__(item)
 
@@ -348,38 +361,18 @@ class PdbBreak:
         if self._l:
             self._l.sertall(1)
             self._l.pspell(1)
-        if BreakLoc.from_pytest_item(pyfuncitem) == self.target:
+        if (self.targets
+                and BreakLoc.from_pytest_item(pyfuncitem) == self.targets[0]):
             # Mimic primary hookimpl in _pytest/python.py
             testargs = {arg: pyfuncitem.funcargs[arg] for
                         arg in pyfuncitem._fixtureinfo.argnames}
             self.runcall_until(pyfuncitem.obj, **testargs)
             #
-            if self.target and self.targets:
-                self.target = self.targets.popleft()
+            if self.targets:
+                self.targets.pop(0)
             self._l and self._l.pspell(2)
             # Skip primary hookimpl for this pyfuncitem
             return True
-
-
-def get_targets(filename, upper, locations):
-    """Return ranked targets from a list of item locations."""
-    from operator import attrgetter
-    from collections import deque
-    from itertools import groupby
-    neighbors = (l for l in locations if l.file == filename)
-    lnumgetter = attrgetter("lnum")
-    out = []
-    for side, locs in groupby(neighbors, lambda l: l.lnum <= upper):
-        if side:
-            # Note: this isn't the same as not reversing and popping last item
-            locs = sorted(locs, key=lnumgetter, reverse=True)
-            if locs:
-                # Not sure if different arg bindings can affect whether trace
-                # is called, so just include all callspec variants now
-                out = [l for l in locs if l.lnum == locs[0].lnum] + out
-        else:
-            out += sorted(locs, key=lnumgetter)
-    return deque(out)
 
 
 def _get_node_at_pos(line_no, node, parent=None):
