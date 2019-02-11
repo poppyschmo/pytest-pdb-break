@@ -16,10 +16,26 @@
         exp: >
           non_none(attr.asdict(v_))
       bls:
-        types: [list, deque]
+        type: list
         cond: all(isinstance(i, BreakLoc) for i in v_)
         exp: >
           [non_none(attr.asdict(i)) for i in v_]
+      syscap:
+        type: SysCapture
+        exp: vars(v_)
+      textio:
+        type: TextIOWrapper
+        exp: >
+          dict(type=type(v_).__name__, name=v_.name,
+               mode=v_.mode, addr=hex(id(v_)))
+      capio:
+        type: CaptureIO
+        exp: >
+          dict(type=type(v_).__name__, addr=hex(id(v_)))
+      encoded_file:
+        type: EncodedFile
+        exp: >
+          dict(type=type(v_).__name__, buffer=v_.name)
     output:
       tmpdir:
         pat: !!python/object/new:re.compile ["/tmp/pytest-of[^/]+/pytest-\\d+"]
@@ -60,12 +76,15 @@ runcall_until:
       - testargs
   cap_top:
     kwargs:
-      "global_cap": vars(capman._global_capturing)
+      "global_cap": >
+        {k: vars(v) if hasattr(v, '__dict__') else v
+         for k, v in vars(capman._global_capturing).items()}
       "sys.stdout (before)": sys.stdout
   cap_bot:
     args:
       - capman._method
     kwargs:
+      "capfix": capfix and vars(capfix._capture)
       "sys.stdout (after)": type(sys.stdout)
   post_capfix:
     args:
@@ -74,7 +93,6 @@ runcall_until:
 pytest_pyfunc_call:
   1:
     assertions:
-      # - self.last_pdb is None
       - not pyfuncitem._isyieldedfunction()
     args:
       - pyfuncitem.name

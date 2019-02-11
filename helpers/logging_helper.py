@@ -8,6 +8,7 @@ import logging
 from pathlib import Path
 from functools import partialmethod
 from contextlib import contextmanager
+from collections.abc import MutableMapping
 
 
 @attr.s
@@ -87,7 +88,8 @@ class PpLogger(logging.Logger):
             yield type(v).__name__ == filt.type if filt.type else filt.all
             yield type(v).__name__ in filt.types if filt.types else filt.all
             yield eval(filt.cond,
-                       caller.f_globals, locup) if filt.cond else filt.all
+                       self._get_updated_globals(caller),
+                       locup) if filt.cond else filt.all
 
         for k, v in items.items():
             # A less wasteful approach would be to to swap loops and check
@@ -105,6 +107,8 @@ class PpLogger(logging.Logger):
                     if filt.first:  # done with this filter
                         break
                     locup["r_"] = new
+            if isinstance(new, MutableMapping):
+                new = self.filter_input(caller, dict(new))
             items[k] = new  # preserves size
         return items
 
