@@ -185,14 +185,6 @@ class PdbBreak:
         except FileNotFoundError:
             if file.is_absolute():
                 raise
-            # Can't use Path.cwd() because its .samefile() calls .stat() on
-            # other and expects returned obj to have .st_ino, but path.Stat
-            # looks for st_st_ino
-            # TODO find out if users of the plugin API are meant to fiddle with
-            # LocalPath objects, or if these are only for internal use. A
-            # cursory search in the CHANGELOG/bug tracker for terms like
-            # pathlib, localpath, fspath, etc., didn't yield much, (occasional
-            # references to "recent pathlib refactoring" circa mid 2018).
             cwd = type(self.config.rootdir)()
             for parent in (self.config.rootdir, self.config.invocation_dir):
                 if not cwd.samefile(parent):
