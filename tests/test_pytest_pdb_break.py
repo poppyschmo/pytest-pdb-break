@@ -201,6 +201,12 @@ def test_invalid_arg(testdir_setup):
     result.stdout.fnmatch_lines("INTERNALERROR>*RuntimeError: "
                                 "unable to determine breakpoint file*")
 
+    # Invalid line (regression): finder bails if node is None
+    result = td.runpytest("--break=test_otherfile.py:99")
+    assert result.ret == 3
+    result.stdout.fnmatch_lines("INTERNALERROR>*RuntimeError: "
+                                "unable to determine breakpoint location*")
+
     # No file named, but pytest arg names one
     pe = td.spawn_pytest("--break=1 test_otherfile.py")  # <- Two sep args
     # XXX API call sig is different for these spawning funcs (string)

@@ -293,7 +293,7 @@ class PdbBreak:
     def runcall_until(self, func, **testargs):
         """Run test with testargs, stopping at location.
 
-        Exceptions raised inside this function will be reported as test
+        Exceptions raised inside this function may be reported as test
         failures. For testing, this means report output is sent to stdout
         rather than stderr (INTERNALERROR).
         """
@@ -420,7 +420,7 @@ def fortify_location(filename, line_no):
     leaf = _get_node_at_pos(line_no, root, None)
 
     def find(node, tipo):
-        while type(node) is not tipo:
+        while node and type(node) is not tipo:
             if node is root:
                 return None
             node = node.parent
