@@ -43,7 +43,7 @@ __version__ = "0.0.1"
 pytestPDB = pytest.set_trace.__self__
 
 
-@attr.s(frozen=True)
+@attr.s
 class BreakLoc:
     """Data object holding path-like filename, line number, test name.
     """
@@ -55,11 +55,6 @@ class BreakLoc:
     class_name = attr.ib(default=None, repr=False, cmp=False, kw_only=True)
     func_name = attr.ib(default=None, repr=False, cmp=False, kw_only=True)
     param_id = attr.ib(default=None, repr=False, cmp=False, kw_only=True)
-
-    def _replace(self, **kwargs):  # temporary
-        for k, v in kwargs.items():
-            object.__setattr__(self, k, v)
-        return self
 
     def equals(self, other):
         """True if class, func, param fields are equal.
@@ -207,7 +202,8 @@ class PdbBreak:
                         break
             else:
                 raise
-        return wanted._replace(file=resolved)
+        wanted.file = resolved
+        return wanted
 
     if module_logger:
         def pytest_internalerror(self, excrepr, excinfo):
@@ -227,7 +223,7 @@ class PdbBreak:
             # If solo, assume good
             if len(locs_files) == 1:
                 inferred = locs_files.pop()
-                self.wanted = self.wanted._replace(file=inferred)
+                self.wanted.file = inferred
                 self._l and self._l.pspore(2)
             else:
                 raise RuntimeError("breakpoint file couldn't be determined")
