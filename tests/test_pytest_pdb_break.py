@@ -297,6 +297,7 @@ def test_two_funcs_simple(testdir_two_funcs):
         "->*# <- line 4",
     ])
     pe.sendline("c")
+    pe.expect(EOF)
 
 
 def test_two_funcs_comment(testdir_two_funcs):
@@ -308,6 +309,7 @@ def test_two_funcs_comment(testdir_two_funcs):
         "->*somevar = True"
     ])
     pe.sendline("c")
+    pe.expect(EOF)
 
 
 def test_two_funcs_gap(testdir_two_funcs):
@@ -320,6 +322,7 @@ def test_two_funcs_gap(testdir_two_funcs):
         "->*isinstance(False, int)"
     ])
     pe.sendline("c")
+    pe.expect(EOF)
 
 
 def test_one_arg(testdir_setup):
@@ -339,10 +342,10 @@ def test_one_arg(testdir_setup):
     befs = LineMatcher(unansi(pe.before))
     befs.fnmatch_lines("*>*/test_one_arg.py(8)test_string()")
     pe.sendline("c")
+    pe.expect(EOF)
 
 
 def test_mark_param(testdir_setup):
-    # Only break once: with the first set of args bound
     testdir_setup.makepyfile("""
         import pytest
 
@@ -356,7 +359,12 @@ def test_mark_param(testdir_setup):
     pe.expect(prompt_re)
     befs = unansi(pe.before)
     assert "one" in befs
-    pe.sendline("c")  # If called again, would get timeout error
+    pe.sendline("c")
+    pe.expect(prompt_re)
+    befs = unansi(pe.before)
+    assert "two" in befs
+    pe.sendline("c")
+    pe.expect(EOF)
 
 
 @pytest.mark.parametrize("cap_method", ["fd", "sys"])
@@ -426,6 +434,7 @@ def test_class_simple(testdir_class):
         "->*# line 8"
     ])
     pe.sendline("c")
+    pe.expect(EOF)
 
 
 def test_class_early(testdir_class):
@@ -438,6 +447,7 @@ def test_class_early(testdir_class):
         "->*# line 8"
     ])
     pe.sendline("c")
+    pe.expect(EOF)
 
 
 def test_class_gap(testdir_class):
@@ -466,6 +476,7 @@ def test_class_gap_named(testdir_class):
         "->*# line 12"
     ])
     pe.sendline("c")
+    pe.expect(EOF)
 
 
 def test_lower_callee(testdir_setup):
@@ -486,6 +497,7 @@ def test_lower_callee(testdir_setup):
         "->*# <- line 3",
     ])
     pe.sendline("c")
+    pe.expect(EOF)
 
 
 def test_no_bt_all(testdir_setup):
@@ -503,6 +515,7 @@ def test_no_bt_all(testdir_setup):
     assert "runcall_until" not in befs.str()
     befs.fnmatch_lines("*>*/test_file.py(2)test_foo()")
     pe.sendline("c")
+    pe.expect(EOF)
 
 
 def test_bt_all(testdir_setup):
@@ -524,6 +537,7 @@ def test_bt_all(testdir_setup):
         "*>*/test_file.py(2)test_foo()"
     ])
     pe.sendline("c")
+    pe.expect(EOF)
 
 
 def test_unittest(testdir_setup):
@@ -539,6 +553,7 @@ def test_unittest(testdir_setup):
     befs = LineMatcher(unansi(pe.before))
     befs.fnmatch_lines("*>*/test_file.py(4)test_foo()")
     pe.sendline("c")
+    pe.expect(EOF)
 
 
 def test_completion_commands_basic(testdir_setup):

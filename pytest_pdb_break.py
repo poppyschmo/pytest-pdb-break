@@ -419,6 +419,7 @@ def fortify_location(filename, line_no):
         return None
 
     cand = func
+    # Fails when inner func is named test_*
     while cand and not cand.name.startswith("test_"):
         cand = find(cand.parent, ast.FunctionDef)
     if cand:
