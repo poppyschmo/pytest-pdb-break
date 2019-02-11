@@ -386,24 +386,24 @@ def get_targets(filename, upper, locations):
     return deque(out)
 
 
-def _get_node_at_pos(target_line_no, node, parent=None):
-    """Return first ast node at target_line_no.
+def _get_node_at_pos(line_no, node, parent=None):
+    """Return first ast node at line_no.
     This is ``ast.NodeVisitor.generic_visit`` with extra breadcrumb
     business for cycling back later, if necessary.
     """
     node.parent = parent
-    if hasattr(node, "lineno") and node.lineno >= target_line_no:
+    if hasattr(node, "lineno") and node.lineno >= line_no:
         return node
     for field, value in ast.iter_fields(node):
         rv = None
         if isinstance(value, list):
             for item in value:
                 if isinstance(item, ast.AST):
-                    rv = _get_node_at_pos(target_line_no, item, node)
+                    rv = _get_node_at_pos(line_no, item, node)
                     if rv:
                         return rv
         elif isinstance(value, ast.AST):
-            rv = _get_node_at_pos(target_line_no, value, node)
+            rv = _get_node_at_pos(line_no, value, node)
             if rv:
                 return rv
 
