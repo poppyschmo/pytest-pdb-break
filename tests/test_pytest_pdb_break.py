@@ -180,7 +180,7 @@ def test_invalid_arg(testdir_setup):
     # No line number (argparse error)
     result = td.runpytest("--break=test_invalid_arg.py")
     assert result.ret == 4
-    result.stderr.fnmatch_lines(["usage:*", "*--break*invalid*value*"])
+    result.stderr.fnmatch_lines(["*usage:*", "*--break*invalid*value*"])
 
     # Non-existent file
     result = td.runpytest("--break=foo:99")
