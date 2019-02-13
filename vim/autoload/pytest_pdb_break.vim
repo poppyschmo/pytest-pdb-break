@@ -19,18 +19,38 @@ function! s:call(name, args, ...) abort "{{{
 	return call(d[a:name], a:args, d)
 endfunction "}}}
 
-" Unused
-function! s:_extract_python_exe() abort "{{{
-	try
-		let shebang = readfile(exepath('pytest'), '', 1)[0]
-		let exe = substitute(shebang, '^#!', '', '')
-	catch /^Vim\%((\a\+)\)\=:E/
-		let exe = ''
-	endtry
+function! s:_get_pytest_exe() abort "{{{
+	if exists('b:pytest_pdb_break_pytest_exe')
+		let exe = b:pytest_pdb_break_pytest_exe
+	else
+		let exe = exepath('pytest')
+	endif
 	if !executable(exe)
-		let exe = exepath('python3')
+		throw 'Cannot find pytest'
 	endif
 	return exe
+endfunction "}}}
+
+function! s:_get_interpreter() abort "{{{
+	try
+		let pytest_exe = s:_get_pytest_exe()
+		let shebang = readfile(pytest_exe, '', 1)[0]
+		let exe = substitute(shebang, '^#!', '', '')
+	catch /.*/
+		let exe = ''
+	endtry
+	if executable(exe)
+		return exe
+	endif
+	" Plain python will fail if not python3
+	let backups = exists('g:python3_host_prog') ? [g:python3_host_prog] : []
+	let backups += ['python3', 'python']
+	for exe in backups
+		if executable(exe)
+			return exepath(exe)
+		endif
+	endfor
+	throw 'Could not find a python executable'
 endfunction "}}}
 
 function! s:init() abort "{{{
@@ -44,35 +64,39 @@ function! s:init() abort "{{{
 	let s:home = fnamemodify(s:plugin, ':h:p') " no trailing/
 	let s:helper = simplify(s:home . '/helpers/main.py')
 	let s:config_info_helper = simplify(s:home . '/helpers/get_config_info.py')
-	let s:isolib = tempname()
-	"
-	let cmdline = ['python3', s:helper, 'install_plugin', s:isolib]
-	if !has('nvim')
-		let cmdline = join(cmdline)
-	endif
-	call system(cmdline)
-	if !isdirectory(s:isolib)
-		throw 'Problem calling '. s:helper
+	if exists('g:pytest_pdb_break_alt_lib')
+		" Glob still passes if pat contains double / (no need to simplify)
+		let alt_lib = g:pytest_pdb_break_alt_lib
+		if !isdirectory(alt_lib) ||
+					\ empty(glob(alt_lib .'/pytest_pdb_break*-info'))
+			throw 'Invalid alt lib: ' . alt_lib
+		endif
+		let s:isolib = alt_lib
+	else
+		let s:isolib = tempname()
+		let cmdline = [s:_get_interpreter(), s:helper, 'install_plugin', s:isolib]
+		if !has('nvim')
+			let cmdline = join(cmdline)
+		endif
+		call system(cmdline)
+		if !isdirectory(s:isolib)
+			throw 'Problem calling '. s:helper
+		endif
 	endif
 	let s:initialized = v:true
 endfunction "}}}
 
 function! s:get_context() abort "{{{
 	" Save env info in buffer-local dict, keyed by pytest exe
+	" XXX the context-dict thing may have made sense under the old 'rootdir'
+	" setup but now seems needlessly complicated; consider ditching
 	if !s:initialized
 		call s:call('init', [])
 	endif
 	if !exists('b:pytest_pdb_break_context')
 		let b:pytest_pdb_break_context = {}
 	endif
-	if exists('b:pytest_pdb_break_pytest_exe')
-		let exe = b:pytest_pdb_break_pytest_exe
-	else
-		let exe = exepath('pytest')
-	endif
-	if !executable(exe)
-		throw 'Cannot find pytest'
-	endif
+	let exe = s:_get_pytest_exe()
 	if !has_key(b:pytest_pdb_break_context, exe)
 		let b:pytest_pdb_break_context[exe] = {'exe': exe}
 	endif
@@ -191,8 +215,10 @@ let s:defuncs = {'get_context': funcref('s:get_context'),
 
 if exists('g:pytest_pdb_break_testing')
 	let g:pytest_pdb_break_testing.s = {
-				\ 'exists': {e -> exists(e)},
-				\ 'get': {v -> eval('s:'. v)}
+				\ 'exists': {n -> exists('s:'. n)},
+				\ 'get': {n -> eval('s:'. n)},
+				\ 'assign': {n, v -> execute('let s:'. n .' = '. v)},
+				\ 'forget': {n -> execute('unlet s:'. n)}
 				\ }
 	let g:pytest_pdb_break_testing.o = copy(s:defuncs)
 endif

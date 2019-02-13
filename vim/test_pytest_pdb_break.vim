@@ -247,22 +247,114 @@ endfunction "}}}
 call s:runfail(funcref('s:test_call'))
 
 
+" _get_pytest_exe and _get_exe ------------------------------------------------
+
+function s:test_get_executables() "{{{
+	let FuncPytest = funcref(s:pfx . '_get_pytest_exe')
+	let FuncInterp = funcref(s:pfx . '_get_interpreter')
+	"
+	let bin_path = fnamemodify('fake', ':p')
+	let pytest_path = bin_path . '/pytest'
+	let interp_path = bin_path . '/python'
+	call mkdir(bin_path)
+	call writefile(['#!' . interp_path], pytest_path)
+	call writefile([], interp_path)
+	call setfperm(pytest_path, 'rwx------')
+	call setfperm(interp_path, 'rwx------')
+	"
+	" Explicit b: option
+	let b:pytest_pdb_break_pytest_exe = pytest_path
+	call assert_equal(FuncPytest(), pytest_path)
+	call assert_equal(FuncInterp(), interp_path)
+	unlet b:pytest_pdb_break_pytest_exe
+	"
+	" Fake PATH
+	let origpath = $PATH
+	try
+		let $PATH = bin_path .':'. $PATH
+		call assert_equal(pytest_path, exepath('pytest'))
+		call assert_equal(interp_path, exepath('python'))
+		call assert_equal(pytest_path, FuncPytest())
+		call assert_equal(interp_path, FuncInterp())
+		"
+		" Fallbacks
+		call assert_false(exists('g:python3_host_prog'))  " skip
+		"
+		call writefile(['#!' . bin_path . '/fake_python'], 'fake/pytest')
+		let interp_path = bin_path . '/python3'
+		call writefile([], interp_path)
+		call setfperm(interp_path, 'rwx------')
+		call assert_equal(interp_path, FuncInterp())
+		"
+		let $PATH = bin_path . ':' " otherwise, /usr/bin/python3 wins
+		call delete(interp_path)
+		let interp_path = bin_path . '/python'
+		call assert_equal(interp_path, FuncInterp())
+		"
+		call delete(interp_path)
+		try
+			call FuncInterp()
+		catch /.*/
+			call assert_exception('Could not find')
+		endtry
+	finally
+		let $PATH = origpath
+	endtry
+endfunction "}}}
+
+call s:pybuf('test_get_executables')
+
+
 " init ------------------------------------------------------------------------
 
 function s:test_init() "{{{
-	call assert_false(s:s.get('initialized'))
-	call assert_false(s:s.exists('s:plugin'))
-	call assert_false(s:s.exists('s:home'))
-	call assert_false(s:s.exists('s:helper'))
-	call assert_false(s:s.exists('s:isolib'))
+	function s:_assert_clean_slate()
+		" Invalid alt lib
+		call assert_false(s:s.get('initialized'))
+		call assert_false(s:s.exists('plugin'))
+		call assert_false(s:s.exists('home'))
+		call assert_false(s:s.exists('helper'))
+		call assert_false(s:s.exists('isolib'))
+	endfunction
 	"
+	" Invalid alt lib
+	call s:_assert_clean_slate()
+	let fake_lib = fnamemodify('test_init_isolib', ':p')
+	call mkdir(fake_lib)
+	let g:pytest_pdb_break_alt_lib = fake_lib
+	try
+		call s:o.init()
+	catch /.*/
+		call assert_exception('Invalid alt lib:')
+	endtry
+	call s:s.assign('initialized', 'v:false')
+	call s:s.forget('plugin')
+	call s:s.forget('home')
+	call s:s.forget('helper')
+	call assert_false(s:s.exists('isolib'))
+	"
+	" Fake alt lib
+	call s:_assert_clean_slate()
+	if isdirectory(fake_lib)  " os should throw permissions error anyway
+		call mkdir(fake_lib . '/pytest_pdb_break-x.x.x.dist-info')
+	endif
+	call s:o.init()
+	call s:s.assign('initialized', 'v:false')
+	call s:s.forget('plugin')
+	call s:s.forget('home')
+	call s:s.forget('helper')
+	call s:s.forget('isolib')
+	unlet g:pytest_pdb_break_alt_lib
+	"
+	" Normal run
+	call s:_assert_clean_slate()
 	call s:o.init()
 	"
 	call assert_true(s:s.get('initialized'))
-	call assert_true(s:s.exists('s:plugin'))
-	call assert_true(s:s.exists('s:home'))
-	call assert_true(s:s.exists('s:helper'))
-	call assert_true(s:s.exists('s:isolib'))
+	call assert_true(s:s.exists('plugin'))
+	call assert_true(s:s.exists('home'))
+	call assert_true(s:s.exists('helper'))
+	call assert_true(s:s.exists('isolib'))
 	call assert_equal(fnamemodify(s:s.get('file'), ':h:h:h'), s:s.get('home'))
 endfunction "}}}
 
@@ -278,7 +370,7 @@ function s:test_get_context() "{{{
 	call setfperm('fake/pytest', 'rwx------')
 	" Script-local vars persist
 	let before = map(['plugin', 'home', 'helper', 'isolib'], 's:s.get(v:val)')
-	let full = fnamemodify('fake/pytest', ':p')
+	let full = fnamemodify('fake', ':p') . '/pytest'
 	let b:pytest_pdb_break_pytest_exe = full
 	call s:o.get_context()
 	call assert_true(has_key(b:pytest_pdb_break_context, full))
