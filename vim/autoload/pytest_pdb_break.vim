@@ -128,39 +128,6 @@ function! s:get_node_id(...) abort "{{{
 	return a:0 && a:1 ? reverse(nodeid) : join(reverse(nodeid), '::')
 endfunction "}}}
 
-" Unused
-function! s:query_helper(ctx, ...) abort "{{{
-	" https://docs.pytest.org/en/latest/customize.html#finding-the-rootdir
-	let context = a:ctx
-	let cmdline = [context.pyexe, '-'] + a:000
-	if !has('nvim')
-		let cmdline = join(cmdline)
-	endif
-	let lines = readfile(s:config_info_helper)
-	try
-		let result = system(cmdline, lines)
-		try
-			let decoded = json_decode(result)
-		catch /^Vim\%((\a\+)\)\=:E474/
-			throw result
-		endtry
-		call extend(context, decoded)
-	catch /.*/
-		echohl WarningMsg | echo 'Problem calling helper' | echohl None
-		echo 'path: '. s:config_info_helper
-		echo 'cmdline: '. string(cmdline)
-		" Truncation often lops off final exc (most recent call last)
-		if exists('result') && stridx(v:exception, result) == -1
-					\ && v:exception =~# 'E474.*Traceback'
-			echo 'exc: '. matchstr(v:exception, '.*\zeTraceback')
-			echo result
-		else
-			echo 'exc: '. v:exception
-		endif
-		echoerr 'HelperError'
-	endtry
-endfunction "}}}
-
 function! s:extend_python_path(ctx) abort "{{{
 	" Stash modified copy of PYTHONPATH, should be unset if unneeded
 	let ctx = a:ctx
