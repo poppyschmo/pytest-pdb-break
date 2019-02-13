@@ -1,6 +1,7 @@
 scriptencoding utf-8
 
 " See 041ced4 for query_helper (get_config_info) stuff
+" TODO if overhauling, use vader: https://github.com/junegunn/vader.vim
 
 if !has('unix')
 	cquit!
