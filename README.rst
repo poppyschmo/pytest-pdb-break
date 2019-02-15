@@ -2,10 +2,10 @@
 pytest-pdb-break
 ================
 
-This is not a real pytest plugin. It's an aid for **text editors** that fires
-up the debugger and fast-forwards to the point of interest. If you already
-enjoy a streamlined workflow with ``breakpoint()`` snippets and/or pytest's
-``--trace`` and ``--pdb`` options, there's nothing to see here.
+This is an aid to help **text editors** fire up the debugger and fast-forward
+to the point of interest. If you already have a solid workflow involving
+``breakpoint()`` snippets and/or the ``--trace`` and ``--pdb`` options, there's
+nothing to see here.
 
     This basically does the equivalent of
 
@@ -34,13 +34,13 @@ Simpatico check
        (experimental)
 
 Don't install
-    Unlike actual plugins, this isn't meant to be installed as a Python
+    Unlike proper pytest plugins, this isn't meant to be installed as a Python
     package. The editor will instead inject an isolated installation via
     ``PYTHONPATH``, but only while in use (no internet connection required).
 
 WIPs
-    - `Emacs <emacs/>`_
-    - `Vim <vim/>`_
+    - `Emacs <https://github.com/poppyschmo/pytest-pdb-break/blob/master/emacs/>`_
+    - `Vim <https://github.com/poppyschmo/pytest-pdb-break/blob/master/vim/>`_
 
 Caveats
     1. This thing has only ever been tried/tested on Linux
