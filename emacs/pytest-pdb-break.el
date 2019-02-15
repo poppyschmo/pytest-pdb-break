@@ -332,25 +332,25 @@ node-id components and SESSION-OPTS a list of additional options. See
            (python-shell-prompt-pdb-regexp pytest-pdb-break-prompt-regexp)
            (args (pytest-pdb-break--get-args session-opts
                                              line-no node-id-parts))
-           (fake-arg-string (mapconcat #'identity (cons "-mpytest" args) " "))
-           ;; Produces warning in 25.x: Making foo local to bar while let-bound
+           ;; Triggers local-while-let-bound warning in 25.x
            (python-shell--parent-buffer (current-buffer))
-           (python-shell--interpreter-args fake-arg-string)
+           ;; Ensure ``python-shell-prompt-detect'' doesn't use ipython, etc.
            (python-shell--interpreter pyexe)
+           python-shell--interpreter-args
            buffer)
       (save-excursion
         ;; Allow "calculate-" funcs to consider "python-shell-" options and
         ;; modify process-environment and exec-path accordingly
         (python-shell-with-environment
-         (setq buffer (apply #'make-comint-in-buffer proc-name nil
-                             pytest-exe nil args))
-         ;; Only python- prefixed local vars get cloned in child buffer
-         (with-current-buffer buffer
-           (inferior-python-mode)
-           (setq pytest-pdb-break--process (get-buffer-process buffer)
-                 pytest-pdb-break--parent-buffer python-shell--parent-buffer)
-           (pytest-pdb-break-mode +1))
-         (display-buffer buffer))))))
+          (setq buffer (apply #'make-comint-in-buffer proc-name nil
+                              pytest-exe nil args))
+          ;; Only python- prefixed local vars get cloned in child buffer
+          (with-current-buffer buffer
+            (inferior-python-mode)
+            (setq pytest-pdb-break--process (get-buffer-process buffer)
+                  pytest-pdb-break--parent-buffer python-shell--parent-buffer)
+            (pytest-pdb-break-mode +1))
+          (display-buffer buffer))))))
 
 
 (provide 'pytest-pdb-break)
