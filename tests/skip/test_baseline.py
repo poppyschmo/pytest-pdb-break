@@ -8,6 +8,20 @@ import pytest
 from _pytest.pytester import LineMatcher
 from conftest import prompt_re, unansi
 
+
+def test_version():
+    from unittest.mock import patch
+    from pytest_pdb_break import __version__
+    with patch("setuptools.setup") as m_s:
+        try:
+            import setup  # noqa: F401
+        except Exception:
+            pytest.skip("Not running from source directory (likely installed)")
+        args, kwargs = m_s.call_args
+
+    assert kwargs["version"] == __version__
+
+
 t2f4 = """
     def test_foo():
         assert True                   # <- line 2
