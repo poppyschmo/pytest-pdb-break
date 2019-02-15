@@ -49,3 +49,18 @@ jobs:
           eval "$(curl -Ss $url) nightly-x64"
         - nvim --version
       script: cd vim && make neovim
+    - stage: deploy
+      name: PyPI
+      before_install: skip
+      script: skip
+      deploy:
+        provider: pypi
+        distributions: sdist bdist_wheel
+        skip_upload_docs: true
+        user: poppyschmo
+        password:
+          secure: "gz/YHqvK9MPb9rI5fcUR1igwb2XlAIcQhPxtGLcf2PXHtCq1aVXjBH7uWtOyxwpp2j2EboLepY18u31ZS0AbXqLHzjH/omcDqAmLlMm4Aqd1lHpXu/s908PaxjCH6/ph1f8vSQ5J4J5K/g3kkqSNJgjY54VzLZk4DZBGloMQyAfGjOHd5Zbj89959qCvxtJqpG1+Vk50qMynjJn/ViidMZ3CpJ/nt4YjX9hMY1EwR2b4jUyJk/6V4iLOVJha1QD9nL2X56aC+QOUpUuc+gIlPA5k0WZX1XgVydz/waW+3uHEqsUcAiIEiYT7Z08XclV3iO0g68jUYdbCb+ZFwQqXhFXRd3/fG39S9GMBWoChUl8qn72WPvdQ1TRug6YJqF3qzOksChjqd4BKDvh20twLDwAfIXJmDK5Szqiaijz7PJOyaBBKUA8KFyyz27Yuo92P5mSQP9/QRPFteISZbI/FXWrAQOlrCrmAehumPxxtPZueLgAzi6SkXrXSzHur2IRhf5Z4ORQQdYbrkjPV9bfvCgCQvQUvU37WzeW2cnw2k1fsi2m/pTO8UFmAOgFiVWjO+NWtUc0ML7guoP/WoElW06BmexSqkte1xH7Klu/CI0PIuFV5kGtEnRkeFsHqp236o5cJSnLwlflmSBhK7AXVSK5O2+rv2LtzbF/D5L3TUCw="
+        on:
+          repo: poppyschmo/pytest-pdb-break
+          tags: true
+
