@@ -2,7 +2,7 @@
 
 ;; Author: Jane Soko <poppyschmo@protonmail.com>
 ;; URL: https://github.com/poppyschmo/pytest-pdb-break
-;; Version: 0.0.1
+;; Version: 0.0.2
 ;; Keywords: python testing
 ;; Package-Requires: ((emacs "25"))
 

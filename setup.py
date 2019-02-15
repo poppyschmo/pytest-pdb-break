@@ -3,7 +3,7 @@ from pathlib import Path
 
 setup(
     name="pytest-pdb-break",
-    version="0.0.1",
+    version="0.0.2",
     license="Apache 2.0",
     description="A pytest command-line option for pdb breakpoints",
     long_description=Path(__file__).parent.joinpath("README.rst").read_text(),
