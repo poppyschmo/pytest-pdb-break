@@ -770,14 +770,17 @@ class TestFoo:
 
 ;; TODO find the proper built-in way to do this
 (defun pytest-pdb-break-test--expect-timeout (pattern &optional max-secs)
-  "Dumb waiter. Wait MAX-SECS for PATTERN before process mark."
+  "Dumb waiter. Wait MAX-SECS for PATTERN to show up.
+PATTERN may also be a function that takes no args."
   (let ((st (float-time))
         (want-disp (if (boundp '$debuggin?) $debuggin?
                      (pytest-pdb-break-test-invoked-with-debug-p)))
         (max-secs (or max-secs 5))
+        (func (if (functionp pattern) pattern
+                (lambda nil (looking-back pattern nil))))
         found)
     (while (and (< (- (float-time) st) max-secs)
-                (not (setq found (looking-back pattern nil))))
+                (not (setq found (funcall func))))
       (and want-disp (redisplay t))
       (sleep-for 0.01))
     found))
@@ -797,7 +800,7 @@ class TestFoo:
                           (setq default-directory ,default-directory))))
            (args (list "-Q" "-nw" "-L" pytest-pdb-break-test-lisp-root
                        "--eval" (format "%S" src)))
-           (buf (apply #'make-term "ert" "emacs" nil args))
+           (buf (apply #'make-term "ert-term" "emacs" nil args))
            (proc (get-buffer-process buf)))
       (with-current-buffer buf
         (unwind-protect
@@ -828,13 +831,28 @@ class TestFoo:
                 (should (pytest-pdb-break-test--expect-timeout
                          (concat  "(\"--foo=\\./somefile\\.suffix ?"
                                   "notherfile\\.suffix ?\").*"))))
+              (ert-info ("Entry appears as initial input")
+                (term-send-raw-string "\e:")
+                (should (pytest-pdb-break-test--expect-timeout "Eval: ?"))
+                (term-send-string
+                 proc "(pytest-pdb-break--read-session-options)\n")
+                (should (pytest-pdb-break-test--expect-timeout
+                         "options: .*\\.suffix ?"))
+                (term-send-raw-string "\C-a\C-k")
+                (should (pytest-pdb-break-test--expect-timeout "options: ?"))
+                (term-send-string proc "\n"))
+              (ert-info ("Empty string added to history")
+                (term-send-raw-string "\e:")
+                (should (pytest-pdb-break-test--expect-timeout "Eval: ?"))
+                (term-send-string proc "pytest-pdb-break--options-history\n")
+                (should (pytest-pdb-break-test--expect-timeout
+                         (concat  "(\"\" \"--foo=\\./somefile\\.suffix ?"
+                                  "notherfile\\.suffix ?\").*"))))
               (term-send-raw-string "\C-x\C-c")
-              (sleep-for 0.1)
-              (goto-char (point-max))
-              (should (search-backward "Process ert finished")))
+              (should (pytest-pdb-break-test--expect-timeout
+                       (lambda nil (not (process-live-p proc))))))
           (unless (pytest-pdb-break-test-invoked-with-debug-p)
             (write-file logfile)
-            (set-process-query-on-exit-flag proc nil)
             (kill-buffer buf))))))))
 
 (ert-deftest pytest-pdb-break-test-default-options-function ()
@@ -864,6 +882,7 @@ class TestFoo:
       (should-not (pytest-pdb-break-default-options-function nil))
       (should (string= "" (car pytest-pdb-break--options-history)))
       (should-not (string= "" (cadr pytest-pdb-break--options-history))))
+    ;; This is only meant to show that history may be modified somehow
     (advice-add 'pytest-pdb-break--read-session-options
                 :override (lambda (&rest r)
                             (should-not r)

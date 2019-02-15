@@ -270,41 +270,47 @@ del _wrap_pyel
 
 (defvar pytest-pdb-break--options-history nil)
 
+(defun pytest-pdb-break--maybe-tare-options-history ()
+  "Add the empty string to the front of the options history.
+Remove other instances and return the modified list."
+  (setq pytest-pdb-break--options-history
+        (cons "" (delete "" pytest-pdb-break--options-history))))
+
 (defun pytest-pdb-break--read-session-options ()
   "Ask for additional options and return the resulting string.
 Shell quoting won't work. Values containing spaces should be enclosed in
 double quotes, e.g., prompt: -foO \"--data={\\\"bar\\\": 1}\" ./baz/"
   (let ((comint-file-name-chars
          (replace-regexp-in-string "[,:=]" "" comint-file-name-chars))
-        minibuffer-allow-text-properties)
+        minibuffer-allow-text-properties outstr)
     (minibuffer-with-setup-hook
         (lambda nil (add-hook 'completion-at-point-functions
                               'comint-completion-at-point nil t))
-      (read-from-minibuffer
-       "options: " nil minibuffer-local-shell-command-map
-       nil 'pytest-pdb-break--options-history
-       (car pytest-pdb-break--options-history) t))))
+      (setq outstr (read-from-minibuffer
+                    "options: " (car pytest-pdb-break--options-history)
+                    minibuffer-local-shell-command-map
+                    nil '(pytest-pdb-break--options-history . 1)
+                    nil t))
+      (when (string-empty-p outstr)
+        (pytest-pdb-break--maybe-tare-options-history))
+      outstr)))
 
 (defun pytest-pdb-break-default-options-function (&optional n)
   "Return a previously used options list or ask for a new one.
 Without N, return the most recent, which may be nil. When N is positive,
-ask for new options. When N is negative, return the N+1-th previous
-list. When N is 0, insert \"\" into history and return nil."
+ask for new options. When N is negative, return that many entries before
+the most recent. When N is 0, add \"\" to the front of the history and
+return nil."
   (let ((raw (cond
               ((null n) (car pytest-pdb-break--options-history))
               ((< n 0) (or (nth (- n) pytest-pdb-break--options-history)
                            (car (last pytest-pdb-break--options-history))))
               ((> n 0) (pytest-pdb-break--read-session-options))
-              (t (car (cl-pushnew "" pytest-pdb-break--options-history))))))
+              (t (car (pytest-pdb-break--maybe-tare-options-history))))))
     (and raw (split-string-and-unquote raw))))
 
 (defun pytest-pdb-break--interpret-prefix-arg (arg)
   "Convert prefix ARG to number if non-nil."
-  ;; FIXME use `prefix-numeric-value' instead
-  ;; (pcase arg
-  ;;   (`(,u) u)
-  ;;   ((and u (pred numberp)) u)
-  ;;   ('- -1))
   (and arg (prefix-numeric-value arg)))
 
 ;;;###autoload
