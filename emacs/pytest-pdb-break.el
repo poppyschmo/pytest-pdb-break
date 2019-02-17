@@ -35,32 +35,35 @@
 (defgroup pytest-pdb-break nil
   "Emacs integration for the pytest plugin of the same name."
   :prefix "pytest-pdb-break-"
-  :group 'pytest)
+  :group 'languages)
 
 (defcustom pytest-pdb-break-extra-opts nil
   "List of extra options passed to all pytest invocations.
+
 For one-offs, see `pytest-pdb-break-options-function', which prompts for
 session options. This variable is best used in a `dir-locals-file'. For
 example, this `python-mode' entry unsets cmd-line options from a project
 ini: (pytest-pdb-break-extra-opts \"-o\" \"addopts=\")."
-  :group 'pytest
+  :group 'pytest-pdb-break
   :type 'list)
 
 (defcustom pytest-pdb-break-pytest-executable nil
   "Path to an alternate pytest executable.
+
 If set, `executable-find' won't be consulted. For certain actions, like
 querying helpers, this script's shebanged Python may be used in place of
 `python-shell-interpreter'."
-  :group 'pytest
+  :group 'pytest-pdb-break
   :type 'string)
 
 (defcustom pytest-pdb-break-options-function
   'pytest-pdb-break-default-options-function
   "Function determining any additional options to pass to pytest.
+
 Handed a single arg, which is either nil or an integer like that
 provided by (interactive \"P\"). Must return a list of strings or nil.
 See `pytest-pdb-break-default-options-function'."
-  :group 'pytest
+  :group 'pytest-pdb-break
   :type 'function)
 
 (defvar pytest-pdb-break-processes nil
@@ -71,6 +74,7 @@ See `pytest-pdb-break-default-options-function'."
 
 (defun pytest-pdb-break--homer ()
   "Find the real path of the directory containing this file.
+
 Store absolute form (with trailing sep) in `pytest-pdb-break--home'.
 This is the root path of cloned repo, not a \"lisp\" sub directory."
   (let ((drefd (file-truename (find-library-name "pytest-pdb-break")))
@@ -98,12 +102,15 @@ This is the root path of cloned repo, not a \"lisp\" sub directory."
 
 (defvar pytest-pdb-break--tempdir nil
   "Temporary directory for this session.
+
 Should be an absolute path ending in a slash.")
 
 (defvar pytest-pdb-break--isolated-lib nil
   "Temporary directory containing plugin and metadata.
-Absolute path to a subdir of `pytest-pdb-break--tempdir'.
-Should end in a slash.")
+
+This should be an absolute path ending end in a slash. It should point
+to a proper \"library\" installation, without dependencies, under
+`pytest-pdb-break--tempdir'.")
 
 (defun pytest-pdb-break--on-kill-emacs ()
   "Remove session tempdir `pytest-pdb-break--tempdir'."
@@ -129,6 +136,7 @@ Should end in a slash.")
 
 (defun pytest-pdb-break-get-isolated-lib (&optional interpreter)
   "Return path to an isolated plugin installation.
+
 Use INTERPRETER or `python-shell-interpreter' to run the helper script."
   (if pytest-pdb-break--isolated-lib
       pytest-pdb-break--isolated-lib
@@ -163,8 +171,7 @@ Use INTERPRETER or `python-shell-interpreter' to run the helper script."
 (defvar pytest-pdb-break--exe-alist nil)
 
 (defun pytest-pdb-break-get-python-interpreter (pytest-exe &optional force)
-  "Return the python interpreter used by PYTEST-EXE.
-With FORCE, update."
+  "Return PYTEST-EXE's interpreter. With FORCE, update existing."
   (let* ((entry (assoc pytest-exe pytest-pdb-break--exe-alist))
          (value (cdr entry)))
     (if (and (not force) value)
@@ -202,6 +209,7 @@ With FORCE, update."
 
 (defun pytest-pdb-break--get-args (session-opts breakpoint node-id-parts)
   "Generate arguments for the pytest subprocess.
+
 SESSION-OPTS, BREAKPOINT, and NODE-ID-PARTS are as required by the main
 command, `pytest-pdb-break-here' (which see)."
   (let ((nodeid (mapconcat #'identity node-id-parts "::"))
@@ -276,12 +284,14 @@ del _wrap_pyel
 
 (defun pytest-pdb-break--maybe-tare-options-history ()
   "Add the empty string to the front of the options history.
+
 Remove other instances and return the modified list."
   (setq pytest-pdb-break--options-history
         (cons "" (delete "" pytest-pdb-break--options-history))))
 
 (defun pytest-pdb-break--read-session-options ()
   "Ask for additional options and return the resulting string.
+
 Shell quoting won't work. Values containing spaces should be enclosed in
 double quotes, e.g., prompt: -foO \"--data={\\\"bar\\\": 1}\" ./baz/"
   (let ((comint-file-name-chars
@@ -301,6 +311,7 @@ double quotes, e.g., prompt: -foO \"--data={\\\"bar\\\": 1}\" ./baz/"
 
 (defun pytest-pdb-break-default-options-function (&optional n)
   "Return a previously used options list or ask for a new one.
+
 Without N, return the most recent, which may be nil. When N is positive,
 ask for new options. When N is negative, return that many entries before
 the most recent. When N is 0, add \"\" to the front of the history and
@@ -320,6 +331,7 @@ return nil."
 ;;;###autoload
 (defun pytest-pdb-break-here (session-opts breakpoint node-id-parts)
   "Run pytest on the test at point and break at BREAKPOINT.
+
 BREAKPOINT may be a line number or cons of the form (FILENAME . LNUM).
 NODE-ID-PARTS should be a list of pytest node-id components and
 SESSION-OPTS a list of additional options. `prefix-arg' behavior is
