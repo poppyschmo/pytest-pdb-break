@@ -766,14 +766,14 @@ class TestFoo:
   (should-not (process-live-p nil))
   (cl-macrolet ((inside (&rest rest) `(ert-info ("Inside") ,@rest))
                 (outside (&rest rest) `(ert-info ("Outside") ,@rest))
-                (rip (x &optional y)
+                (rip (x &optional y &key (args '("sleep" "60")))
                      `(pytest-pdb-break-test-with-environment
                        (should-not pytest-pdb-break-processes)
                        (should-not pytest-pdb-break--process)
                        (let (proc)
                          (with-temp-buffer
-                           (setq proc (start-process "sleeper" (current-buffer)
-                                                     "sleep" "60"))
+                           (setq proc (start-process ,(car args)
+                                                     (current-buffer) ,@args))
                            (should (process-buffer proc)) ; proc dies w. buffer
                            (set-process-query-on-exit-flag proc nil)
                            ,x)
@@ -809,24 +809,36 @@ class TestFoo:
                    (pytest-pdb-break-mode +1))
            (outside (should-not pytest-pdb-break-processes))))
     (ert-info ("Deactivation behavior")
-      (let ((s1 (start-process "s1" (current-buffer) "sleep" "30")))
-        (set-process-query-on-exit-flag s1 nil)
-        (rip (inside (setq pytest-pdb-break--process proc) ; else latest picked
-                     (pytest-pdb-break-mode +1)
-                     (let ((t1 (start-process "t1" (current-buffer) "true")))
-                       (setq pytest-pdb-break-processes
-                             (nconc pytest-pdb-break-processes (list s1 t1)))
-                       (while (process-live-p t1) (sleep-for 0.001))
-                       (should (seq-set-equal-p pytest-pdb-break-processes
-                                                (list proc s1 t1))))
-                     (pytest-pdb-break-mode -1)
-                     (should (codechk))  ; buffer-local var not removed
-                     (should (equal pytest-pdb-break-processes (list s1))))
-             (outside (kill-process s1)
-                      (should-not pytest-pdb-break--process)
+      (pytest-pdb-break-test-with-tmpdir
+       (let (($pyexe (pytest-pdb-break-test--get-pyexe 'base))
+             (s1 (start-process "s1" (current-buffer) "sleep" "30")))
+         (set-process-query-on-exit-flag s1 nil)
+         (rip (inside (defvar python-shell--interpreter)
+                      (defvar python-shell--interpreter-args)
+                      (let (python-shell--interpreter
+                            python-shell--interpreter-args)
+                        (inferior-python-mode))
+                      (setq pytest-pdb-break--process proc) ; else most recent
+                      (pytest-pdb-break-mode +1)
+                      (should (eq pytest-pdb-break--process proc))
+                      (let ((t1 (start-process "t1" (current-buffer) "true")))
+                        (nconc pytest-pdb-break-processes (list s1 t1))
+                        (while (process-live-p t1) (sleep-for 0.001))
+                        (should (seq-set-equal-p pytest-pdb-break-processes
+                                                 (list proc s1 t1))))
                       (pytest-pdb-break-mode -1)
+                      ;; buffer-local vars removed
+                      (should-not (local-variable-p
+                                   'python-shell-completion-native-enable))
                       (should-not (codechk))
-                      (should-not (local-variable-p 'kill-buffer-hook))))))))
+                      (should-not pytest-pdb-break--process)
+                      (should (equal pytest-pdb-break-processes (list s1))))
+              (outside (kill-process s1)
+                       (should-not pytest-pdb-break--process)
+                       (pytest-pdb-break-mode -1)
+                       (should-not (codechk))
+                       (should-not (local-variable-p 'kill-buffer-hook)))
+              :args ($pyexe "-c" "import pdb; pdb.set_trace()")))))))
 
 (ert-deftest pytest-pdb-break-test-interpret-prefix-arg ()
   ;; Eval: (compile "make PAT=interpret-prefix-arg")

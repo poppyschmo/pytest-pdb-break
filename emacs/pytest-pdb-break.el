@@ -280,10 +280,14 @@ del _wrap_pyel
           (add-hook 'kill-buffer-hook
                     (lambda nil (pytest-pdb-break-mode -1))
                     nil t))
+      (when (eq major-mode 'inferior-python-mode)
+        (kill-local-variable 'pytest-pdb-break--process)
+        (kill-local-variable 'python-shell-completion-setup-code)
+        (kill-local-variable 'python-shell-completion-native-enable))
       ;; Forget proc even if it's still running
       (setq pytest-pdb-break-processes
             (seq-filter #'process-live-p ; proc may be nil
-                        (remq proc pytest-pdb-break-processes))))))
+                        (delq proc pytest-pdb-break-processes))))))
 
 (defvar pytest-pdb-break-prompt-regexp  "[(<]*[Ii]?[Pp]db[+>)]+ "
   "The default `python-shell-prompt-pdb-regexp' with an extra +.")
