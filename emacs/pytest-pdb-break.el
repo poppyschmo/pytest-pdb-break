@@ -66,6 +66,15 @@ See `pytest-pdb-break-default-options-function'."
   :group 'pytest-pdb-break
   :type 'function)
 
+(defcustom pytest-pdb-break-alt-lib-dir nil
+  "Path to an existing installation of the pytest plugin.
+
+If set, this is used in lieu of creating a per-session, \"isolated\"
+installation. Useful for \"editable\" setups (working dir with egg
+info)."
+  :group 'pytest-pdb-break
+  :type 'string)
+
 (defvar pytest-pdb-break-processes nil
   "List of processes started via `pytest-pdb-break-here'.")
 
@@ -350,7 +359,8 @@ determined by `pytest-pdb-break-options-function'."
     (let* ((pytest-exe (pytest-pdb-break-get-pytest-executable))
            (pyexe (pytest-pdb-break-get-python-interpreter pytest-exe))
            (python-shell-extra-pythonpaths
-            (append (list (pytest-pdb-break-get-isolated-lib pyexe))
+            (append (list (or pytest-pdb-break-alt-lib-dir
+                              (pytest-pdb-break-get-isolated-lib pyexe)))
                     python-shell-extra-pythonpaths))
            ;; Make pdb++ prompt trigger non-native-completion fallback
            (python-shell-prompt-pdb-regexp pytest-pdb-break-prompt-regexp)

@@ -1026,6 +1026,9 @@ PATTERN may also be a function that takes no args."
                (kill-process pytest-pdb-break--process))
              (kill-buffer))))))))
 
+;; Note: none of the following cases covers `pytest-pdb-break-alt-lib-dir'
+;; because its implementation is trivial
+
 (ert-deftest pytest-pdb-break-test-main-command-basic ()
   ;; Eval: (compile "make PAT=main-command-basic")
   (pytest-pdb-break--main-command-fixture
