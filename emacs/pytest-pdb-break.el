@@ -263,7 +263,6 @@ del _wrap_pyel
     proc-name))
 
 (defvar-local pytest-pdb-break--process nil)
-(defvar-local pytest-pdb-break--parent-buffer nil)
 
 (define-minor-mode pytest-pdb-break-mode
   "A minor mode for Python comint buffers running a pytest PDB session."
@@ -383,8 +382,7 @@ determined by `pytest-pdb-break-options-function'."
           ;; Only python- prefixed local vars get cloned in child buffer
           (with-current-buffer buffer
             (inferior-python-mode)
-            (setq pytest-pdb-break--process (get-buffer-process buffer)
-                  pytest-pdb-break--parent-buffer python-shell--parent-buffer)
+            (setq pytest-pdb-break--process (get-buffer-process buffer))
             (pytest-pdb-break-mode +1))
           (display-buffer buffer))))))
 
