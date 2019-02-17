@@ -1,4 +1,4 @@
-;;; pytest-pdb-break-test.el ---- tests -*- lexical-binding: t -*-
+;;; pytest-pdb-break-test.el --- tests -*- lexical-binding: t -*-
 
 ;;; Commentary:
 ;;
@@ -72,7 +72,7 @@
   (should-not (getenv "VIRTUAL_ENV"))
   (should-not (getenv "PYTHONPATH")))
 
-(eval-when-compile ; BEG
+(eval-when-compile
 
   (unless (fboundp 'seq-set-equal-p) ; 25
     (defun seq-set-equal-p (p q) (not (cl-set-exclusive-or p q))))
@@ -101,11 +101,7 @@
     (upcase (replace-regexp-in-string "-" "_" name)))
 
   (defun pytest-pdb-break-test-invoked-with-debug-p ()
-    ;; (let ((earg (car (last command-line-args))))
-    ;;   (string-match-p "ert-run-tests-interactively" earg))
-    (not noninteractive))
-
-  ) ; e-w-c--------- END
+    (not noninteractive)))
 
 (defmacro pytest-pdb-break-test-with-environment (&rest body)
   "Run BODY in a temporary environment.

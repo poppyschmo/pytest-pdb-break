@@ -1,31 +1,29 @@
-;;; pytest-pdb-break.el --- pytest-pdb-break runner -*- lexical-binding: t -*-
+;;; pytest-pdb-break.el --- A pytest PDB launcher -*- lexical-binding: t -*-
+
+;; Copyright (C) 2018-2019 Jane Soko
 
 ;; Author: Jane Soko <poppyschmo@protonmail.com>
 ;; URL: https://github.com/poppyschmo/pytest-pdb-break
 ;; Version: 0.0.2
-;; Keywords: python testing
+;; Keywords: languages, tools
 ;; Package-Requires: ((emacs "25"))
+
+;; This file is not part of GNU Emacs.
 
 ;;; Commentary:
 
-;; Installation: no MELPA, but `straight.el' users can use this recipe:
-;;
-;;   '(:host github :repo "poppyschmo/pytest-pdb-break"
-;;     :files (:defaults "emacs/*.el" (:exclude "emacs/*-test.el")))
-;;
 ;; Usage: with point in the body of some test, run M-x `pytest-pdb-break-here'
 ;;
 ;; This command can only handle the "console script"/entry-point invocation
 ;; style (as opposed to "python -m pytest"). If a pytest executable doesn't
 ;; appear in PATH, `pytest-pdb-break-pytest-executable' must be set.
 ;;
-;; Regarding the completion modifications:
-;;
-;;   1. they're only meant for use with pdb++.
-;;   2. they may not respond correctly when summoned by third-party tools like
-;;      `company-capf'.
-;;
-;; TODO tramp
+;; TODO:
+;; - Test and merge the "on-fail" branch, which adds a `compilation-mode'
+;;   runner that drops into pdb on failure
+;; - Fixture breaking
+;; - Option-name completions (would require external helper)
+;; - Tramp
 ;;
 
 ;;; Code:
@@ -35,16 +33,16 @@
 (require 'python)
 
 (defgroup pytest-pdb-break nil
-  "Emacs integration for the pdb-break pytest plugin."
+  "Emacs integration for the pytest plugin of the same name."
   :prefix "pytest-pdb-break-"
   :group 'pytest)
 
 (defcustom pytest-pdb-break-extra-opts nil
-  "List of extra args passed to all pytest invocations.
-For one-offs, it's easier to call this package's commands with one or
-more universal args. This option is best used in a `dir-locals-file'.
-For example, this `python-mode' entry unsets cmd-line options from a
-project ini: (pytest-pdb-break-extra-opts \"-o\" \"addopts=\")."
+  "List of extra options passed to all pytest invocations.
+For one-offs, see `pytest-pdb-break-options-function', which prompts for
+session options. This variable is best used in a `dir-locals-file'. For
+example, this `python-mode' entry unsets cmd-line options from a project
+ini: (pytest-pdb-break-extra-opts \"-o\" \"addopts=\")."
   :group 'pytest
   :type 'list)
 
@@ -59,7 +57,7 @@ querying helpers, this script's shebanged Python may be used in place of
 (defcustom pytest-pdb-break-options-function
   'pytest-pdb-break-default-options-function
   "Function determining any additional options to pass to pytest.
-Handed a single arg, which, if non-nil, must be an integer like that
+Handed a single arg, which is either nil or an integer like that
 provided by (interactive \"P\"). Must return a list of strings or nil.
 See `pytest-pdb-break-default-options-function'."
   :group 'pytest
@@ -316,9 +314,9 @@ return nil."
 ;;;###autoload
 (defun pytest-pdb-break-here (session-opts line-no node-id-parts)
   "Run pytest on the test at point and break at LINE-NO.
-When called non-interactively, NODE-ID-PARTS should be a list of pytest
-node-id components and SESSION-OPTS a list of additional options. See
-`pytest-pdb-break-default-options-function' for `prefix-arg' behavior."
+NODE-ID-PARTS should be a list of pytest node-id components and
+SESSION-OPTS a list of additional options. `prefix-arg' behavior is
+determined by `pytest-pdb-break-options-function'."
   (interactive
    (list (funcall pytest-pdb-break-options-function
                   (pytest-pdb-break--interpret-prefix-arg
@@ -340,7 +338,7 @@ node-id components and SESSION-OPTS a list of additional options. See
                                              line-no node-id-parts))
            ;; Triggers local-while-let-bound warning in 25.x
            (python-shell--parent-buffer (current-buffer))
-           ;; Ensure ``python-shell-prompt-detect'' doesn't use ipython, etc.
+           ;; Ensure `python-shell-prompt-detect' doesn't use ipython, etc.
            (python-shell--interpreter pyexe)
            python-shell--interpreter-args
            buffer)
@@ -348,15 +346,15 @@ node-id components and SESSION-OPTS a list of additional options. See
         ;; Allow "calculate-" funcs to consider "python-shell-" options and
         ;; modify process-environment and exec-path accordingly
         (python-shell-with-environment
-          (setq buffer (apply #'make-comint-in-buffer proc-name nil
-                              pytest-exe nil args))
-          ;; Only python- prefixed local vars get cloned in child buffer
-          (with-current-buffer buffer
-            (inferior-python-mode)
-            (setq pytest-pdb-break--process (get-buffer-process buffer)
-                  pytest-pdb-break--parent-buffer python-shell--parent-buffer)
-            (pytest-pdb-break-mode +1))
-          (display-buffer buffer))))))
+         (setq buffer (apply #'make-comint-in-buffer proc-name nil
+                             pytest-exe nil args))
+         ;; Only python- prefixed local vars get cloned in child buffer
+         (with-current-buffer buffer
+           (inferior-python-mode)
+           (setq pytest-pdb-break--process (get-buffer-process buffer)
+                 pytest-pdb-break--parent-buffer python-shell--parent-buffer)
+           (pytest-pdb-break-mode +1))
+         (display-buffer buffer))))))
 
 
 (provide 'pytest-pdb-break)
