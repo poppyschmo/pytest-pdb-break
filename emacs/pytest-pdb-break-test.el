@@ -16,6 +16,7 @@
 
 (defvar pytest-pdb-break-test-tests
   '(pytest-pdb-break-test-ert-setup
+    pytest-pdb-break-test-library-version
     pytest-pdb-break-test-upstream-env-updaters
     pytest-pdb-break-test-homer
     pytest-pdb-break-test-homer-symlink
@@ -153,6 +154,23 @@ Note: this does *not* create and cd to a temp dir."
       (let (python-indent-guess-indent-offset)
         (python-mode))
       ,@body)))
+
+(ert-deftest pytest-pdb-break-test-library-version ()
+  ;; Eval: (compile "make PAT=library-version")
+  (let (ours theirs)
+    (with-temp-buffer
+      (let ((default-directory pytest-pdb-break-test-repo-root))
+        (should (file-exists-p "setup.py"))
+        (should (zerop (call-process "python3" nil (current-buffer) nil
+                                     "setup.py" "--version")))
+        (goto-char (point-min))
+        (setq theirs (buffer-substring (point) (point-at-eol)))))
+    (with-temp-buffer
+      (insert-file-contents-literally pytest-pdb-break-test-lisp-main)
+      (goto-char (point-min))
+      (should (setq ours (and (search-forward-regexp "^;; Version: \\(.+\\)$")
+                              (match-string-no-properties 1)))))
+    (should (string= ours theirs))))
 
 (ert-deftest pytest-pdb-break-test-upstream-env-updaters ()
   "Describe expected behavior of built-in `python-mode' interface.
