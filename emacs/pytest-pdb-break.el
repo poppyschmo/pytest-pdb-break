@@ -19,8 +19,6 @@
 ;; appear in PATH, `pytest-pdb-break-pytest-executable' must be set.
 ;;
 ;; TODO:
-;; - Test and merge the "on-fail" branch, which adds a `compilation-mode'
-;;   runner that drops into pdb on failure
 ;; - Fixture breaking
 ;; - Option-name completions (would require external helper)
 ;; - Tramp

@@ -13,6 +13,7 @@
 (require 'ert)
 (require 'term)
 (require 'pytest-pdb-break)
+(require 'pytest-pdb-break-extra)
 
 (defvar pytest-pdb-break-test-tests
   '(pytest-pdb-break-test-ert-setup
@@ -35,7 +36,12 @@
     pytest-pdb-break-test-read-session-options
     pytest-pdb-break-test-default-options-function
     pytest-pdb-break-test-main-command-basic
-    pytest-pdb-break-test-main-command-completion))
+    pytest-pdb-break-test-main-command-completion
+    pytest-pdb-break-test-run-fail-compilation-filter
+    pytest-pdb-break-test-run-fail-comint-process-filter
+    pytest-pdb-break-test-go-inferior
+    pytest-pdb-break-test-run-fail-stay
+    pytest-pdb-break-test-run-fail-switch))
 
 (defvar pytest-pdb-break-test-repo-root
   (file-name-as-directory
@@ -57,6 +63,9 @@
 (defvar pytest-pdb-break-test-lisp-main
   (concat pytest-pdb-break-test-lisp-root "pytest-pdb-break.el"))
 
+(defvar pytest-pdb-break-test-lisp-extra
+  (concat pytest-pdb-break-test-lisp-root "pytest-pdb-break-extra.el"))
+
 (defvar pytest-pdb-break-test-lisp-this
   (concat pytest-pdb-break-test-lisp-root "pytest-pdb-break-test.el"))
 
@@ -69,6 +78,7 @@
   (should (file-exists-p pytest-pdb-break-test-lisp-root))
   (should (file-exists-p pytest-pdb-break-test-pytest-plugin))
   (should (file-exists-p pytest-pdb-break-test-lisp-main))
+  (should (file-exists-p pytest-pdb-break-test-lisp-extra))
   (should (file-exists-p pytest-pdb-break-test-lisp-this))
   (should-not (getenv "VIRTUAL_ENV"))
   (should-not (getenv "PYTHONPATH")))
@@ -179,8 +189,7 @@ returns nil."
 
 (ert-deftest pytest-pdb-break-test-upstream-env-updaters ()
   "Describe expected behavior of built-in `python-mode' interface.
-Show that it doesn't restore environment to previous state. Certain
-options are idiosyncratic and unintuitive.
+Show that it doesn't restore environment to previous state.
 
 Note: for local files, `python-shell-with-environment' calls both
 `process-environment' and `exec-path' \"calculate\" funcs, in that
@@ -290,6 +299,7 @@ generated VIRTUAL_ENV var never end in a /, even when orig does.
 
 ;; TODO link ffip
 (ert-deftest pytest-pdb-break-test-homer ()
+  ;; Eval: (compile "make SYM=pytest-pdb-break-test-homer")
   (ert-info ("Find cloned repo containing pytest plugin")
     (should-not (fboundp 'ffip-project-root))
     (pytest-pdb-break-test-homer-fixture)))
@@ -329,6 +339,7 @@ DIR-BODY sets up build dir. INFO-MSG is passed to `ert-info'."
                  "-setup/build"
                  ,dir-body
                  (byte-compile-file "./pytest-pdb-break.el")
+                 (byte-compile-file "./pytest-pdb-break-extra.el")
                  default-directory)))
        (ert-info (,info-msg)
          (should (zerop (pytest-pdb-break-test-run-ert-in-subprocess
@@ -345,9 +356,12 @@ DIR-BODY sets up build dir. INFO-MSG is passed to `ert-info'."
    (progn
      (should-not (fboundp 'ffip-project-root))
      (should (file-symlink-p (find-library-name "pytest-pdb-break")))
+     (should (file-symlink-p (find-library-name "pytest-pdb-break-extra")))
      (pytest-pdb-break-test-homer-fixture))
    ;; dir-body
-   (make-symbolic-link pytest-pdb-break-test-lisp-main "./")
+   (progn
+     (make-symbolic-link pytest-pdb-break-test-lisp-main "./")
+     (make-symbolic-link pytest-pdb-break-test-lisp-extra "./"))
    ;; info-msg
    "Find home, resolving symlinks"))
 
@@ -360,7 +374,9 @@ DIR-BODY sets up build dir. INFO-MSG is passed to `ert-info'."
      (should (string-match-p "cannot find.*home" (cadr exc)))
      (should-not pytest-pdb-break--home))
    ;; dir-body
-   (copy-file pytest-pdb-break-test-lisp-main "./")
+   (progn
+     (copy-file pytest-pdb-break-test-lisp-main "./")
+     (copy-file pytest-pdb-break-test-lisp-extra "./"))
    ;; info-msg
    "No cloned repo (pytest plugin) found"))
 
@@ -810,7 +826,7 @@ class TestFoo:
            (outside (should-not pytest-pdb-break-processes))))
     (ert-info ("Deactivation behavior")
       (pytest-pdb-break-test-with-tmpdir
-       (let (($pyexe (pytest-pdb-break-test--get-pyexe 'base))
+       (let ((pyexe (pytest-pdb-break-test--get-pyexe 'base))
              (s1 (start-process "s1" (current-buffer) "sleep" "30")))
          (set-process-query-on-exit-flag s1 nil)
          (rip (inside (defvar python-shell--interpreter)
@@ -838,7 +854,7 @@ class TestFoo:
                        (pytest-pdb-break-mode -1)
                        (should-not (codechk))
                        (should-not (local-variable-p 'kill-buffer-hook)))
-              :args ($pyexe "-c" "import pdb; pdb.set_trace()")))))))
+              :args (pyexe "-c" "import pdb; pdb.set_trace()")))))))
 
 (ert-deftest pytest-pdb-break-test-interpret-prefix-arg ()
   ;; Eval: (compile "make PAT=interpret-prefix-arg")
@@ -1122,6 +1138,208 @@ PATTERN may also be a function that takes no args."
    (execute-kbd-macro "c\r")
    (should (pytest-pdb-break-test--expect-timeout
             (if $debuggin? "passed.*\n?" "finished.*\n?")))))
+
+(ert-deftest pytest-pdb-break-test-run-fail-compilation-filter ()
+  ;; Eval: (compile "make PAT=run-fail-compilation-filter")
+  ;; Eval: (compile "make debug PAT=run-fail-compilation-filter")
+  (pytest-pdb-break-test-with-tmpdir
+   (let ((inhibit-message t))
+     (with-current-buffer
+         (compile (format "%s -c 'import pdb; pdb.set_trace()'"
+                          (pytest-pdb-break-test--get-pyexe 'base)))
+       (unwind-protect
+           (let ((proc (get-buffer-process (current-buffer))))
+             (setq-local
+              pytest-pdb-break--prompt-watcher-function
+              (lambda (p)
+                (should-not
+                 (member 'pytest-pdb-break--run-fail-compilation-filter
+                         compilation-filter-hook))
+                (process-send-string p "help\n")))
+             (add-hook 'compilation-filter-hook
+                       'pytest-pdb-break--run-fail-compilation-filter nil t)
+             (should (eq major-mode 'compilation-mode))
+             (should (pytest-pdb-break-test--expect-timeout
+                      (lambda ()
+                        (goto-char (point-min))
+                        (search-forward "topic" (point-max) t))))
+             (should (pytest-pdb-break-test--expect-timeout
+                      (lambda () (goto-char (point-max))
+                        (looking-back "(Pdb) " nil))))
+             (process-send-string proc "c\n")
+             (should (pytest-pdb-break-test--expect-timeout
+                      (lambda nil (not (process-live-p proc))))))
+         (unless (pytest-pdb-break-test-invoked-with-debug-p)
+           (write-file "compilation.out")))))))
+
+(ert-deftest pytest-pdb-break-test-run-fail-comint-process-filter ()
+  ;; Eval: (compile "make PAT=run-fail-comint-process-filter")
+  ;; Eval: (compile "make debug PAT=run-fail-comint-process-filter")
+  (pytest-pdb-break-test-with-tmpdir
+   (let* ((compilation-buffer-name-function
+           (lambda (m) (format "*test-%s-filter*" m)))
+          (inhibit-message t)
+          (buf (compile (format "%s -c 'import pdb; pdb.set_trace()'"
+                                (pytest-pdb-break-test--get-pyexe 'base))
+                        t))
+          (proc (get-buffer-process buf)))
+     (with-current-buffer buf
+       (unwind-protect
+           (ert-info ("Comint buffer")
+             (setq-local pytest-pdb-break--prompt-watcher-function
+                         (lambda (p)
+                           (should (eq (process-filter p)
+                                       'comint-output-filter))
+                           (process-send-string p "help\n")
+                           (comint-goto-process-mark)))
+             (set-process-filter
+              proc 'pytest-pdb-break--run-fail-comint-process-filter)
+             (should (eq major-mode 'comint-mode))
+             (should (pytest-pdb-break-test--expect-timeout
+                      (lambda ()
+                        (goto-char (point-min))
+                        (search-forward "topic" (point-max) t))))
+             (comint-goto-process-mark)
+             (should (pytest-pdb-break-test--expect-timeout "(Pdb) "))
+             (should-not buffer-read-only)
+             ;; Current buffer must be displayed for macros to work!
+             (switch-to-buffer buf)
+             (execute-kbd-macro "c\r")
+             (should (pytest-pdb-break-test--expect-timeout
+                      (lambda nil (not (process-live-p proc))))))
+         (unless (pytest-pdb-break-test-invoked-with-debug-p)
+           ;; When proc ends, we're popped back to parbuf
+           (with-current-buffer buf
+             (write-file "comint.out"))))))))
+
+(defmacro pytest-pdb-break-test-go-inferior-fixture (mode &rest body)
+  "Run BODY in MODE."
+  `(pytest-pdb-break-test-ensure-venv
+    'base
+    (let ((inhibit-message t))
+      (with-current-buffer
+          (compile (format "%s -c 'import pdb; pdb.set_trace()'" $pyexe)
+                   ,(eq mode 'comint-mode))
+        (should (pytest-pdb-break-test--expect-timeout
+                 (lambda () (goto-char (point-max))
+                   (looking-back "(Pdb) " nil))))
+        (let (($proc (get-buffer-process (current-buffer)))
+              (python-shell-virtualenv-root $venv)
+              (pytest-pdb-break--setup-code-addendum nil)
+              (pytest-pdb-break-processes
+               (append pytest-pdb-break-processes nil)))
+          (setq-local python-shell-interpreter $pyexe)
+          (pytest-pdb-break-go-inferior $proc)
+          (should-not (member $proc compilation-in-progress))
+          (should (string-match "pytest-PDB" (buffer-name)))
+          (with-current-buffer (messages-buffer)
+            (goto-char (point-min))
+            (should (search-forward "Switching")))
+          (should (eq major-mode 'inferior-python-mode))
+          (should pytest-pdb-break-mode)
+          (should (= (point) (process-mark $proc)))
+          ,@body
+          (comint-goto-process-mark)
+          (execute-kbd-macro "c\r")
+          (should (pytest-pdb-break-test--expect-timeout
+                   (lambda nil (not (process-live-p $proc))))))))))
+
+(ert-deftest pytest-pdb-break-test-go-inferior ()
+  ;; Eval: (compile "make PAT=go-inferior")
+  (pytest-pdb-break-test-go-inferior-fixture
+   'compilation-mode
+   (ignore))
+  (pytest-pdb-break-test-go-inferior-fixture
+   'comint-mode
+   (ignore)))
+
+(defmacro pytest-pdb-break-test-run-fail-fixture (&rest body)
+  "Run BODY with common setup for run-fail."
+  `(pytest-pdb-break-test-ensure-venv
+    'base
+    (let ((sample-source (nth 1 pytest-pdb-break-test--get-node-id-sources))
+          (python-shell-virtualenv-root $venv)
+          (python-shell-interpreter $pyexe)
+          (pytest-pdb-break--setup-code-addendum nil)
+          (pytest-pdb-break-processes (append pytest-pdb-break-processes nil))
+          ($debuggin? (pytest-pdb-break-test-invoked-with-debug-p))
+          (start-dir default-directory)
+          (inhibit-message t)
+          case-fold-search)
+      (pytest-pdb-break-test-with-python-buffer
+       ,@body))))
+
+(ert-deftest pytest-pdb-break-test-run-fail-stay ()
+  ;; Eval: (compile "make PAT=run-fail-stay")
+  ;; Eval: (compile "make debug PAT=run-fail-stay")
+  (pytest-pdb-break-test-run-fail-fixture
+   (insert sample-source)
+   (write-file "test_class.py")
+   (should (and (goto-char (point-min))
+                (search-forward "assert True")
+                (goto-char (match-beginning 0))))
+   (call-interactively 'pytest-pdb-break-run-fail)
+   (with-current-buffer (get-buffer "*compilation*")
+     (unwind-protect
+         (ert-info ("In run-fail buffer")
+           (should (eq pytest-pdb-break--process (get-buffer-process
+                                                  (current-buffer))))
+           (should (pytest-pdb-break-test--expect-timeout
+                    (lambda nil
+                      (not (process-live-p pytest-pdb-break--process)))))
+           (goto-char (point-min))
+           (should (search-forward "passed"))
+           (should-not (get-buffer "*Warnings*")))
+       (let ((cap (buffer-string)))
+         (with-temp-buffer
+           (insert (format "debuggin?: %S\n"
+                           (pytest-pdb-break-test-invoked-with-debug-p)))
+           (insert cap)
+           (write-file (expand-file-name "cap.out" start-dir))))
+       ;; Keep buffer open for inspection when running interactively
+       (unless $debuggin?
+         (when (process-live-p pytest-pdb-break--process)
+           (set-process-query-on-exit-flag pytest-pdb-break--process nil)
+           (kill-process pytest-pdb-break--process))
+         (kill-buffer))))))
+
+(ert-deftest pytest-pdb-break-test-run-fail-switch ()
+  ;; Eval: (compile "make PAT=run-fail-switch")
+  ;; Eval: (compile "make debug PAT=run-fail-switch")
+  (pytest-pdb-break-test-run-fail-fixture
+   (insert (replace-regexp-in-string "assert True" "assert False"
+                                     sample-source))
+   (write-file "test_class.py")
+   (should (and (goto-char (point-min))
+                (search-forward "assert False")
+                (goto-char (match-beginning 0))))
+   (call-interactively 'pytest-pdb-break-run-fail)
+   (should (pytest-pdb-break-test--expect-timeout
+            (lambda nil (get-buffer "*pytest-PDB[test_class.py]*"))))
+   (with-current-buffer "*pytest-PDB[test_class.py]*"
+     (unwind-protect
+         (ert-info ("In run-fail buffer")
+           (should (eq pytest-pdb-break--process (get-buffer-process
+                                                  (current-buffer))))
+           (should (pytest-pdb-break-test--expect-timeout "(Pdb) "))
+           (switch-to-buffer (current-buffer))
+           (execute-kbd-macro "c\r")
+           (should (pytest-pdb-break-test--expect-timeout
+                    (lambda nil
+                      (not (process-live-p pytest-pdb-break--process)))))
+           (should-not (get-buffer "*Warnings*")))
+       (let ((cap (buffer-string)))
+         (with-temp-buffer
+           (insert (format "debuggin?: %S\n"
+                           (pytest-pdb-break-test-invoked-with-debug-p)))
+           (insert cap)
+           (write-file (expand-file-name "cap.out" start-dir))))
+       ;; Keep buffer open for inspection when running interactively
+       (unless $debuggin?
+         (when (process-live-p pytest-pdb-break--process)
+           (set-process-query-on-exit-flag pytest-pdb-break--process nil)
+           (kill-process pytest-pdb-break--process))
+         (kill-buffer))))))
 
 (provide 'pytest-pdb-break-test)
 ;;; pytest-pdb-break-test ends here
