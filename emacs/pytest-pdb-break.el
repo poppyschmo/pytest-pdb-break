@@ -196,12 +196,14 @@ With FORCE, update."
       (setq parts (list (pop parts) (pop parts))))
     (cons file parts)))
 
-(defun pytest-pdb-break--get-args (session-opts line-no node-id-parts)
-  "Generate args for subprocess.
-SESSION-OPTS, LINE-NO, and NODE-ID-PARTS are as required by the main
+(defun pytest-pdb-break--get-args (session-opts breakpoint node-id-parts)
+  "Generate arguments for the pytest subprocess.
+SESSION-OPTS, BREAKPOINT, and NODE-ID-PARTS are as required by the main
 command, `pytest-pdb-break-here' (which see)."
   (let ((nodeid (mapconcat #'identity node-id-parts "::"))
-        (break (format "--break=%s:%s" (car node-id-parts) line-no)))
+        (break (format "--break=%s:%s"
+                       (or (car-safe breakpoint) (car node-id-parts))
+                       (or (cdr-safe breakpoint) breakpoint))))
     (append pytest-pdb-break-extra-opts session-opts (list break nodeid))))
 
 (defvar pytest-pdb-break--setup-code-addendum nil)
@@ -312,8 +314,9 @@ return nil."
   (and arg (prefix-numeric-value arg)))
 
 ;;;###autoload
-(defun pytest-pdb-break-here (session-opts line-no node-id-parts)
-  "Run pytest on the test at point and break at LINE-NO.
+(defun pytest-pdb-break-here (session-opts breakpoint node-id-parts)
+  "Run pytest on the test at point and break at BREAKPOINT.
+BREAKPOINT may be a line number or cons of the form (FILENAME . LNUM).
 NODE-ID-PARTS should be a list of pytest node-id components and
 SESSION-OPTS a list of additional options. `prefix-arg' behavior is
 determined by `pytest-pdb-break-options-function'."
@@ -321,10 +324,11 @@ determined by `pytest-pdb-break-options-function'."
    (list (funcall pytest-pdb-break-options-function
                   (pytest-pdb-break--interpret-prefix-arg
                    current-prefix-arg))
-         (line-number-at-pos)
-         (pytest-pdb-break--get-node-id)))
-  (let* ((process-environment (append process-environment nil))
-         (proc-name (pytest-pdb-break--get-proc-name)))
+         nil nil))
+  ;; As per (info "(elisp) Programming Tips"), the "repetition" thing
+  (unless node-id-parts (setq node-id-parts (pytest-pdb-break--get-node-id)))
+  (let ((process-environment (append process-environment nil))
+        (proc-name (pytest-pdb-break--get-proc-name)))
     (defvar python-shell--interpreter)
     (defvar python-shell--interpreter-args)
     (let* ((pytest-exe (pytest-pdb-break-get-pytest-executable))
@@ -335,7 +339,9 @@ determined by `pytest-pdb-break-options-function'."
            ;; Make pdb++ prompt trigger non-native-completion fallback
            (python-shell-prompt-pdb-regexp pytest-pdb-break-prompt-regexp)
            (args (pytest-pdb-break--get-args session-opts
-                                             line-no node-id-parts))
+                                             (or breakpoint
+                                                 (line-number-at-pos))
+                                             node-id-parts))
            ;; Triggers local-while-let-bound warning in 25.x
            (python-shell--parent-buffer (current-buffer))
            ;; Ensure `python-shell-prompt-detect' doesn't use ipython, etc.
@@ -346,15 +352,15 @@ determined by `pytest-pdb-break-options-function'."
         ;; Allow "calculate-" funcs to consider "python-shell-" options and
         ;; modify process-environment and exec-path accordingly
         (python-shell-with-environment
-         (setq buffer (apply #'make-comint-in-buffer proc-name nil
-                             pytest-exe nil args))
-         ;; Only python- prefixed local vars get cloned in child buffer
-         (with-current-buffer buffer
-           (inferior-python-mode)
-           (setq pytest-pdb-break--process (get-buffer-process buffer)
-                 pytest-pdb-break--parent-buffer python-shell--parent-buffer)
-           (pytest-pdb-break-mode +1))
-         (display-buffer buffer))))))
+          (setq buffer (apply #'make-comint-in-buffer proc-name nil
+                              pytest-exe nil args))
+          ;; Only python- prefixed local vars get cloned in child buffer
+          (with-current-buffer buffer
+            (inferior-python-mode)
+            (setq pytest-pdb-break--process (get-buffer-process buffer)
+                  pytest-pdb-break--parent-buffer python-shell--parent-buffer)
+            (pytest-pdb-break-mode +1))
+          (display-buffer buffer))))))
 
 
 (provide 'pytest-pdb-break)

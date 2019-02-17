@@ -622,33 +622,34 @@ class TestFoo:
 
 (ert-deftest pytest-pdb-break-test-get-args ()
   ;; Eval: (compile "make PAT=get-args")
-  (let* ((file "/tmp/a.py")
-         (node-info (list file "test_a"))
-         (session '("-p" "my_plugin")))
+  (let ((parts (list "/tmp/a.py" "test_a"))
+        (session '("-p" "my_plugin")))
     (ert-info ("No extras")
       (should-not pytest-pdb-break-extra-opts)
-      (should (equal (pytest-pdb-break--get-args nil 9 node-info)
+      (should (equal (pytest-pdb-break--get-args nil 9 parts)
                      '("--break=/tmp/a.py:9" "/tmp/a.py::test_a"))))
     (ert-info ("Session, no extras")
       (should-not pytest-pdb-break-extra-opts)
-      (should (equal (pytest-pdb-break--get-args session 9 node-info)
+      (should (equal (pytest-pdb-break--get-args session 9 parts)
                      '("-p" "my_plugin"
                        "--break=/tmp/a.py:9" "/tmp/a.py::test_a"))))
     (ert-info ("Extras")
       (let ((pytest-pdb-break-extra-opts '("-p" "no:foo")))
-        (should (equal (pytest-pdb-break--get-args nil 9 node-info)
+        (should (equal (pytest-pdb-break--get-args nil 9 parts)
                        '("-p" "no:foo"
                          "--break=/tmp/a.py:9"
                          "/tmp/a.py::test_a")))
         (should (equal pytest-pdb-break-extra-opts '("-p" "no:foo")))))
     (ert-info ("Session, extras")
       (let ((pytest-pdb-break-extra-opts '("-p" "no:foo")))
-        (should (equal (pytest-pdb-break--get-args session 9 node-info)
+        (should (equal (pytest-pdb-break--get-args session 9 parts)
                        '("-p" "no:foo" "-p" "my_plugin"
                          "--break=/tmp/a.py:9"
                          "/tmp/a.py::test_a")))
         (should (equal pytest-pdb-break-extra-opts '("-p" "no:foo")))))
-    ))
+    (ert-info ("Cons form")
+      (should (equal (pytest-pdb-break--get-args nil '("/tmp/b.py" . 9) parts)
+                     '("--break=/tmp/b.py:9" "/tmp/a.py::test_a"))))))
 
 (ert-deftest pytest-pdb-break-test-get-modified-setup-code ()
   ;; Eval: (compile "make PAT=get-modified-setup-code")
