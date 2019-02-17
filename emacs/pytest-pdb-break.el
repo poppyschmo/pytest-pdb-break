@@ -180,21 +180,25 @@ With FORCE, update."
         (push (setq entry (list pytest-exe)) pytest-pdb-break--exe-alist))
       (setcdr entry value))))
 
+
+(define-error 'pytest-pdb-break-test-not-found "Test not found" 'error)
+
 (defun pytest-pdb-break--get-node-id ()
   "Return list of node-id components for test at point."
-  (let (file test parts)
-    (if (fboundp 'elpy-test-at-point)
-        (let ((four (elpy-test-at-point)))
-          (setq file (nth 1 four)
-                test (nth 3 four)))
-      (setq file buffer-file-name
-            test (python-info-current-defun)))
-    (unless (and test (string-match-p "\\<[Tt]est" test))
-      (error "No test found"))
-    (setq parts (split-string test "\\."))
-    (when (caddr parts)
-      (setq parts (list (pop parts) (pop parts))))
-    (cons file parts)))
+  (let* ((test (python-info-current-defun))
+         case-fold-search
+         (func (apply-partially #'string-match-p "^\\(Test\\|test_\\)"))
+         (parts (and test (seq-take-while func (split-string test "\\.")))))
+    (cond ((cdr parts)
+           (setq parts (if (= (elt (car parts) 0) ?T)
+                           (and (= (elt (cadr parts) 0) ?t)
+                                (list (pop parts) (pop parts)))
+                         (list (pop parts)))))
+          ((and (car parts) (= (elt (car parts) 0) ?T))
+           (setq parts nil)))
+    (unless parts
+      (signal 'pytest-pdb-break-test-not-found (list test)))
+    (cons buffer-file-name parts)))
 
 (defun pytest-pdb-break--get-args (session-opts breakpoint node-id-parts)
   "Generate arguments for the pytest subprocess.

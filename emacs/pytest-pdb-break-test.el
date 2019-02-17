@@ -148,12 +148,17 @@ looping."
 
 (defmacro pytest-pdb-break-test-with-python-buffer (&rest body)
   "Run BODY in a `python-mode' temp buffer with a temp environment.
-Note: this does *not* create and cd to a temp dir."
+Note: this does *not* create and cd to a temp dir. Helper `$get-there'
+moves to next occurrence of a fixed string (and returns point) or
+returns nil."
   `(pytest-pdb-break-test-with-environment
-    (with-temp-buffer
-      (let (python-indent-guess-indent-offset)
-        (python-mode))
-      ,@body)))
+    (cl-flet (($get-there (lambda (s) (and (goto-char (point-min))
+                                           (search-forward s)
+                                           (goto-char (match-beginning 0))))))
+      (with-temp-buffer
+        (let (python-indent-guess-indent-offset)
+          (python-mode))
+        ,@body))))
 
 (ert-deftest pytest-pdb-break-test-library-version ()
   ;; Eval: (compile "make PAT=library-version")
@@ -550,9 +555,6 @@ def test_foo():
 
 def may_be_a_test():
     pass
-
-def something_else():
-    assert 1
 "
     "
 class TestFoo:
@@ -563,6 +565,23 @@ class TestFoo:
         somevar = True
         # comment
         assert somevar
+"
+    "
+class TestFoo:
+    def test_foo(self):
+        def test_f():
+            return 1
+        assert test_f()
+
+    def test_bar(self):
+        def f():
+            return 2
+        assert f()
+
+    def not_test_baz(self):
+        def test_f():
+            return 3
+        assert test_f()
 ")
   "The first line (1) is a single newline char.")
 
@@ -571,41 +590,29 @@ class TestFoo:
   ;; For now, assume Elpy branch is infallible, and just test ours
   (let ((source-one (nth 0 pytest-pdb-break-test--get-node-id-sources))
         (source-two (nth 1 pytest-pdb-break-test--get-node-id-sources))
+        (source-three (nth 2 pytest-pdb-break-test--get-node-id-sources))
         case-fold-search)
     (pytest-pdb-break-test-with-tmpdir
      (pytest-pdb-break-test-with-python-buffer
-      (should-not (fboundp 'elpy-test-at-point))
       (insert source-one)
       (write-file "s1.py") ; doesn't filter based on file name
       (ert-info ("Simple Python func, no docstring, comments")
         (should (equal buffer-file-name (expand-file-name "s1.py")))
-        (should (and (goto-char (point-min))
-                     (search-forward "assert True")
-                     (goto-char (match-beginning 0))))
+        (should ($get-there "assert True"))
         (should (equal (python-info-current-defun)
                        "test_foo"))
         (should (equal (pytest-pdb-break--get-node-id)
                        (list buffer-file-name "test_foo"))))
-      (ert-info ("Match pattern is liberal")
-        (should (and (goto-char (point-min))
-                     (search-forward "pass")
-                     (goto-char (match-beginning 0))))
-        (should (equal (pytest-pdb-break--get-node-id)
-                       (list buffer-file-name "may_be_a_test"))))
-      (ert-info ("Rejects funcs without 'test' in name")
-        (should (and (goto-char (point-min))
-                     (search-forward "assert 1")
-                     (goto-char (match-beginning 0))))
-        (should (equal (python-info-current-defun) "something_else"))
+      (ert-info ("Name must start with 'test'")
+        (should ($get-there "pass"))
         (let ((exc (should-error (pytest-pdb-break--get-node-id))))
-          (should (equal exc '(error "No test found"))))))
+          (should (equal (car exc) 'pytest-pdb-break-test-not-found))
+          (should (equal (cadr exc) "may_be_a_test")))))
      (pytest-pdb-break-test-with-python-buffer
       (insert source-two)
       (write-file "s2.py")
       (ert-info ("Simple Python class, two methods")
-        (should (and (goto-char (point-min))
-                     (search-forward "# comment")
-                     (goto-char (match-beginning 0))))
+        (should ($get-there "# comment"))
         (should (equal (python-info-current-defun)
                        "TestFoo.test_bar"))
         (should (equal (pytest-pdb-break--get-node-id)
@@ -618,7 +625,62 @@ class TestFoo:
                             (looking-at-p "\n"))))
         (should-not (python-info-current-defun))
         (let ((exc (should-error (pytest-pdb-break--get-node-id))))
-          (should (equal exc '(error "No test found")))))))))
+          (should (equal (car exc) 'pytest-pdb-break-test-not-found))
+          (should-not (cadr exc)))))
+     (pytest-pdb-break-test-with-python-buffer
+      (insert source-three)
+      (write-file "s3.py")
+      (ert-info ("Nested: Test / test / test") ; upcase T means cls
+        (should ($get-there "return 1"))
+        (should (equal (pytest-pdb-break--get-node-id)
+                       (list buffer-file-name "TestFoo" "test_foo"))))
+      (ert-info ("Nested: Test / test /non")
+        (should ($get-there "return 2"))
+        (should (equal (pytest-pdb-break--get-node-id)
+                       (list buffer-file-name "TestFoo" "test_bar"))))
+      (ert-info ("Nested: Test / non / test")
+        (should ($get-there "return 3"))
+        (let ((exc (should-error (pytest-pdb-break--get-node-id))))
+          (should (equal (car exc) 'pytest-pdb-break-test-not-found))
+          (should (equal (cadr exc) "TestFoo.not_test_baz.test_f")))))
+     (pytest-pdb-break-test-with-python-buffer
+      (insert (replace-regexp-in-string
+               "(self)" "()"
+               (replace-regexp-in-string "class TestFoo"
+                                         "def test_foo_top()"
+                                         source-three)))
+      (write-file "s4.py")
+      (ert-info ("Nested: test / test / test")
+        (should ($get-there "return 1"))
+        (should (equal (pytest-pdb-break--get-node-id)
+                       (list buffer-file-name "test_foo_top"))))
+      (ert-info ("Nested: test / test / non")
+        (should ($get-there "return 2"))
+        (should (equal (pytest-pdb-break--get-node-id)
+                       (list buffer-file-name "test_foo_top"))))
+      (ert-info ("Nested: test / non / test")
+        (should ($get-there "return 3"))
+        (should (equal (pytest-pdb-break--get-node-id)
+                       (list buffer-file-name "test_foo_top")))))
+     (pytest-pdb-break-test-with-python-buffer
+      (insert (replace-regexp-in-string
+               "(self)" "()"
+               (replace-regexp-in-string "^    \\|class TestFoo.*$"
+                                         "" source-three)))
+      (write-file "s5.py")
+      (ert-info ("Nested: test / test")
+        (should ($get-there "return 1"))
+        (should (equal (pytest-pdb-break--get-node-id)
+                       (list buffer-file-name "test_foo"))))
+      (ert-info ("Nested: test / non")
+        (should ($get-there "return 2"))
+        (should (equal (pytest-pdb-break--get-node-id)
+                       (list buffer-file-name "test_bar"))))
+      (ert-info ("Nested: non / test")
+        (should ($get-there "return 3"))
+        (let ((exc (should-error (pytest-pdb-break--get-node-id))))
+          (should (equal (car exc) 'pytest-pdb-break-test-not-found))
+          (should (equal (cadr exc) "not_test_baz.test_f"))))))))
 
 (ert-deftest pytest-pdb-break-test-get-args ()
   ;; Eval: (compile "make PAT=get-args")
