@@ -64,7 +64,7 @@ See `pytest-pdb-break-default-options-function'."
   :group 'pytest-pdb-break
   :type 'function)
 
-(defcustom pytest-pdb-break-alt-lib-dir nil
+(defcustom pytest-pdb-break-alt-installation nil
   "Path to an existing installation of the pytest plugin.
 
 If set, this is used in lieu of creating a per-session, \"isolated\"
@@ -76,29 +76,29 @@ info)."
 (defvar pytest-pdb-break-processes nil
   "List of processes started via `pytest-pdb-break-here'.")
 
-(defvar pytest-pdb-break--home nil
-  "Path to this package's Python files.")
+(defvar pytest-pdb-break--py-home nil
+  "Directory containing the uninstalled plugin and non-el scripts.")
 
 (defun pytest-pdb-break--homer (&optional this-file)
-  "Return the directory containing this package's files.
+  "Return the directory containing the plugin's setup.py script.
 
-And store the result in `pytest-pdb-break--home' as an absolute path
-with trailing sep. The usual locations are the root of the cloned
-repo (not a \"lisp\" sub directory) or a \"lib\" subdir of the installed
-package. THIS-FILE is used as a starting point, if provided."
+And store the result in `pytest-pdb-break--py-home' as an absolute path
+with trailing sep. The likeliest locations are the root of the cloned
+repo or a \"lib\" subtree of the installed package. THIS-FILE is used as
+a starting point, if provided."
   (let* ((this (or this-file (find-library-name "pytest-pdb-break")))
          (parent/ (file-name-directory this))
          (lib/? (file-name-as-directory (expand-file-name "lib" parent/))))
     (cond
      ((file-exists-p (expand-file-name "pytest_pdb_break.py" lib/?))
-      (setq pytest-pdb-break--home lib/?))
+      (setq pytest-pdb-break--py-home lib/?))
      ((and (string= "emacs" (file-name-base (directory-file-name parent/)))
            (setq lib/? (file-name-directory (directory-file-name parent/)))
            (file-exists-p (expand-file-name "pytest_pdb_break.py" lib/?)))
-      (setq pytest-pdb-break--home lib/?))
+      (setq pytest-pdb-break--py-home lib/?))
      ((file-symlink-p this)  ; only dereference as a last resort
       (pytest-pdb-break--homer (file-truename this)))
-     (t (error "Cannot find pytest-pdb-break's home directory")))))
+     (t (error "Cannot find pytest-pdb-break's Python files")))))
 
 (defun pytest-pdb-break-get-pytest-executable ()
   "Return the current pytest executable."
@@ -115,11 +115,11 @@ package. THIS-FILE is used as a starting point, if provided."
 
 Should be an absolute path ending in a slash.")
 
-(defvar pytest-pdb-break--isolated-lib nil
+(defvar pytest-pdb-break--isolated nil
   "Temporary directory containing plugin and metadata.
 
-This should be an absolute path ending end in a slash. It should point
-to a proper \"library\" installation, without dependencies, under
+This should be an absolute path ending end in a slash and should point to a
+proper \"library\" installation, without dependencies, under
 `pytest-pdb-break--tempdir'.")
 
 (defun pytest-pdb-break--on-kill-emacs ()
@@ -145,13 +145,13 @@ to a proper \"library\" installation, without dependencies, under
     (add-hook 'kill-emacs-hook #'pytest-pdb-break--on-kill-emacs))
   pytest-pdb-break--tempdir)
 
-(defun pytest-pdb-break-get-isolated-lib (&optional interpreter)
+(defun pytest-pdb-break-get-isolated (&optional interpreter)
   "Return path to an isolated plugin installation.
 
 Use INTERPRETER or `python-shell-interpreter' to run the helper script."
-  (if pytest-pdb-break--isolated-lib
-      pytest-pdb-break--isolated-lib
-    (let* ((home (or pytest-pdb-break--home (pytest-pdb-break--homer)))
+  (if pytest-pdb-break--isolated
+      pytest-pdb-break--isolated
+    (let* ((home (or pytest-pdb-break--py-home (pytest-pdb-break--homer)))
            (tmpdir (or pytest-pdb-break--tempdir
                        (pytest-pdb-break--create-tempdir)))
            (name (file-name-as-directory (concat tmpdir "self")))
@@ -164,7 +164,7 @@ Use INTERPRETER or `python-shell-interpreter' to run the helper script."
                                      script "install_plugin" name))
           (error "Error calling %s\nscript: %s\nname: %s\noutput: ...\n%s"
                  python-shell-interpreter script name (buffer-string))))
-      (setq pytest-pdb-break--isolated-lib name))))
+      (setq pytest-pdb-break--isolated name))))
 
 (defun pytest-pdb-break--extract-shebang (pytest-exe)
   "Extract PYTEST-EXE's shebanged interpreter."
@@ -238,7 +238,7 @@ del _wrap_pyel
 (defun pytest-pdb-break--get-modified-setup-code ()
   "Return revised completion setup-code."
   (unless pytest-pdb-break--setup-code-addendum
-    (let ((srcfile (concat (or pytest-pdb-break--home
+    (let ((srcfile (concat (or pytest-pdb-break--py-home
                                (pytest-pdb-break--homer))
                            "emacs/setup_code_wrapper.py")))
       (with-temp-buffer
@@ -364,8 +364,8 @@ determined by `pytest-pdb-break-options-function'."
     (let* ((pytest-exe (pytest-pdb-break-get-pytest-executable))
            (pyexe (pytest-pdb-break-get-python-interpreter pytest-exe))
            (python-shell-extra-pythonpaths
-            (append (list (or pytest-pdb-break-alt-lib-dir
-                              (pytest-pdb-break-get-isolated-lib pyexe)))
+            (append (list (or pytest-pdb-break-alt-installation
+                              (pytest-pdb-break-get-isolated pyexe)))
                     python-shell-extra-pythonpaths))
            ;; Make pdb++ prompt trigger non-native-completion fallback
            (python-shell-prompt-pdb-regexp pytest-pdb-break-prompt-regexp)

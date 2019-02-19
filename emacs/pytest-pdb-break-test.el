@@ -25,7 +25,7 @@
     pytest-pdb-break-test-homer-missing
     pytest-pdb-break-test-on-kill-emacs
     pytest-pdb-break-test-create-tempdir
-    pytest-pdb-break-test-get-isolated-lib
+    pytest-pdb-break-test-get-isolated
     pytest-pdb-break-test-get-pytest-executable
     pytest-pdb-break-test-get-python-interpreter
     pytest-pdb-break-test-get-node-id
@@ -292,11 +292,11 @@ generated VIRTUAL_ENV var never end in a /, even when orig does.
   "Common assertions for the home-finder when not installed.
 Likely running from the cloned repo."
   '(pytest-pdb-break-test-with-tmpdir
-    (should-not pytest-pdb-break--home)
+    (should-not pytest-pdb-break--py-home)
     (should (string= (pytest-pdb-break--homer)
                      pytest-pdb-break-test-repo-root))
-    (should (directory-name-p pytest-pdb-break--home)) ; ends in /
-    (should (string= pytest-pdb-break--home
+    (should (directory-name-p pytest-pdb-break--py-home)) ; ends in /
+    (should (string= pytest-pdb-break--py-home
                      pytest-pdb-break-test-repo-root))))
 
 (ert-deftest pytest-pdb-break-test-homer ()
@@ -354,14 +354,14 @@ DIR-BODY sets up build dir. INFO-MSG is passed to `ert-info'."
   ;; The package.el layout in which emacs lisp files live in the root
   (pytest-pdb-break-test-homer-setup-fixture
    (ert-info ("Subproc")
-     (should-not pytest-pdb-break--home)
+     (should-not pytest-pdb-break--py-home)
      (pytest-pdb-break-test-with-tmpdir
       (let ((expected (concat pytest-pdb-break-test-temp
                               (pytest-pdb-break-test--unprefix $test-sym)
                               "-setup/build/lib/")))
         (should (string= (pytest-pdb-break--homer) expected))
-        (should (directory-name-p pytest-pdb-break--home)) ; ends in /
-        (should (string= pytest-pdb-break--home expected)))))
+        (should (directory-name-p pytest-pdb-break--py-home)) ; ends in /
+        (should (string= pytest-pdb-break--py-home expected)))))
    (ert-info ("Setup")
      (copy-file pytest-pdb-break-test-lisp-main "./")
      (copy-file pytest-pdb-break-test-lisp-extra "./")
@@ -392,8 +392,8 @@ DIR-BODY sets up build dir. INFO-MSG is passed to `ert-info'."
      ;; Looks "above" in pytest-pdb-break-test-temp, then for "./lib"
      (let ((exc (should-error (pytest-pdb-break-test-homer-repo-fixture)))
            (case-fold-search t))
-       (should (string-match-p "cannot find.*home" (cadr exc)))
-       (should-not pytest-pdb-break--home)))
+       (should (string-match-p "cannot find.*files" (cadr exc)))
+       (should-not pytest-pdb-break--py-home)))
    (ert-info ("Setup")
      (copy-file pytest-pdb-break-test-lisp-main "./")
      (copy-file pytest-pdb-break-test-lisp-extra "./"))
@@ -500,25 +500,25 @@ a sound choice)."
        (should (directory-name-p $venvbin))
        ,@body))))
 
-(ert-deftest pytest-pdb-break-test-get-isolated-lib ()
-  ;; Eval: (compile "make PAT=get-isolated-lib")
+(ert-deftest pytest-pdb-break-test-get-isolated ()
+  ;; Eval: (compile "make PAT=get-isolated")
   (pytest-pdb-break-test-ensure-venv
    'bare
    (make-directory "fake-tmpdir")
    (setenv "PYTEST_PDB_BREAK_INSTALL_LOGFILE" "helper.log")
-   (let* ((pytest-pdb-break--home pytest-pdb-break-test-repo-root)
+   (let* ((pytest-pdb-break--py-home pytest-pdb-break-test-repo-root)
           (pytest-pdb-break--tempdir (file-name-as-directory
                                       (file-truename "fake-tmpdir")))
-          pytest-pdb-break--isolated-lib
-          (rv (pytest-pdb-break-get-isolated-lib $pyexe)))
+          pytest-pdb-break--isolated
+          (rv (pytest-pdb-break-get-isolated $pyexe)))
      (should (file-exists-p rv))
      (should (directory-name-p rv))
-     (should (string= rv pytest-pdb-break--isolated-lib))
+     (should (string= rv pytest-pdb-break--isolated))
      (should (file-exists-p (concat rv "/pytest_pdb_break.py")))
      (should (string-match-p (regexp-quote pytest-pdb-break--tempdir) rv))
      (should-not (member #'pytest-pdb-break--on-kill-emacs kill-emacs-hook))
      (should-not (null (directory-files rv nil "\\.*-info"))))
-   (should-not pytest-pdb-break--isolated-lib)))
+   (should-not pytest-pdb-break--isolated)))
 
 (ert-deftest pytest-pdb-break-test-get-pytest-executable ()
   ;; Eval: (compile "make PAT=get-pytest-executable")
@@ -757,13 +757,13 @@ class TestFoo:
   ;; Eval: (compile "make PAT=get-modified-setup-code")
   (setq pytest-pdb-break--setup-code-addendum nil)
   (pytest-pdb-break-test-with-tmpdir
-   (let ((orig-home pytest-pdb-break--home))
+   (let ((orig-home pytest-pdb-break--py-home))
      (ert-info ("Relies on homer, source file must exist")
-       (let* ((pytest-pdb-break--home default-directory)
+       (let* ((pytest-pdb-break--py-home default-directory)
               (exc (should-error (pytest-pdb-break--get-modified-setup-code))))
          (should (member (car exc) '(file-missing file-error)))))
      ;; No condition-case handler for resetting to nil
-     (should (equal orig-home pytest-pdb-break--home))
+     (should (equal orig-home pytest-pdb-break--py-home))
      (should-not pytest-pdb-break--setup-code-addendum)))
   (ert-info ("Ordering of source snippets")
     (with-temp-buffer
@@ -1072,7 +1072,7 @@ PATTERN may also be a function that takes no args."
                (kill-process pytest-pdb-break--process))
              (kill-buffer))))))))
 
-;; Note: none of the following cases covers `pytest-pdb-break-alt-lib-dir'
+;; Note: none of the following cases covers `pytest-pdb-break-alt-installation'
 ;; because its implementation is trivial
 
 (ert-deftest pytest-pdb-break-test-main-command-basic ()
