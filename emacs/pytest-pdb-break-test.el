@@ -1,4 +1,4 @@
-;;; pytest-pdb-break-test.el --- tests -*- lexical-binding: t -*-
+;;; pytest-pdb-break-test.el --- Tests -*- lexical-binding: t -*-
 
 ;;; Commentary:
 ;;
@@ -502,6 +502,10 @@ a sound choice)."
 
 (ert-deftest pytest-pdb-break-test-get-pytest-executable ()
   ;; Eval: (compile "make PAT=get-pytest-executable")
+  (ert-info ("Not found")
+    (let* ((exec-path (list (concat pytest-pdb-break-test-temp "foo")))
+           (exc (should-error (pytest-pdb-break-get-pytest-executable))))
+      (should (string-match-p "not found" (cadr exc)))))
   (pytest-pdb-break-test-ensure-venv
    'base
    (ert-info ("Real exe found")
@@ -1342,4 +1346,4 @@ PATTERN may also be a function that takes no args."
          (kill-buffer))))))
 
 (provide 'pytest-pdb-break-test)
-;;; pytest-pdb-break-test ends here
+;;; pytest-pdb-break-test.el ends here

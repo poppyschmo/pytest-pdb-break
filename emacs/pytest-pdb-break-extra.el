@@ -1,13 +1,24 @@
-;;; pytest-pdb-break.el --- Misc convenience helpers -*- lexical-binding: t -*-
+;;; pytest-pdb-break-extra.el --- Convenience tools -*- lexical-binding: t -*-
 
 ;;; Commentary:
 
-;; The runners (only one, so far) extend normal `python-mode' behavior with
-;; features provided by `pytest-pdb-break' but may not use the namesake pytest
-;; plugin. They all enable the minor mode in the interactive buffer.
-
-;; `pytest-pdb-break-run-fail' is like elpy's `elpy-test-pytest-runner' except
-;; with support for pytest's --pdb option.
+;; This file should contain:
+;;
+;; - Miscellaneous helpers that allow the integration of `pytest-pdb-mode'
+;;   with other tools and libraries
+;;
+;; - Runners (only one, so far) that extend normal `python-mode' behavior
+;;   but may not use the namesake pytest plugin
+;;
+;; `pytest-pdb-break-run-fail' is like `elpy-test-pytest-runner' except with
+;; support for pytest's --pdb option. For now, point must be located within
+;; the confines of the surrounding test body. In the future, some prefix arg
+;; may spawn a `completing-read' buffer to offer a choice.
+;;
+;; Note: if there's an issue with the feature/prefix mismatch in this file, it
+;; can be renamed to `pytest-pdb-break-x' or simply narrowed in scope to
+;; `pytest-pdb-break-run-fail', since that's all it really provides, at the
+;; moment.
 
 ;;; Code:
 
@@ -123,4 +134,4 @@ Otherwise, finish normally."
                           'pytest-pdb-break--run-fail-comint-process-filter))))
 
 (provide 'pytest-pdb-break-extra)
-;;; pytest-pdb-break-extra ends here
+;;; pytest-pdb-break-extra.el ends here

@@ -80,10 +80,10 @@ info)."
   "Real path of this project's root directory.")
 
 (defun pytest-pdb-break--homer ()
-  "Find the real path of the directory containing this file.
+  "Find the real path of the package containing this file.
 
 Store absolute form (with trailing sep) in `pytest-pdb-break--home'.
-This is the root path of cloned repo, not a \"lisp\" sub directory."
+This is the root of the cloned repo, not a \"lisp\" sub directory."
   (let ((drefd (file-truename (find-library-name "pytest-pdb-break")))
         root)
     (if (fboundp 'ffip-project-root)
@@ -101,11 +101,10 @@ This is the root path of cloned repo, not a \"lisp\" sub directory."
   (if pytest-pdb-break-pytest-executable
       pytest-pdb-break-pytest-executable
     (python-shell-with-environment
-      (let ((pytest-exe (executable-find "pytest")))
-        (if pytest-exe
-            pytest-exe
-          (error "Pytest not found\nexec-path: %s\nprocess-environment: %s\n"
-                 exec-path process-environment))))))
+     (let ((pytest-exe (executable-find "pytest")))
+       (if pytest-exe
+           pytest-exe
+         (error "Pytest executable not found"))))))
 
 (defvar pytest-pdb-break--tempdir nil
   "Temporary directory for this session.
@@ -135,8 +134,9 @@ to a proper \"library\" installation, without dependencies, under
   (let ((prefix (format "emacs-%s-pytest-pdb-break-" (user-uid))))
     (setq pytest-pdb-break--tempdir (file-name-as-directory
                                      (make-temp-file prefix t)))
-    ;; `server-ensure-safe-dir' takes some extra pains, but requiring it may
-    ;; not be desirable. Hopefully setting user perms is enough.
+    ;; `server-ensure-safe-dir' takes some extra pains when setting up its
+    ;; tempdir. We're running whatever's in pytest-pdb-break.py, so hopefully
+    ;; setting user perms is enough, portability issues aside.
     (chmod pytest-pdb-break--tempdir #o0700)
     (add-hook 'kill-emacs-hook #'pytest-pdb-break--on-kill-emacs))
   pytest-pdb-break--tempdir)
@@ -391,4 +391,4 @@ determined by `pytest-pdb-break-options-function'."
 
 (provide 'pytest-pdb-break)
 
-;;; pytest-pdb-break ends here
+;;; pytest-pdb-break.el ends here
