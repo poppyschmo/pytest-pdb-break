@@ -77,24 +77,28 @@ info)."
   "List of processes started via `pytest-pdb-break-here'.")
 
 (defvar pytest-pdb-break--home nil
-  "Real path of this project's root directory.")
+  "Path to this package's Python files.")
 
-(defun pytest-pdb-break--homer ()
-  "Find the real path of the package containing this file.
+(defun pytest-pdb-break--homer (&optional this-file)
+  "Return the directory containing this package's files.
 
-Store absolute form (with trailing sep) in `pytest-pdb-break--home'.
-This is the root of the cloned repo, not a \"lisp\" sub directory."
-  (let ((drefd (file-truename (find-library-name "pytest-pdb-break")))
-        root)
-    (if (fboundp 'ffip-project-root)
-        (setq root (let ((default-directory drefd))
-                     (file-truename (ffip-project-root))))
-      (setq root (file-name-directory drefd)
-            root (and root (directory-file-name root))
-            root (and root (file-name-directory root))))
-    (if (and root (file-exists-p (concat root "pytest_pdb_break.py")))
-        (setq pytest-pdb-break--home root)
-      (error "Cannot find pytest-pdb-break's home directory"))))
+And store the result in `pytest-pdb-break--home' as an absolute path
+with trailing sep. The usual locations are the root of the cloned
+repo (not a \"lisp\" sub directory) or a \"lib\" subdir of the installed
+package. THIS-FILE is used as a starting point, if provided."
+  (let* ((this (or this-file (find-library-name "pytest-pdb-break")))
+         (parent/ (file-name-directory this))
+         (lib/? (file-name-as-directory (expand-file-name "lib" parent/))))
+    (cond
+     ((file-exists-p (expand-file-name "pytest_pdb_break.py" lib/?))
+      (setq pytest-pdb-break--home lib/?))
+     ((and (string= "emacs" (file-name-base (directory-file-name parent/)))
+           (setq lib/? (file-name-directory (directory-file-name parent/)))
+           (file-exists-p (expand-file-name "pytest_pdb_break.py" lib/?)))
+      (setq pytest-pdb-break--home lib/?))
+     ((file-symlink-p this)  ; only dereference as a last resort
+      (pytest-pdb-break--homer (file-truename this)))
+     (t (error "Cannot find pytest-pdb-break's home directory")))))
 
 (defun pytest-pdb-break-get-pytest-executable ()
   "Return the current pytest executable."

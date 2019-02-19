@@ -20,6 +20,7 @@
     pytest-pdb-break-test-library-version
     pytest-pdb-break-test-upstream-env-updaters
     pytest-pdb-break-test-homer
+    pytest-pdb-break-test-homer-installed
     pytest-pdb-break-test-homer-symlink
     pytest-pdb-break-test-homer-missing
     pytest-pdb-break-test-on-kill-emacs
@@ -287,8 +288,9 @@ generated VIRTUAL_ENV var never end in a /, even when orig does.
               (during (should (= (sxhash-equal exec-path) orig)))
               (after (should (= (sxhash-equal exec-path) orig))))))))
 
-(defmacro pytest-pdb-break-test-homer-fixture ()
-  "Common assertions for the home-finder."
+(defmacro pytest-pdb-break-test-homer-repo-fixture ()
+  "Common assertions for the home-finder when not installed.
+Likely running from the cloned repo."
   '(pytest-pdb-break-test-with-tmpdir
     (should-not pytest-pdb-break--home)
     (should (string= (pytest-pdb-break--homer)
@@ -297,12 +299,10 @@ generated VIRTUAL_ENV var never end in a /, even when orig does.
     (should (string= pytest-pdb-break--home
                      pytest-pdb-break-test-repo-root))))
 
-;; TODO link ffip
 (ert-deftest pytest-pdb-break-test-homer ()
   ;; Eval: (compile "make SYM=pytest-pdb-break-test-homer")
   (ert-info ("Find cloned repo containing pytest plugin")
-    (should-not (fboundp 'ffip-project-root))
-    (pytest-pdb-break-test-homer-fixture)))
+    (pytest-pdb-break-test-homer-repo-fixture)))
 
 (cl-defun pytest-pdb-break-test-run-ert-in-subprocess
     (test-file selector &key load-path-dir env-vars logfile)
@@ -349,17 +349,37 @@ DIR-BODY sets up build dir. INFO-MSG is passed to `ert-info'."
                          :env-vars (list (cons $env-var "1"))
                          :logfile "test.out"))))))))
 
+(ert-deftest pytest-pdb-break-test-homer-installed ()
+  ;; Eval: (compile "make PAT=homer-installed")
+  ;; The package.el layout in which emacs lisp files live in the root
+  (pytest-pdb-break-test-homer-setup-fixture
+   (ert-info ("Subproc")
+     (should-not pytest-pdb-break--home)
+     (pytest-pdb-break-test-with-tmpdir
+      (let ((expected (concat pytest-pdb-break-test-temp
+                              (pytest-pdb-break-test--unprefix $test-sym)
+                              "-setup/build/lib/")))
+        (should (string= (pytest-pdb-break--homer) expected))
+        (should (directory-name-p pytest-pdb-break--home)) ; ends in /
+        (should (string= pytest-pdb-break--home expected)))))
+   (ert-info ("Setup")
+     (copy-file pytest-pdb-break-test-lisp-main "./")
+     (copy-file pytest-pdb-break-test-lisp-extra "./")
+     (mkdir "lib")
+     (with-temp-file "lib/pytest_pdb_break.py"
+       (ignore)))
+   ;; info-msg
+   "Python package installed with 'lib' subdir"))
+
 (ert-deftest pytest-pdb-break-test-homer-symlink ()
   ;; Eval: (compile "make PAT=homer-symlink")
   (pytest-pdb-break-test-homer-setup-fixture
-   ;; subform
-   (progn
+   (ert-info ("Subproc")
      (should-not (fboundp 'ffip-project-root))
      (should (file-symlink-p (find-library-name "pytest-pdb-break")))
      (should (file-symlink-p (find-library-name "pytest-pdb-break-extra")))
-     (pytest-pdb-break-test-homer-fixture))
-   ;; dir-body
-   (progn
+     (pytest-pdb-break-test-homer-repo-fixture))
+   (ert-info ("Setup")
      (make-symbolic-link pytest-pdb-break-test-lisp-main "./")
      (make-symbolic-link pytest-pdb-break-test-lisp-extra "./"))
    ;; info-msg
@@ -368,13 +388,13 @@ DIR-BODY sets up build dir. INFO-MSG is passed to `ert-info'."
 (ert-deftest pytest-pdb-break-test-homer-missing ()
   ;; Eval: (compile "make PAT=homer-missing")
   (pytest-pdb-break-test-homer-setup-fixture
-   ;; subform
-   (let ((exc (should-error (pytest-pdb-break-test-homer-fixture)))
-         (case-fold-search t))
-     (should (string-match-p "cannot find.*home" (cadr exc)))
-     (should-not pytest-pdb-break--home))
-   ;; dir-body
-   (progn
+   (ert-info ("Subrpoc")
+     ;; Looks "above" in pytest-pdb-break-test-temp, then for "./lib"
+     (let ((exc (should-error (pytest-pdb-break-test-homer-repo-fixture)))
+           (case-fold-search t))
+       (should (string-match-p "cannot find.*home" (cadr exc)))
+       (should-not pytest-pdb-break--home)))
+   (ert-info ("Setup")
      (copy-file pytest-pdb-break-test-lisp-main "./")
      (copy-file pytest-pdb-break-test-lisp-extra "./"))
    ;; info-msg
