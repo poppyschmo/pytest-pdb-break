@@ -45,7 +45,8 @@ def test_copy_plugin(tmp_path):
 # PluginManager.load_setuptools_entrypoints to detect it
 setup_py_src = dedent("""\
    import setuptools
-   setuptools.setup(name="pytest_pdb_break", py_modules=["pytest_pdb_break"])
+   setuptools.setup(name="pytest_pdb_break", py_modules=["pytest_pdb_break"],
+                    long_description=None)
 """)
 
 

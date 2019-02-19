@@ -1,12 +1,17 @@
 from setuptools import setup
-from pathlib import Path
+
+try:
+    from pathlib import Path
+    long_description = Path(__file__).parent.joinpath("README.rst").read_text()
+except Exception:
+    long_description = None
 
 setup(
     name="pytest-pdb-break",
     version="0.0.2",
     license="Apache 2.0",
     description="A pytest command-line option for pdb breakpoints",
-    long_description=Path(__file__).parent.joinpath("README.rst").read_text(),
+    long_description=long_description,
     url="https://github.com/poppyschmo/pytest-pdb-break",
     author="Jane Soko",
     author_email="poppyschmo@protonmail.com",
