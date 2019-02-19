@@ -19,10 +19,10 @@ def get_project_root():
     """Return path to *this* project's root"""
     global _project_root
     if not _project_root:
-        # __file__ may be be empty or relative
+        # Ensure this module was imported
         root = Path(__file__).parent.parent
         assert root.is_absolute(), f"root: {root}"
-        assert root.joinpath("tox.ini").exists()
+        assert root.joinpath("setup.py").exists()
         _project_root = root
     return _project_root
 
