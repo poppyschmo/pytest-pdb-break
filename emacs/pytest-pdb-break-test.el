@@ -553,7 +553,7 @@ a sound choice)."
          pytest-pdb-break--exe-alist
          exc)
      (with-temp-file pytest-exe
-       (insert "#!" python-exe "\n"))
+       (insert "#!" python-exe "\n\n# -*- coding: utf-8 -*-\nimport re\n"))
      (ert-info ("Shebanged file not found")
        (setq exc (should-error (pytest-pdb-break-get-python-interpreter
                                 pytest-exe)))

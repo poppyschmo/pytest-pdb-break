@@ -162,22 +162,22 @@ Use INTERPRETER or `python-shell-interpreter' to run the helper script."
                                      nil
                                      (current-buffer) nil
                                      script "install_plugin" name))
-          (error "Error calling %s\nscript: %s\nname: %s\noutput: ...\n%s"
-                 python-shell-interpreter script name (buffer-string))))
+          ;; The traceback dumped here isn't helpful because the script calls
+          ;; another subprocess; try exporting PYTEST_PDB_BREAK_INSTALL_LOGFILE
+          (error "Call to %s install_plugin returned non-zero" script)))
       (setq pytest-pdb-break--isolated name))))
 
 (defun pytest-pdb-break--extract-shebang (pytest-exe)
   "Extract PYTEST-EXE's shebanged interpreter."
-  (let (maybe)
-    (with-temp-buffer
-      (insert-file-contents-literally pytest-exe)
-      (goto-char (point-min))
-      (if (and (looking-at "#!\\([^\r\n]+\\)")
+  (with-temp-buffer
+    (insert-file-contents-literally pytest-exe)
+    (goto-char (point-min))
+    (let (maybe)
+      (if (and (looking-at "#!\\(.+\\)$")
                (setq maybe (match-string-no-properties 1))
                (file-executable-p maybe))
           maybe
-        (error "Cannot find python exe\npytest-exe: %s\nrejected: %s\n"
-               pytest-exe (buffer-substring (point) (point-at-eol)))))))
+        (error "Cannot find interpreter for pytest exe %S" pytest-exe)))))
 
 (defvar pytest-pdb-break--exe-alist nil)
 
