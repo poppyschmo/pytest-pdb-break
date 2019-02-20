@@ -254,9 +254,22 @@ del _wrap_pyel
 (define-error 'pytest-pdb-break-process-exists
   "Live process already exists" 'error)
 
+(defconst pytest-pdb-break--proc-base-name "pytest-PDB"
+  "Base portion of subprocess names. Don't change this.
+
+String-sending functions that rely on `python-shell-get-process-name'
+need `python-shell-buffer-name' set to this in source buffers during PDB
+sessions. If a local binding already exists, it's stashed and restored
+later. This may not be desirable in certain situations, but it's
+hard-wired, for now." )
+
+(defvar-local pytest-pdb-break--process nil)
+(defvar-local pytest-pdb-break--parent-buffer nil)
+(defvar-local pytest-pdb-break--existing-python-shell-buffer-name nil)
+
 (defun pytest-pdb-break--get-proc-name ()
   "Generate a process name and ensure it's available."
-  (let* ((python-shell-buffer-name "pytest-PDB")
+  (let* ((python-shell-buffer-name pytest-pdb-break--proc-base-name)
          (proc-name (python-shell-get-process-name 'dedicated))
          (proc-buffer-name (format "*%s*" proc-name)))
     ;; Caller may opt to pop to existing proc's buffer
@@ -264,13 +277,50 @@ del _wrap_pyel
       (signal 'pytest-pdb-break-process-exists (list proc-name)))
     proc-name))
 
-(defvar-local pytest-pdb-break--process nil)
+(defun pytest-pdb-break--maybe-get-parent-buffer ()
+  "Try to divine the source buffer from an inferior-shell buffer."
+  (let* ((bufname (buffer-name))
+         (pat (concat "\\(" (regexp-quote pytest-pdb-break--proc-base-name)
+                      "\\|" (regexp-quote python-shell-buffer-name) "\\)"
+                      "\\[\\(.+\\)\\]\\*$"))
+         (m (and (string-match pat bufname) (match-string 2 bufname)))
+         (buf (and m (get-buffer m))))
+    (and buf (with-current-buffer buf (eq major-mode 'python-mode)) buf)))
+
+(defun pytest-pdb-break--set-shell-buffer-name (parent-buffer)
+  "Set `python-shell-buffer-name' in PARENT-BUFFER."
+  (with-current-buffer parent-buffer
+    (when (local-variable-p 'python-shell-buffer-name)
+      (message "Moving existing python-shell-buffer-name %S to %s"
+               python-shell-buffer-name
+               'pytest-pdb-break--existing-python-shell-buffer-name)
+      (setq pytest-pdb-break--existing-python-shell-buffer-name
+            python-shell-buffer-name))
+    (setq-local python-shell-buffer-name
+                pytest-pdb-break--proc-base-name)))
+
+(defun pytest-pdb-break--kill-shell-buffer-name (parent-buffer)
+  "Remove or restore `python-shell-buffer-name' in PARENT-BUFFER."
+  (with-current-buffer parent-buffer
+    (when (and (local-variable-p 'python-shell-buffer-name)
+               python-shell-buffer-name
+               (string= python-shell-buffer-name
+                        pytest-pdb-break--proc-base-name))
+      (if pytest-pdb-break--existing-python-shell-buffer-name
+          (progn
+            (setq-local python-shell-buffer-name
+                        pytest-pdb-break--existing-python-shell-buffer-name)
+            (kill-local-variable
+             'pytest-pdb-break--existing-python-shell-buffer-name))
+        (kill-local-variable 'python-shell-buffer-name)))))
 
 (define-minor-mode pytest-pdb-break-mode
   "A minor mode for Python comint buffers running a pytest PDB session."
   :group 'pytest-pdb-break
   (let ((proc (or pytest-pdb-break--process
-                  (get-buffer-process (current-buffer)))))
+                  (get-buffer-process (current-buffer))))
+        (parbuf (or pytest-pdb-break--parent-buffer
+                    (pytest-pdb-break--maybe-get-parent-buffer))))
     (if pytest-pdb-break-mode
         (progn
           (unless (process-live-p proc)
@@ -281,9 +331,12 @@ del _wrap_pyel
                       (pytest-pdb-break--get-modified-setup-code))
           (add-hook 'kill-buffer-hook
                     (lambda nil (pytest-pdb-break-mode -1))
-                    nil t))
+                    nil t)
+          (when parbuf (pytest-pdb-break--set-shell-buffer-name parbuf)))
       (when (eq major-mode 'inferior-python-mode)
+        (when parbuf (pytest-pdb-break--kill-shell-buffer-name parbuf))
         (kill-local-variable 'pytest-pdb-break--process)
+        (kill-local-variable 'pytest-pdb-break--parent-buffer)
         (kill-local-variable 'python-shell-completion-setup-code)
         (kill-local-variable 'python-shell-completion-native-enable))
       ;; Forget proc even if it's still running
@@ -388,7 +441,8 @@ determined by `pytest-pdb-break-options-function'."
           ;; Only python- prefixed local vars get cloned in child buffer
           (with-current-buffer buffer
             (inferior-python-mode)
-            (setq pytest-pdb-break--process (get-buffer-process buffer))
+            (setq pytest-pdb-break--process (get-buffer-process buffer)
+                  pytest-pdb-break--parent-buffer python-shell--parent-buffer)
             (pytest-pdb-break-mode +1))
           (display-buffer buffer))))))
 

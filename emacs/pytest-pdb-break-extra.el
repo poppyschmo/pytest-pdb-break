@@ -68,7 +68,8 @@ This converts major or minor (comint) compilation modes to
               python-shell--interpreter
               python-shell--interpreter-args)
           (inferior-python-mode)
-          (setq pytest-pdb-break--process proc)
+          (setq pytest-pdb-break--process proc
+                pytest-pdb-break--parent-buffer parbuf)
           (pytest-pdb-break-mode +1)
           (select-window (get-buffer-window proc-buffer-name))
           (sit-for 0)
