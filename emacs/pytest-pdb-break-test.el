@@ -32,11 +32,15 @@
     pytest-pdb-break-test-get-args
     pytest-pdb-break-test-get-modified-setup-code
     pytest-pdb-break-test-get-proc-name
+    pytest-pdb-break-test-maybe-get-parent-buffer
     pytest-pdb-break-test-minor-mode
+    pytest-pdb-break-test-set-shell-buffer-name
+    pytest-pdb-break-test-kill-shell-buffer-name
     pytest-pdb-break-test-interpret-prefix-arg
     pytest-pdb-break-test-read-session-options
     pytest-pdb-break-test-default-options-function
     pytest-pdb-break-test-main-command-basic
+    pytest-pdb-break-test-main-command-send-string
     pytest-pdb-break-test-main-command-completion
     pytest-pdb-break-test-run-fail-compilation-filter
     pytest-pdb-break-test-run-fail-comint-process-filter
@@ -798,6 +802,87 @@ class TestFoo:
           (kill-process proc)
           (kill-buffer buf)))))))
 
+(ert-deftest pytest-pdb-break-test-maybe-get-parent-buffer ()
+  ;; Eval: (compile "make PAT=maybe-get-parent-buffer")
+  (pytest-pdb-break-test-with-python-buffer
+   (should (string= (rename-buffer "sample.py") "sample.py"))
+   (let ((parbuf (current-buffer)))
+     (ert-info ("Our proc name")
+       (with-temp-buffer
+         (should (string= (rename-buffer "*pytest-PDB[sample.py]*")
+                          "*pytest-PDB[sample.py]*"))
+         (should (eq parbuf (pytest-pdb-break--maybe-get-parent-buffer)))))
+     (ert-info ("Default proc name")
+       (should (string= python-shell-buffer-name "Python"))
+       (with-temp-buffer
+         (should (string= (rename-buffer "*Python[sample.py]*")
+                          "*Python[sample.py]*"))
+         (should (eq parbuf (pytest-pdb-break--maybe-get-parent-buffer)))))))
+  (with-temp-buffer
+    (should (string= (rename-buffer "sample.txt") "sample.txt"))
+    (should (eq major-mode 'fundamental-mode))
+    (ert-info ("Parent is wrong mode")
+      (with-temp-buffer
+        (should (string= (rename-buffer "*pytest-PDB[sample.txt]*")
+                         "*pytest-PDB[sample.txt]*"))
+        (should-not (pytest-pdb-break--maybe-get-parent-buffer))))))
+
+(ert-deftest pytest-pdb-break-test-set-shell-buffer-name ()
+  ;; Eval: (compile "make PAT=set-shell-buffer-name")
+  (should-not pytest-pdb-break--existing-python-shell-buffer-name)
+  (ert-info ("No existing")
+    (with-temp-buffer
+      (let ((parbuf (current-buffer)))
+        (with-temp-buffer ; currently unnecessary
+          (pytest-pdb-break--set-shell-buffer-name parbuf)))
+      (should (string= python-shell-buffer-name "pytest-PDB"))
+      (should (local-variable-p 'python-shell-buffer-name))))
+  (ert-info ("Existing")
+    (should-not pytest-pdb-break--existing-python-shell-buffer-name)
+    (with-temp-buffer
+      (setq-local python-shell-buffer-name "Foo")
+      (let ((parbuf (current-buffer))
+            (inhibit-message t))
+        (with-current-buffer (messages-buffer)
+          (pytest-pdb-break--set-shell-buffer-name parbuf)
+          (save-excursion
+            (goto-char (point-min))
+            (should (search-forward "Moving existing")))))
+      (should (local-variable-p 'python-shell-buffer-name))
+      (should (local-variable-p
+               'pytest-pdb-break--existing-python-shell-buffer-name))
+      (should (string= python-shell-buffer-name "pytest-PDB"))
+      (should (string= pytest-pdb-break--existing-python-shell-buffer-name
+                       "Foo")))))
+
+(ert-deftest pytest-pdb-break-test-kill-shell-buffer-name ()
+  ;; Eval: (compile "make PAT=kill-shell-buffer-name")
+  (ert-info ("No stashed (no existing)")
+    (with-temp-buffer
+      (ert-info ("Mismatch")
+        (setq-local python-shell-buffer-name "Foo")
+        (pytest-pdb-break--kill-shell-buffer-name (current-buffer))
+        (should (string= python-shell-buffer-name "Foo"))
+        (should (local-variable-p 'python-shell-buffer-name)))
+      (ert-info ("Killed")
+        (setq python-shell-buffer-name pytest-pdb-break--proc-base-name)
+        (pytest-pdb-break--kill-shell-buffer-name (current-buffer))
+        (should-not (local-variable-p 'python-shell-buffer-name))
+        (should-not (string= python-shell-buffer-name
+                             pytest-pdb-break--proc-base-name)))))
+  (ert-info ("Restore from stashed")
+    (with-temp-buffer
+      (setq pytest-pdb-break--existing-python-shell-buffer-name "Foo")
+      (should (local-variable-p
+               'pytest-pdb-break--existing-python-shell-buffer-name))
+      (setq-local python-shell-buffer-name pytest-pdb-break--proc-base-name)
+      (pytest-pdb-break--kill-shell-buffer-name (current-buffer))
+      (should (string= python-shell-buffer-name "Foo"))
+      (should (local-variable-p 'python-shell-buffer-name))
+      (should-not pytest-pdb-break--existing-python-shell-buffer-name)
+      (should-not (local-variable-p
+                   'pytest-pdb-break--existing-python-shell-buffer-name)))))
+
 (ert-deftest pytest-pdb-break-test-minor-mode ()
   ;; Eval: (compile "make PAT=minor-mode")
   (setq pytest-pdb-break--setup-code-addendum nil)
@@ -859,6 +944,8 @@ class TestFoo:
                             python-shell--interpreter-args)
                         (inferior-python-mode))
                       (setq pytest-pdb-break--process proc) ; else most recent
+                      (setq pytest-pdb-break--parent-buffer
+                            (get-buffer-create "dummy-parent.py"))
                       (pytest-pdb-break-mode +1)
                       (should (eq pytest-pdb-break--process proc))
                       (let ((t1 (start-process "t1" (current-buffer) "true")))
@@ -872,12 +959,20 @@ class TestFoo:
                                    'python-shell-completion-native-enable))
                       (should-not (codechk))
                       (should-not pytest-pdb-break--process)
+                      (should-not (local-variable-p
+                                   'pytest-pdb-break--process))
+                      (should-not pytest-pdb-break--parent-buffer)
+                      (should-not (local-variable-p
+                                   'pytest-pdb-break--parent-buffer))
                       (should (equal pytest-pdb-break-processes (list s1))))
               (outside (kill-process s1)
                        (should-not pytest-pdb-break--process)
                        (pytest-pdb-break-mode -1)
                        (should-not (codechk))
-                       (should-not (local-variable-p 'kill-buffer-hook)))
+                       (should-not (local-variable-p 'kill-buffer-hook))
+                       (let ((b (get-buffer "dummy-parent.py")))
+                         (should (buffer-live-p b))
+                         (kill-buffer b)))
               :args (pyexe "-c" "import pdb; pdb.set_trace()")))))))
 
 (ert-deftest pytest-pdb-break-test-interpret-prefix-arg ()
@@ -894,7 +989,9 @@ class TestFoo:
     (should (= (pytest-pdb-break--interpret-prefix-arg '-) -1))
     (should (= (pytest-pdb-break--interpret-prefix-arg '-1) -1))))
 
-;; TODO find the proper built-in way to do this
+;; TODO find the proper built-in way to do this; should decouple waiter from
+;; matcher and use own marker to limit search to new output; should also bind
+;; to alias in common fixtures to save typing
 (defun pytest-pdb-break-test--expect-timeout (pattern &optional max-secs)
   "Dumb waiter. Wait MAX-SECS for PATTERN to show up.
 PATTERN may also be a function that takes no args."
@@ -1041,9 +1138,7 @@ PATTERN may also be a function that takes no args."
       (pytest-pdb-break-test-with-python-buffer
        (insert sample-source)
        (write-file "test_class.py")
-       (should (and (goto-char (point-min))
-                    (search-forward ,linepat)
-                    (goto-char (match-beginning 0))))
+       (should ($get-there ,linepat))
        (call-interactively 'pytest-pdb-break-here)
        (should (get-buffer "*pytest-PDB[test_class.py]*"))
        (with-current-buffer "*pytest-PDB[test_class.py]*"
@@ -1054,6 +1149,9 @@ PATTERN may also be a function that takes no args."
                (should (eq major-mode 'inferior-python-mode))
                (should pytest-pdb-break-mode)
                (should pytest-pdb-break--process)
+               (should (local-variable-p 'pytest-pdb-break--parent-buffer))
+               (should (eq pytest-pdb-break--parent-buffer
+                           (get-buffer "test_class.py")))
                (should (pytest-pdb-break-test--expect-timeout "(Pdb) "))
                (let ((inhibit-message t)) ,@body)
                (should-not (get-buffer "*Warnings*")))
@@ -1085,6 +1183,63 @@ PATTERN may also be a function that takes no args."
                                        (point-min) t))))
    (comint-send-string pytest-pdb-break--process "c\n")
    (should (pytest-pdb-break-test--expect-timeout "finished\n.*"))))
+
+(ert-deftest pytest-pdb-break-test-main-command-send-string ()
+  "Test compatibility of `python.el''s string-sending functions."
+  ;; Eval: (compile "make PAT=main-command-send-string")
+  ;; Eval: (compile "make debug PAT=main-command-send-string")
+  ;;
+  ;; XXX prompt is not filtered and appears before output; but when
+  ;; interacting with a live Emacs instance, this doesn't happen
+  (pytest-pdb-break--main-command-fixture
+   "assert True"
+   (ert-info ("Break in first method")
+     (should (save-excursion
+               (search-backward-regexp ">.*\\.py(4)test_foo()\n"
+                                       (point-min) t))))
+   (ert-info ("Send string noninteractively (no minibuffer)")
+     (with-current-buffer pytest-pdb-break--parent-buffer
+       (python-shell-send-string "myvar = 21 * 2"))
+     (ert-info ("Output is not echoed") ; same for all that follows
+       (should-not (save-excursion
+                     (search-backward-regexp "myvar" (point-min) t))))
+     (execute-kbd-macro "myvar\r")
+     (should (pytest-pdb-break-test--expect-timeout "(Pdb) "))
+     (should (pytest-pdb-break-test--expect-timeout
+              (lambda nil (save-excursion (goto-char (point-min))
+                                          (search-forward "42" nil t)))))
+     (should (pytest-pdb-break-test--expect-timeout "(Pdb) ")))
+   (ert-info ("Send defun")
+     (with-current-buffer pytest-pdb-break--parent-buffer
+       (goto-char (point-max))
+       (insert "\ndef some_func(x):\n    return x * 2")
+       (save-buffer)
+       (should ($get-there "return x * 2"))
+       (call-interactively #'python-shell-send-defun))
+     (should (pytest-pdb-break-test--expect-timeout "(Pdb) "))
+     (execute-kbd-macro "some_func(myvar)\r")
+     (should (pytest-pdb-break-test--expect-timeout
+              (lambda nil (save-excursion (goto-char (point-min))
+                                          (search-forward "84" nil t))))))
+   (ert-info ("Interactive")
+     (execute-kbd-macro "interact\r")
+     (should (pytest-pdb-break-test--expect-timeout ">>> "))
+     (with-current-buffer pytest-pdb-break--parent-buffer
+       (goto-char (point-max))
+       (insert "\ndef nother_func(x):\n    return x * 3")
+       (save-buffer)
+       (should ($get-there "return x * 3"))
+       (call-interactively #'python-shell-send-defun))
+     (should (pytest-pdb-break-test--expect-timeout ">>> "))
+     (execute-kbd-macro "nother_func(myvar)\r")
+     (should (pytest-pdb-break-test--expect-timeout
+              (lambda nil (save-excursion (goto-char (point-min))
+                                          (search-forward "126" nil t)))))
+     (execute-kbd-macro [4]))
+   (should (pytest-pdb-break-test--expect-timeout "(Pdb) "))
+   (comint-send-string pytest-pdb-break--process "c\n")
+   (unless $debuggin?
+     (should (pytest-pdb-break-test--expect-timeout "finished\n.*")))))
 
 (ert-deftest pytest-pdb-break-test-main-command-completion ()
   ;; Eval: (compile "make PAT=main-command-completion")
@@ -1251,16 +1406,20 @@ PATTERN may also be a function that takes no args."
               (python-shell-virtualenv-root $venv)
               (pytest-pdb-break--setup-code-addendum nil)
               (pytest-pdb-break-processes
-               (append pytest-pdb-break-processes nil)))
+               (append pytest-pdb-break-processes nil))
+              new-name)
           (setq-local python-shell-interpreter $pyexe)
           (pytest-pdb-break-go-inferior $proc)
           (should-not (member $proc compilation-in-progress))
-          (should (string-match "pytest-PDB" (buffer-name)))
+          (should (string-match-p "pytest-PDB" (setq new-name (buffer-name))))
           (with-current-buffer (messages-buffer)
             (goto-char (point-min))
-            (should (search-forward "Switching")))
+            (should (search-forward-regexp (concat "Switching .* to "
+                                                   (regexp-quote new-name)))))
           (should (eq major-mode 'inferior-python-mode))
           (should pytest-pdb-break-mode)
+          (ert-info ("No parbuf because run-fail didn't run here")
+            (should-not pytest-pdb-break--parent-buffer))
           (should (= (point) (process-mark $proc)))
           ,@body
           (comint-goto-process-mark)
@@ -1308,6 +1467,8 @@ PATTERN may also be a function that takes no args."
          (ert-info ("In run-fail buffer")
            (should (eq pytest-pdb-break--process (get-buffer-process
                                                   (current-buffer))))
+           (should-not pytest-pdb-break--parent-buffer)
+           (should-not (local-variable-p 'pytest-pdb-break--parent-buffer))
            (should (pytest-pdb-break-test--expect-timeout
                     (lambda nil
                       (not (process-live-p pytest-pdb-break--process)))))
@@ -1345,6 +1506,9 @@ PATTERN may also be a function that takes no args."
          (ert-info ("In run-fail buffer")
            (should (eq pytest-pdb-break--process (get-buffer-process
                                                   (current-buffer))))
+           (should (local-variable-p 'pytest-pdb-break--parent-buffer))
+           (should (eq pytest-pdb-break--parent-buffer
+                       (get-buffer "test_class.py")))
            (should (pytest-pdb-break-test--expect-timeout "(Pdb) "))
            (switch-to-buffer (current-buffer))
            (execute-kbd-macro "c\r")
