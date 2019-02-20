@@ -4,8 +4,8 @@
 
 ;; This file should contain:
 ;;
-;; - Miscellaneous helpers that allow the integration of `pytest-pdb-mode'
-;;   with other tools and libraries
+;; - Miscellaneous helpers that enable integration with other tools and
+;;   libraries
 ;;
 ;; - Runners (only one, so far) that extend normal `python-mode' behavior
 ;;   but may not use the namesake pytest plugin
@@ -14,6 +14,10 @@
 ;; support for pytest's --pdb option. For now, point must be located within
 ;; the confines of the surrounding test body. In the future, some prefix arg
 ;; may spawn a `completing-read' buffer to offer a choice.
+;;
+;; Elpy users can try adding `pytest-pdb-break-advise-elpy-shell-get-proc' to
+;; `pytest-pdb-break-mode-hook'. It helps `elpy-shell-get-or-create-process'
+;; recognize this package's processes as valid.
 ;;
 ;; Note: if there's an issue with the feature/prefix mismatch in this file, it
 ;; can be renamed to `pytest-pdb-break-x' or simply narrowed in scope to
@@ -133,6 +137,31 @@ Otherwise, finish normally."
       ;; doing it wrong, but for now...).
       (set-process-filter pytest-pdb-break--process
                           'pytest-pdb-break--run-fail-comint-process-filter))))
+
+(defun pytest-pdb-break--elpy-shell-get-or-create-process-advice
+    (orig &rest rest)
+  "Advice around `elpy-shell-get-or-create-process'.
+
+Return the source buffer's child process or call ORIG with REST."
+  (condition-case exc
+      (progn (pytest-pdb-break--get-proc-name) (apply orig rest))
+    (pytest-pdb-break-process-exists (get-process (cadr exc)))))
+
+;;;###autoload
+(defun pytest-pdb-break-advise-elpy-shell-get-proc ()
+  "A minor-mode hookee to help Elpy's send-related commands.
+
+This is experimental, but `elpy-shell-send-statement' and
+`elpy-shell-send-defun' seem to work. Unlike the stock send
+commands, the Elpy versions echo the input to the REPL (with proper
+indentation and continuation ellipses)."
+  (let ((a 'pytest-pdb-break--elpy-shell-get-or-create-process-advice))
+    (if pytest-pdb-break-mode
+        ;; Not sure it's worth checking for membership beforehand
+        (unless (advice-member-p a 'elpy-shell-get-or-create-process)
+          (advice-add 'elpy-shell-get-or-create-process :around a))
+      (unless pytest-pdb-break-processes
+        (advice-remove 'elpy-shell-get-or-create-process a)))))
 
 (provide 'pytest-pdb-break-extra)
 ;;; pytest-pdb-break-extra.el ends here
