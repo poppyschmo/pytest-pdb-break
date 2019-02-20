@@ -991,25 +991,19 @@ class TestFoo:
     (should (= (pytest-pdb-break--interpret-prefix-arg '-) -1))
     (should (= (pytest-pdb-break--interpret-prefix-arg '-1) -1))))
 
-;; TODO find the proper built-in way to do this; should decouple waiter from
-;; matcher and use own marker to limit search to new output; or use some kind
-;; of output filter; should also bind to alias in common fixtures to save
-;; typing
-(defun pytest-pdb-break-test--expect-timeout (pattern &optional max-secs)
-  "Dumb waiter. Wait MAX-SECS for PATTERN to show up.
-PATTERN may also be a function that takes no args."
+(defun pytest-pdb-break-test--timeout (func &optional max-secs)
+  "Dumb waiter. Wait MAX-SECS for FUNC to return non-nil."
   (let ((st (float-time))
-        (want-disp (if (boundp '$debuggin?) $debuggin?
-                     (pytest-pdb-break-test-invoked-with-debug-p)))
         (max-secs (or max-secs 5))
-        (func (if (functionp pattern) pattern
-                (lambda nil (looking-back pattern nil))))
         found)
     (while (and (< (- (float-time) st) max-secs)
                 (not (setq found (funcall func))))
-      (and want-disp (redisplay t))
       (sleep-for 0.01))
     found))
+
+(defun pytest-pdb-break-test--expect-simple (pattern)
+  "Wait 5 secs for PATTERN before point."
+  (pytest-pdb-break-test--timeout (lambda () (looking-back pattern nil))))
 
 (ert-deftest pytest-pdb-break-test-read-session-options ()
   ;; Eval: (compile "make PAT=read-session-options")
@@ -1034,48 +1028,48 @@ PATTERN may also be a function that takes no args."
               (term-char-mode)
               (goto-char (process-mark proc))
               (term-send-raw-string "\e:")
-              (should (pytest-pdb-break-test--expect-timeout "Eval: ?"))
+              (should (pytest-pdb-break-test--expect-simple "Eval: ?"))
               (term-send-string proc "(switch-to-buffer (messages-buffer))\n")
               (term-send-raw-string "\e>")
               (ert-info ("Completion of file in current directory")
                 (term-send-raw-string "\e:")
-                (should (pytest-pdb-break-test--expect-timeout "Eval: ?"))
+                (should (pytest-pdb-break-test--expect-simple "Eval: ?"))
                 (term-send-string
                  proc "(pytest-pdb-break--read-session-options)\n")
-                (should (pytest-pdb-break-test--expect-timeout "options: ?"))
+                (should (pytest-pdb-break-test--expect-simple "options: ?"))
                 (term-send-string proc "--foo=./some\t")
-                (should (pytest-pdb-break-test--expect-timeout
+                (should (pytest-pdb-break-test--expect-simple
                          "file\\.suffix ?"))
                 (term-send-string proc "nothe\t")
-                (should (pytest-pdb-break-test--expect-timeout
+                (should (pytest-pdb-break-test--expect-simple
                          "notherfile\\.suffix ?"))
                 (term-send-string proc "\n"))
               (ert-info ("Entry added to history")
                 (term-send-raw-string "\e:")
-                (should (pytest-pdb-break-test--expect-timeout "Eval: ?"))
+                (should (pytest-pdb-break-test--expect-simple "Eval: ?"))
                 (term-send-string proc "pytest-pdb-break--options-history\n")
-                (should (pytest-pdb-break-test--expect-timeout
+                (should (pytest-pdb-break-test--expect-simple
                          (concat  "(\"--foo=\\./somefile\\.suffix ?"
                                   "notherfile\\.suffix ?\").*"))))
               (ert-info ("Entry appears as initial input")
                 (term-send-raw-string "\e:")
-                (should (pytest-pdb-break-test--expect-timeout "Eval: ?"))
+                (should (pytest-pdb-break-test--expect-simple "Eval: ?"))
                 (term-send-string
                  proc "(pytest-pdb-break--read-session-options)\n")
-                (should (pytest-pdb-break-test--expect-timeout
+                (should (pytest-pdb-break-test--expect-simple
                          "options: .*\\.suffix ?"))
                 (term-send-raw-string "\C-a\C-k")
-                (should (pytest-pdb-break-test--expect-timeout "options: ?"))
+                (should (pytest-pdb-break-test--expect-simple "options: ?"))
                 (term-send-string proc "\n"))
               (ert-info ("Empty string added to history")
                 (term-send-raw-string "\e:")
-                (should (pytest-pdb-break-test--expect-timeout "Eval: ?"))
+                (should (pytest-pdb-break-test--expect-simple "Eval: ?"))
                 (term-send-string proc "pytest-pdb-break--options-history\n")
-                (should (pytest-pdb-break-test--expect-timeout
+                (should (pytest-pdb-break-test--expect-simple
                          (concat  "(\"\" \"--foo=\\./somefile\\.suffix ?"
                                   "notherfile\\.suffix ?\").*"))))
               (term-send-raw-string "\C-x\C-c")
-              (should (pytest-pdb-break-test--expect-timeout
+              (should (pytest-pdb-break-test--timeout
                        (lambda nil (not (process-live-p proc))))))
           (unless (pytest-pdb-break-test-invoked-with-debug-p)
             (write-file logfile)
@@ -1126,6 +1120,14 @@ PATTERN may also be a function that takes no args."
                                  'pytest-pdb-break--read-session-options)))
   (should-not pytest-pdb-break--options-history))
 
+(defun pytest-pdb-break-test--expect-last (proc pattern)
+  "Search forward for PATTERN in most recent output from PROC.
+Use \\' for end of string, and $ for end of line."
+  (pytest-pdb-break-test--timeout
+   (lambda nil (string-match-p pattern
+                               (buffer-substring comint-last-output-start
+                                                 (process-mark proc))))))
+
 (defmacro pytest-pdb-break--main-command-fixture (linepat &rest body)
   "Run main command assertions in BODY from LINEPAT."
   `(pytest-pdb-break-test-ensure-venv
@@ -1155,8 +1157,10 @@ PATTERN may also be a function that takes no args."
                (should (local-variable-p 'pytest-pdb-break--parent-buffer))
                (should (eq pytest-pdb-break--parent-buffer
                            (get-buffer "test_class.py")))
-               (should (pytest-pdb-break-test--expect-timeout "(Pdb) "))
-               (let ((inhibit-message t)) ,@body)
+               (should (pytest-pdb-break-test--expect-simple "(Pdb) "))
+               (cl-flet (($expect (pat) (pytest-pdb-break-test--expect-last
+                                         pytest-pdb-break--process pat)))
+                 (let ((inhibit-message t)) ,@body))
                (should-not (get-buffer "*Warnings*")))
            (advice-remove 'ding 'neuter)
            (should-not (advice-member-p 'neuter 'ding))
@@ -1181,11 +1185,9 @@ PATTERN may also be a function that takes no args."
   (pytest-pdb-break--main-command-fixture
    "assert True"
    (ert-info ("Break in first method")
-     (should (save-excursion
-               (search-backward-regexp ">.*\\.py(4)test_foo()\n"
-                                       (point-min) t))))
+     (should ($expect ">.*\\.py(4)test_foo()$")))
    (comint-send-string pytest-pdb-break--process "c\n")
-   (should (pytest-pdb-break-test--expect-timeout "finished\n.*"))))
+   (should (pytest-pdb-break-test--expect-simple "finished\n.*"))))
 
 (ert-deftest pytest-pdb-break-test-main-command-send-string ()
   "Test compatibility of `python.el''s string-sending functions."
@@ -1197,9 +1199,7 @@ PATTERN may also be a function that takes no args."
   (pytest-pdb-break--main-command-fixture
    "assert True"
    (ert-info ("Break in first method")
-     (should (save-excursion
-               (search-backward-regexp ">.*\\.py(4)test_foo()\n"
-                                       (point-min) t))))
+     (should ($expect ">.*\\.py(4)test_foo()$")))
    (ert-info ("Send string noninteractively (no minibuffer)")
      (with-current-buffer pytest-pdb-break--parent-buffer
        (python-shell-send-string "myvar = 21 * 2"))
@@ -1207,11 +1207,8 @@ PATTERN may also be a function that takes no args."
        (should-not (save-excursion
                      (search-backward-regexp "myvar" (point-min) t))))
      (execute-kbd-macro "myvar\r")
-     (should (pytest-pdb-break-test--expect-timeout "(Pdb) "))
-     (should (pytest-pdb-break-test--expect-timeout
-              (lambda nil (save-excursion (goto-char (point-min))
-                                          (search-forward "42" nil t)))))
-     (should (pytest-pdb-break-test--expect-timeout "(Pdb) ")))
+     (should ($expect "42$"))
+     (should ($expect "(Pdb) \\'")))
    (ert-info ("Send defun")
      (with-current-buffer pytest-pdb-break--parent-buffer
        (goto-char (point-max))
@@ -1219,30 +1216,26 @@ PATTERN may also be a function that takes no args."
        (save-buffer)
        (should ($get-there "return x * 2"))
        (call-interactively #'python-shell-send-defun))
-     (should (pytest-pdb-break-test--expect-timeout "(Pdb) "))
+     (should ($expect "(Pdb) \\'"))
      (execute-kbd-macro "some_func(myvar)\r")
-     (should (pytest-pdb-break-test--expect-timeout
-              (lambda nil (save-excursion (goto-char (point-min))
-                                          (search-forward "84" nil t))))))
+     (should ($expect "84$")))
    (ert-info ("Interactive")
      (execute-kbd-macro "interact\r")
-     (should (pytest-pdb-break-test--expect-timeout ">>> "))
+     (should ($expect ">>> \\'"))
      (with-current-buffer pytest-pdb-break--parent-buffer
        (goto-char (point-max))
        (insert "\ndef nother_func(x):\n    return x * 3")
        (save-buffer)
        (should ($get-there "return x * 3"))
        (call-interactively #'python-shell-send-defun))
-     (should (pytest-pdb-break-test--expect-timeout ">>> "))
+     (should ($expect ">>> \\'"))
      (execute-kbd-macro "nother_func(myvar)\r")
-     (should (pytest-pdb-break-test--expect-timeout
-              (lambda nil (save-excursion (goto-char (point-min))
-                                          (search-forward "126" nil t)))))
+     (should ($expect "126$"))
      (execute-kbd-macro [4]))
-   (should (pytest-pdb-break-test--expect-timeout "(Pdb) "))
+   (should ($expect "(Pdb) \\'"))
    (comint-send-string pytest-pdb-break--process "c\n")
    (unless $debuggin?
-     (should (pytest-pdb-break-test--expect-timeout "finished\n.*")))))
+     (should (pytest-pdb-break-test--expect-simple "finished\n.*")))))
 
 (ert-deftest pytest-pdb-break-test-main-command-completion ()
   ;; Eval: (compile "make PAT=main-command-completion")
@@ -1252,19 +1245,21 @@ PATTERN may also be a function that takes no args."
    (should (member 'python-shell-completion-at-point
                    completion-at-point-functions))
    (ert-info ("Break in second method")
-     (should (save-excursion
-               (search-backward-regexp ">.*\\.py(9)test_bar()\n"
-                                       (point-min) t))))
+     ;; Already waiting, so last-output-start has been cleared
+     (should (save-excursion (search-backward-regexp ">.*\\.py(9)test_bar()$"
+                                                     nil t))))
    (ert-info ("Local variable, single result autocompletes")
      (execute-kbd-macro "somev\t")
      (should-not (get-buffer "*Completions*"))
+     ;; XXX would think the kbd-macro and looking-back call might race, but
+     ;; guess they don't (i.e., seems no waiter needed)
      (should (looking-back "somevar"))
      (execute-kbd-macro [13])
-     (should (pytest-pdb-break-test--expect-timeout "(Pdb) "))
-     (should (save-excursion (search-backward "True"))))
+     (should ($expect "^True$"))
+     (should ($expect "(Pdb) \\'")))
    (ert-info ("Attr in command loop")
      (execute-kbd-macro "import sys\r")
-     (should (pytest-pdb-break-test--expect-timeout "(Pdb) "))
+     (should ($expect "(Pdb) \\'"))
      (execute-kbd-macro "sys.\t")
      (should (get-buffer "*Completions*"))
      (with-current-buffer "*Completions*"
@@ -1274,51 +1269,48 @@ PATTERN may also be a function that takes no args."
      (execute-kbd-macro "version_info.maj\t")
      (should (looking-back "sys\\.version_info\\.major"))
      (execute-kbd-macro [13])
-     (should (pytest-pdb-break-test--expect-timeout "(Pdb) "))
-     (should (save-excursion (search-backward-regexp "\n3\n"))))
+     (should ($expect "^3$"))
+     (should ($expect "(Pdb) \\'")))
    (ert-info ("PDB command, interactive REPL")
      (execute-kbd-macro "inter\t")
      (should (looking-back "interact"))
      (execute-kbd-macro [13])
-     (should (pytest-pdb-break-test--expect-timeout ">>> "))
-     (should (save-excursion (search-backward-regexp "[*]interactive[*]")))
+     (should ($expect "[*]interactive[*]$"))
+     (should ($expect ">>> \\'"))
      (ert-info ("No commands in interactive")
        (execute-kbd-macro "inter\t")
        (should (looking-back "inter"))
        (execute-kbd-macro "act\r")
-       (should (pytest-pdb-break-test--expect-timeout ">>> "))
-       (should (save-excursion (search-backward-regexp "NameError"))))
+       (should ($expect "NameError"))
+       (should ($expect ">>> \\'")))
      (ert-info ("Locals from test available")
        (execute-kbd-macro "somev\t")
        (should (looking-back "somevar"))
        (execute-kbd-macro [13])
-       (should (pytest-pdb-break-test--expect-timeout ">>> ")))
+       (should ($expect ">>> \\'")))
      (ert-info ("New locals")
        (execute-kbd-macro "import pathlib\r")
-       (should (pytest-pdb-break-test--expect-timeout ">>> "))
+       (should ($expect ">>> \\'"))
        (execute-kbd-macro "pathlib.\t")
        (with-current-buffer "*Completions*"
          (save-excursion (goto-char (point-min))
                          (should (search-forward "pathlib.Path"))))
        (execute-kbd-macro "Path\r")
-       (should (pytest-pdb-break-test--expect-timeout ">>> ")))
+       (should ($expect ">>> \\'")))
      (execute-kbd-macro [4]))
    (ert-info ("Interactive locals removed")
-     (should (pytest-pdb-break-test--expect-timeout "(Pdb) "))
+     (should ($expect "(Pdb) \\'"))
      (execute-kbd-macro "pathlib\r")
-     (should (pytest-pdb-break-test--expect-timeout "(Pdb) "))
-     (should (save-excursion (search-backward-regexp "NameError"))))
+     (should ($expect "NameError"))
+     (should ($expect "(Pdb) \\'")))
    (ert-info ("Command completion still works")
-     (let ((pbef (point)))
-       (execute-kbd-macro "whe\t")
-       (should (pytest-pdb-break-test--expect-timeout "where"))
-       (execute-kbd-macro [13])
-       (should (pytest-pdb-break-test--expect-timeout "(Pdb) "))
-       (should (save-excursion
-                 (search-backward-regexp ">.*\\.py(9)test_bar()"
-                                         pbef t)))))
+     (execute-kbd-macro "whe\t")
+     (should (looking-back "where"))
+     (execute-kbd-macro [13])
+     (should ($expect ">.*\\.py(9)test_bar()$"))
+     (should ($expect "(Pdb) \\'")))
    (execute-kbd-macro "c\r")
-   (should (pytest-pdb-break-test--expect-timeout
+   (should (pytest-pdb-break-test--expect-simple
             (if $debuggin? "passed.*\n?" "finished.*\n?")))))
 
 (ert-deftest pytest-pdb-break-test-run-fail-compilation-filter ()
@@ -1341,15 +1333,15 @@ PATTERN may also be a function that takes no args."
              (add-hook 'compilation-filter-hook
                        'pytest-pdb-break--run-fail-compilation-filter nil t)
              (should (eq major-mode 'compilation-mode))
-             (should (pytest-pdb-break-test--expect-timeout
+             (should (pytest-pdb-break-test--timeout
                       (lambda ()
                         (goto-char (point-min))
                         (search-forward "topic" (point-max) t))))
-             (should (pytest-pdb-break-test--expect-timeout
+             (should (pytest-pdb-break-test--timeout
                       (lambda () (goto-char (point-max))
                         (looking-back "(Pdb) " nil))))
              (process-send-string proc "c\n")
-             (should (pytest-pdb-break-test--expect-timeout
+             (should (pytest-pdb-break-test--timeout
                       (lambda nil (not (process-live-p proc))))))
          (unless (pytest-pdb-break-test-invoked-with-debug-p)
            (write-file "compilation.out")))))))
@@ -1377,17 +1369,17 @@ PATTERN may also be a function that takes no args."
              (set-process-filter
               proc 'pytest-pdb-break--run-fail-comint-process-filter)
              (should (eq major-mode 'comint-mode))
-             (should (pytest-pdb-break-test--expect-timeout
+             (should (pytest-pdb-break-test--timeout
                       (lambda ()
                         (goto-char (point-min))
                         (search-forward "topic" (point-max) t))))
              (comint-goto-process-mark)
-             (should (pytest-pdb-break-test--expect-timeout "(Pdb) "))
+             (should (pytest-pdb-break-test--expect-simple "(Pdb) "))
              (should-not buffer-read-only)
              ;; Current buffer must be displayed for macros to work!
              (switch-to-buffer buf)
              (execute-kbd-macro "c\r")
-             (should (pytest-pdb-break-test--expect-timeout
+             (should (pytest-pdb-break-test--timeout
                       (lambda nil (not (process-live-p proc))))))
          (unless (pytest-pdb-break-test-invoked-with-debug-p)
            ;; When proc ends, we're popped back to parbuf
@@ -1402,7 +1394,7 @@ PATTERN may also be a function that takes no args."
       (with-current-buffer
           (compile (format "%s -c 'import pdb; pdb.set_trace()'" $pyexe)
                    ,(eq mode 'comint-mode))
-        (should (pytest-pdb-break-test--expect-timeout
+        (should (pytest-pdb-break-test--timeout
                  (lambda () (goto-char (point-max))
                    (looking-back "(Pdb) " nil))))
         (let (($proc (get-buffer-process (current-buffer)))
@@ -1427,7 +1419,7 @@ PATTERN may also be a function that takes no args."
           ,@body
           (comint-goto-process-mark)
           (execute-kbd-macro "c\r")
-          (should (pytest-pdb-break-test--expect-timeout
+          (should (pytest-pdb-break-test--timeout
                    (lambda nil (not (process-live-p $proc))))))))))
 
 (ert-deftest pytest-pdb-break-test-go-inferior ()
@@ -1472,7 +1464,7 @@ PATTERN may also be a function that takes no args."
                                                   (current-buffer))))
            (should-not pytest-pdb-break--parent-buffer)
            (should-not (local-variable-p 'pytest-pdb-break--parent-buffer))
-           (should (pytest-pdb-break-test--expect-timeout
+           (should (pytest-pdb-break-test--timeout
                     (lambda nil
                       (not (process-live-p pytest-pdb-break--process)))))
            (goto-char (point-min))
@@ -1502,7 +1494,7 @@ PATTERN may also be a function that takes no args."
                 (search-forward "assert False")
                 (goto-char (match-beginning 0))))
    (call-interactively 'pytest-pdb-break-run-fail)
-   (should (pytest-pdb-break-test--expect-timeout
+   (should (pytest-pdb-break-test--timeout
             (lambda nil (get-buffer "*pytest-PDB[test_class.py]*"))))
    (with-current-buffer "*pytest-PDB[test_class.py]*"
      (unwind-protect
@@ -1512,10 +1504,10 @@ PATTERN may also be a function that takes no args."
            (should (local-variable-p 'pytest-pdb-break--parent-buffer))
            (should (eq pytest-pdb-break--parent-buffer
                        (get-buffer "test_class.py")))
-           (should (pytest-pdb-break-test--expect-timeout "(Pdb) "))
+           (should (pytest-pdb-break-test--expect-simple "(Pdb) "))
            (switch-to-buffer (current-buffer))
            (execute-kbd-macro "c\r")
-           (should (pytest-pdb-break-test--expect-timeout
+           (should (pytest-pdb-break-test--timeout
                     (lambda nil
                       (not (process-live-p pytest-pdb-break--process)))))
            (should-not (get-buffer "*Warnings*")))
