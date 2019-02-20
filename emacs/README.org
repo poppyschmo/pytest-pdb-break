@@ -1,5 +1,6 @@
 * pytest-pdb-break
-See the main source file's front matter for additional options and info.
+See atop the main file for additional options and info, also =pytest-pdb-break-extra.el= for
+convenience functions, integration tips (Elpy), and more.
 
 ** Installation
 No MELPA yet, but =straight.el= users can use this:
@@ -12,7 +13,7 @@ No MELPA yet, but =straight.el= users can use this:
 ** Usage
 With point in the body of some test, run =M-x pytest-pdb-break-here=.
 
-That's the one and only command. By default, =C-u= will trigger a prompt for pytest options,
+That's the only real command. By default, =C-u= will trigger a prompt for pytest options,
 which are included in subsequent runs until cleared. Clearing is done by killing the input
 line or calling the command with =C-u 0=. Prompt history and file-path completion should
 work as expected, but pytest option names have yet to be added.
@@ -20,6 +21,6 @@ work as expected, but pytest option names have yet to be added.
 Persistent options can be stored in ~pytest-pdb-break-extra-opts~. These are inserted before
 per-session options in the command line.
 
-The main command activates a very minor, minor mode whose hook is handy for rigging up
-PDB-related tasks, like ~realgud~ tracking, etc. It runs inside the ~inferior-python-mode~
+The main command activates a minimal minor mode whose hook is handy for rigging up
+PDB-related tasks like ~realgud~ tracking, etc. It runs inside the ~inferior-python-mode~
 buffer just after it's created and again when it's killed.
