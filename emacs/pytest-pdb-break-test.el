@@ -46,7 +46,9 @@
     pytest-pdb-break-test-run-fail-comint-process-filter
     pytest-pdb-break-test-go-inferior
     pytest-pdb-break-test-run-fail-stay
-    pytest-pdb-break-test-run-fail-switch))
+    pytest-pdb-break-test-run-fail-switch
+    pytest-pdb-break-test-elpy-shell-get-or-create-process-advice
+    pytest-pdb-break-test-advise-elpy-shell-get-proc))
 
 (defvar pytest-pdb-break-test-repo-root
   (file-name-as-directory
@@ -990,8 +992,9 @@ class TestFoo:
     (should (= (pytest-pdb-break--interpret-prefix-arg '-1) -1))))
 
 ;; TODO find the proper built-in way to do this; should decouple waiter from
-;; matcher and use own marker to limit search to new output; should also bind
-;; to alias in common fixtures to save typing
+;; matcher and use own marker to limit search to new output; or use some kind
+;; of output filter; should also bind to alias in common fixtures to save
+;; typing
 (defun pytest-pdb-break-test--expect-timeout (pattern &optional max-secs)
   "Dumb waiter. Wait MAX-SECS for PATTERN to show up.
 PATTERN may also be a function that takes no args."
@@ -1528,6 +1531,52 @@ PATTERN may also be a function that takes no args."
            (set-process-query-on-exit-flag pytest-pdb-break--process nil)
            (kill-process pytest-pdb-break--process))
          (kill-buffer))))))
+
+;; Note: these are mocked, so actual integrations may still fail
+
+(ert-deftest pytest-pdb-break-test-elpy-shell-get-or-create-process-advice ()
+  ;; Eval: (compile "make PAT=elpy-shell-get-or-create-process-advice")
+  (should-not (featurep 'elpy-shell))
+  (let* ((fake-up (lambda (&rest args) (cons 'called-with args)))
+         (f 'pytest-pdb-break--elpy-shell-get-or-create-process-advice))
+    (ert-info ("Orig called")
+      (should (equal (funcall f fake-up 1 2 3) '(called-with 1 2 3))))
+    (ert-info ("Our proc returned")
+      (with-temp-buffer
+        (rename-buffer "foo")
+        (let* ((proc-name (pytest-pdb-break--get-proc-name))
+               (child-buf (get-buffer-create (format "*%s*" proc-name)))
+               (proc (with-current-buffer child-buf
+                       (start-process proc-name (current-buffer)
+                                      "sleep" "10"))))
+          (should (eq (funcall f fake-up 1 2 3) proc)))))))
+
+(ert-deftest pytest-pdb-break-test-advise-elpy-shell-get-proc ()
+  ;; Eval: (compile "make PAT=advise-elpy-shell-get-proc")
+  (unless (fboundp 'elpy-shell-get-or-create-process)
+    (defun elpy-shell-get-or-create-process
+        (&rest _args) (error "Called fake function")))
+  (with-temp-buffer
+    (let ((elpy-a 'pytest-pdb-break--elpy-shell-get-or-create-process-advice)
+          (proc (start-process "pytest-PDB[foo]" (current-buffer)
+                               "sleep" "10")))
+      (set-process-query-on-exit-flag proc nil)
+      (ert-info ("New process")
+        (should-not (advice-member-p elpy-a 'elpy-shell-get-or-create-process))
+        (pytest-pdb-break-mode +1)
+        (pytest-pdb-break-advise-elpy-shell-get-proc)
+        (should (advice-member-p elpy-a 'elpy-shell-get-or-create-process)))
+      (ert-info ("Advice not removed when procs exist")
+        (should pytest-pdb-break-processes)
+        (pytest-pdb-break-advise-elpy-shell-get-proc)
+        (should (advice-member-p elpy-a 'elpy-shell-get-or-create-process)))
+      (ert-info ("Process dead")
+        (kill-process proc)
+        (while (process-live-p proc) (sleep-for 0.001))
+        (pytest-pdb-break-mode -1)
+        (pytest-pdb-break-advise-elpy-shell-get-proc)
+        (should-not (advice-member-p elpy-a
+                                     'elpy-shell-get-or-create-process))))))
 
 (provide 'pytest-pdb-break-test)
 ;;; pytest-pdb-break-test.el ends here
