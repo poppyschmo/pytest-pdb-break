@@ -349,7 +349,7 @@ hard-wired, for now." )
 
 (defvar pytest-pdb-break--options-history nil)
 
-(defun pytest-pdb-break--maybe-tare-options-history ()
+(defun pytest-pdb-break--burp-options-history ()
   "Add the empty string to the front of the options history.
 
 Remove other instances and return the modified list."
@@ -373,7 +373,7 @@ double quotes, e.g., prompt: -foO \"--data={\\\"bar\\\": 1}\" ./baz/"
                     nil '(pytest-pdb-break--options-history . 1)
                     nil t))
       (when (string-empty-p outstr)
-        (pytest-pdb-break--maybe-tare-options-history))
+        (pytest-pdb-break--burp-options-history))
       outstr)))
 
 (defun pytest-pdb-break-default-options-function (&optional n)
@@ -388,7 +388,7 @@ return nil."
               ((< n 0) (or (nth (- n) pytest-pdb-break--options-history)
                            (car (last pytest-pdb-break--options-history))))
               ((> n 0) (pytest-pdb-break--read-session-options))
-              (t (car (pytest-pdb-break--maybe-tare-options-history))))))
+              (t (car (pytest-pdb-break--burp-options-history))))))
     (and raw (split-string-and-unquote raw))))
 
 (defun pytest-pdb-break--interpret-prefix-arg (arg)
