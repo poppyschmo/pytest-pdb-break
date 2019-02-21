@@ -568,7 +568,7 @@ def test_bt_all(testdir_setup):
     pe.expect(EOF)
 
 
-def test_unittest(testdir_setup):
+def test_unittest_simple(testdir_setup):
     testdir_setup.makepyfile(test_file="""
         import unittest
         class TestFoo(unittest.TestCase):
@@ -580,6 +580,24 @@ def test_unittest(testdir_setup):
     pe.expect(prompt_re)
     befs = LineMatcher(unansi(pe.before))
     befs.fnmatch_lines("*>*/test_file.py(4)test_foo()")
+    pe.sendline("c")
+    pe.expect(EOF)
+
+
+def test_unittest_inner(testdir_setup):
+    testdir_setup.makepyfile(test_file="""
+        import unittest
+        class TestFoo(unittest.TestCase):
+            def test_foo(self):
+                def inner(x):
+                    return x                 # <- line 5
+                self.assertTrue(inner(True))
+    """)
+    pe = testdir_setup.spawn_pytest("--break=test_file.py:5")
+    pe.expect(prompt_re)
+    befs = LineMatcher(unansi(pe.before))
+    befs.fnmatch_lines(["*>*/test_file.py(5)inner()",
+                        "*line 5*"])
     pe.sendline("c")
     pe.expect(EOF)
 
@@ -625,6 +643,66 @@ def test_elsewhere_fixture_with_yield(testdir_setup, lnum):
     befs.fnmatch_lines([f"*>*/test_file.py({lnum})fixie()",
                         f"->*# <- line {lnum}"])
     pe.sendline("c")
+    pe.expect(EOF)
+    befs = LineMatcher(unansi(pe.before))
+    befs.fnmatch_lines("*1 passed*")
+
+
+@pytest.mark.parametrize("bt_all", [False, True])
+def test_inner_simple(testdir_setup, bt_all):
+    testdir_setup.makepyfile(test_file="""
+        def test_foo():
+
+            def inner(x):
+                print("inner")  # <- line 4
+                return x + 1
+
+            assert inner(1)     # <- line 7
+            assert True
+    """)
+    opts = "--break=test_file.py:4"
+    if bt_all:
+        opts += " --bt-all"
+    pe = testdir_setup.spawn_pytest(opts)
+    pe.expect(prompt_re)
+    befs = LineMatcher(unansi(pe.before))
+    befs.fnmatch_lines(["*>*/test_file.py(4)inner()",
+                        "->*# <- line 4"])
+
+    # Stack
+    pe.sendline("w")
+    pe.expect(prompt_re)
+    befs = LineMatcher(unansi(pe.before))
+    if bt_all:
+        befs.fnmatch_lines([
+            "*/_pytest/config/__init__.py(*)main()",
+            "*/pytest_pdb_break.py(*)runcall_until()",
+            "*/test_file.py(7)test_foo()",
+            "*assert inner(1)*line 7"
+        ])
+    else:
+        assert "runcall_until" not in befs.str()
+        befs.fnmatch_lines(["*/test_file.py(7)test_foo()",
+                            "*assert inner(1)*line 7"])
+
+    pe.sendline("c")
+    pe.expect(EOF)
+    befs = LineMatcher(unansi(pe.before))
+    befs.fnmatch_lines("*1 passed*")
+
+
+@pytest.mark.parametrize("at_def", [False, True])
+def test_inner_never_called(testdir_setup, at_def):
+    testdir_setup.makepyfile(test_file="""
+        def test_foo():
+            def inner(x):       # <- line 2
+                print("inner")  # <- line 3
+                return x + 1
+            assert inner
+    """)
+    # The True case is unfortunate, may warrant switching behavior
+    lnum = (3, 2)[at_def]
+    pe = testdir_setup.spawn_pytest(f"--break=test_file.py:{lnum}")
     pe.expect(EOF)
     befs = LineMatcher(unansi(pe.before))
     befs.fnmatch_lines("*1 passed*")

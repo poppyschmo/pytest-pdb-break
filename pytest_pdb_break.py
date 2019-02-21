@@ -56,6 +56,7 @@ class BreakLoc:
     func_name = attr.ib(default=None, repr=False, cmp=False, kw_only=True)
     param_id = attr.ib(default=None, repr=False, cmp=False, kw_only=True)
     decked = attr.ib(default=None, repr=False, cmp=False, kw_only=True)
+    inner = attr.ib(default=None, repr=False, cmp=False, kw_only=True)
 
     def equals(self, other):
         """True if class, func, param fields are equal.
@@ -176,7 +177,7 @@ class PdbBreak:
         self.last_pdb = None
 
     def _resolve_wanted(self, wanted):
-        """Validate file component of user arg, if supplied"""
+        """Validate file component of user arg, if supplied."""
         if wanted.file is None or wanted.file.is_absolute():
             return wanted
         file = wanted.file
@@ -267,18 +268,24 @@ class PdbBreak:
         self._l and self._l.prinspect(event=event, frame=frame)
 
         if (event != "line"
-                or frame.f_code.co_name != self.wanted.func_name
-                or frame.f_lineno < self.wanted.lnum):
+                or frame.f_lineno < self.wanted.lnum
+                or (self.wanted.inner
+                    and frame.f_code.co_name != self.wanted.inner)
+                or (not self.wanted.inner
+                    and frame.f_code.co_name != self.wanted.func_name)):
             return self.trace_handoff
 
         inst = self.last_pdb
-        # Reinstrument "backwards" to show pytest frames in stack
-        if self.bt_all:
-            _frame = frame
-            while _frame.f_back:
-                _frame.f_trace = inst.trace_dispatch
-                _frame = _frame.f_back
-            inst.botframe = _frame
+
+        if self.bt_all or self.wanted.inner:
+            bot = frame
+            while bot.f_back:
+                bot.f_trace = inst.trace_dispatch
+                bot = bot.f_back
+                if (not self.bt_all
+                        and bot.f_code.co_name == self.wanted.func_name):
+                    break
+            inst.botframe = bot
         else:
             inst.botframe = frame
 
@@ -429,10 +436,13 @@ def fortify_location(filename, line_no):
         return None
 
     cand = func
+    inner = None
     # Fails when inner func is named test_*
     while cand and not cand.name.startswith("test_"):
         cand = find(cand.parent, ast.FunctionDef)
     if cand:
+        if cand is not func:
+            inner = func.name
         func = cand
 
     cls = find(func, ast.ClassDef)
@@ -441,7 +451,8 @@ def fortify_location(filename, line_no):
                     class_name=cls.name if cls else None,
                     func_name=func.name,
                     param_id=None,
-                    decked=bool(func.decorator_list))
+                    decked=bool(func.decorator_list),
+                    inner=inner)
 
 
 def add_completion(config):
