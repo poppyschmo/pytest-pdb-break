@@ -55,7 +55,7 @@ class BreakLoc:
     class_name = attr.ib(default=None, repr=False, cmp=False, kw_only=True)
     func_name = attr.ib(default=None, repr=False, cmp=False, kw_only=True)
     param_id = attr.ib(default=None, repr=False, cmp=False, kw_only=True)
-    decked = attr.ib(default=None, repr=False, cmp=False, kw_only=True)
+    ast_obj = attr.ib(default=None, repr=False, cmp=False, kw_only=True)
     inner = attr.ib(default=None, repr=False, cmp=False, kw_only=True)
 
     def equals(self, other):
@@ -234,9 +234,7 @@ class PdbBreak:
                 msg = "unable to determine breakpoint item"
                 raise RuntimeError(msg)
             self._l and self._l.pspore("targets")
-        elif (self.wanted.decked
-              and self.wanted.func_name in
-              session._fixturemanager._arg2fixturedefs):
+        elif is_fixture(self.wanted, session._fixturemanager._arg2fixturedefs):
             self.elsewhere = [i for i in session.items if
                               self.wanted.func_name in i.fixturenames]
         else:
@@ -450,8 +448,27 @@ def fortify_location(filename, line_no):
                     class_name=cls.name if cls else None,
                     func_name=func.name,
                     param_id=None,
-                    decked=bool(func.decorator_list),
+                    ast_obj=func,
                     inner=inner)
+
+
+def is_fixture(loc, fixture_names):
+    """Return True if loc appears to reside in the body of a fixture.
+    """
+    node = loc.ast_obj
+    while node.parent:
+        if (type(node) is ast.FunctionDef
+                and node.decorator_list
+                and node.name in fixture_names):
+            break
+        node = node.parent
+    else:
+        return False
+
+    if node is not loc.ast_obj:
+        loc.inner = loc.func_name
+        loc.func_name = node.name
+    return True
 
 
 def add_completion(config):

@@ -153,21 +153,78 @@ def test_fortify_location(testdir_ast):
     rv = fortify_location(filename, 2)
     assert rv.equals(BreakLoc(filename, 2, None,
                               class_name=None,
-                              func_name="somefunc",
-                              decked=None))
+                              func_name="somefunc"))
     rv = fortify_location(filename, 6)
     assert rv.equals(BreakLoc(filename, 6, None,
                               class_name="C", func_name="f"))
     rv = fortify_location(filename, 13)
     assert rv.equals(BreakLoc(filename, 13, None,
                               class_name="TestClass", func_name="test_foo"))
+    assert rv.inner is not None
     rv = fortify_location(filename, 17)
     assert rv is None
     rv = fortify_location(filename, 21)
     assert rv.equals(BreakLoc(filename, 21, None,
                               class_name=None,
-                              func_name="wrapped",
-                              decked=True))
+                              func_name="wrapped"))
+    from ast import FunctionDef
+    assert type(rv.ast_obj) is FunctionDef
+
+
+def test_is_fixture(testdir_setup):
+    from pytest_pdb_break import fortify_location, is_fixture
+    testdir_setup.makepyfile(test_file="""
+        @wrapper.attr
+        def a():
+            print("a")                 # <- line 3
+
+        @wrapper.attr
+        def b():
+            def inner():
+                return True            # <- line 8
+            print("b")
+
+        @wrapper.attr
+        def c():
+            class C:
+                def inner(self):
+                    return True        # <- line 15
+            print("c")
+
+        def d():
+            print("d")                 # <- line 19
+    """)
+    filename = Path(testdir_setup.tmpdir.join("test_file.py"))
+
+    wanted = fortify_location(filename, 3)
+    assert wanted.func_name == "a"
+    assert is_fixture(wanted, ["x", "a", "y", "z"]) is True
+    assert wanted.func_name == "a"
+    assert wanted.inner is None
+
+    wanted = fortify_location(filename, 8)
+    assert wanted.func_name == "inner"
+    assert is_fixture(wanted, ["x", "b", "y", "z"]) is True
+    assert wanted.func_name == "b"
+    assert wanted.inner == "inner"
+
+    wanted = fortify_location(filename, 15)
+    assert wanted.func_name == "inner"
+    assert is_fixture(wanted, ["x", "c", "y", "z"]) is True
+    assert wanted.func_name == "c"
+    assert wanted.inner == "inner"
+
+    wanted = fortify_location(filename, 15)
+    assert wanted.func_name == "inner"
+    assert is_fixture(wanted, ["x", "y", "z"]) is False
+    assert wanted.func_name == "inner"
+    assert wanted.inner is None
+
+    wanted = fortify_location(filename, 19)  # no deco
+    assert wanted.func_name == "d"
+    assert is_fixture(wanted, ["x", "d", "y", "z"]) is False
+    assert wanted.func_name == "d"
+    assert wanted.inner is None
 
 
 def test_invalid_arg(testdir_setup):
@@ -634,6 +691,29 @@ def test_elsewhere_fixture_simple(testdir_setup):
     befs.fnmatch_lines("*1 passed*")
 
 
+def test_elsewhere_fixture_nested_simple(testdir_setup):
+    testdir_setup.makepyfile(test_file="""
+        import pytest
+
+        @pytest.fixture
+        def fixie():
+            def inner():
+                return True              # <- line 6
+            return inner()
+
+        def test_foo(fixie):
+            assert fixie
+    """)
+    pe = testdir_setup.spawn_pytest("--break=test_file.py:6")
+    pe.expect(prompt_re)
+    befs = LineMatcher(unansi(pe.before))
+    befs.fnmatch_lines(["*>*/test_file.py(6)inner()", "->*# <- line 6"])
+    pe.sendline("c")
+    pe.expect(EOF)
+    befs = LineMatcher(unansi(pe.before))
+    befs.fnmatch_lines("*1 passed*")
+
+
 @pytest.mark.parametrize("lnum", [5, 7])
 def test_elsewhere_fixture_with_yield(testdir_setup, lnum):
     testdir_setup.makepyfile(test_file="""
@@ -653,6 +733,35 @@ def test_elsewhere_fixture_with_yield(testdir_setup, lnum):
     befs = LineMatcher(unansi(pe.before))
     befs.fnmatch_lines([f"*>*/test_file.py({lnum})fixie()",
                         f"->*# <- line {lnum}"])
+    pe.sendline("c")
+    pe.expect(EOF)
+    befs = LineMatcher(unansi(pe.before))
+    befs.fnmatch_lines("*1 passed*")
+
+
+def test_elsewhere_fixture_with_yield_nested(testdir_setup):
+    testdir_setup.makepyfile(test_file="""
+        import pytest
+
+        @pytest.fixture
+        def fixie():
+            class C:
+                def __init__(self):
+                    print("in init")     # <- line 7
+                def ran(self):
+                    return True
+            c = C()
+            yield c
+            del c
+
+        def test_foo(fixie):
+            assert fixie.ran()
+    """)
+    pe = testdir_setup.spawn_pytest("--break=test_file.py:7")
+    pe.expect(prompt_re)
+    befs = LineMatcher(unansi(pe.before))
+    befs.fnmatch_lines(["*>*/test_file.py(7)__init__()",
+                        "->*# <- line 7"])
     pe.sendline("c")
     pe.expect(EOF)
     befs = LineMatcher(unansi(pe.before))
