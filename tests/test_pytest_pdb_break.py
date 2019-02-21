@@ -311,6 +311,17 @@ def test_compat_invoke_after_other(testdir_setup):
     pe.sendline("c")
 
 
+def test_collect_only(testdir_setup):
+    testdir_setup.makepyfile(test_file="""
+        def test_foo():
+            assert True                   # <- line 2
+    """)
+    # Arg parse still runs, but fake file means our init isn't called
+    result = testdir_setup.runpytest_subprocess("--break=fake.py:2",
+                                                "--collectonly")
+    result.stdout.fnmatch_lines(["*collected*", "*no tests ran*"])
+
+
 def test_two_funcs_simple(testdir_two_funcs):
     pe = testdir_two_funcs.spawn_pytest("--break=test_two_funcs_simple.py:4")
     pe.expect(prompt_re)

@@ -135,7 +135,7 @@ def pytest_addoption(parser):
 @pytest.hookimpl(trylast=True)
 def pytest_configure(config):
     wanted = config.getoption("pdb_break")
-    if not wanted:
+    if not wanted or config.option.collectonly:
         return
     pdbtrace = config.pluginmanager.get_plugin("pdbtrace")
     pdbcls = config.pluginmanager.get_plugin("pdbtrace")
@@ -234,8 +234,7 @@ class PdbBreak:
                 msg = "unable to determine breakpoint item"
                 raise RuntimeError(msg)
             self._l and self._l.pspore("targets")
-        elif (not session.config.option.collectonly
-              and self.wanted.decked
+        elif (self.wanted.decked
               and self.wanted.func_name in
               session._fixturemanager._arg2fixturedefs):
             self.elsewhere = [i for i in session.items if
