@@ -8,7 +8,7 @@ except Exception:
 
 setup(
     name="pytest-pdb-break",
-    version="0.0.2",
+    version="0.0.3",
     license="Apache 2.0",
     description="A pytest command-line option for pdb breakpoints",
     long_description=long_description,
