@@ -918,7 +918,7 @@ class TestFoo:
                    (kill-process proc)
                    (while (process-live-p proc) (sleep-for 0.01))
                    (should proc)
-                   (should-not (get-buffer-process (current-buffer)))
+                   ;; Call to get-buffer-process may return #<killed-buffer>
                    (let ((exc (should-error (pytest-pdb-break-mode +1))))
                      (should (string-match-p "No live process" (cadr exc)))))
            (outside (should-not pytest-pdb-break-processes))))
