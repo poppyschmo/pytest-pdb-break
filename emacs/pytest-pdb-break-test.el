@@ -1185,7 +1185,8 @@ Use \\' for end of string, and $ for end of line."
   (pytest-pdb-break--main-command-fixture
    "assert True"
    (ert-info ("Break in first method")
-     (should ($expect ">.*\\.py(4)test_foo()$")))
+     (should (save-excursion  ; already at prompt, so must search back
+               (search-backward-regexp ">.*\\.py(4)test_foo()$" nil t))))
    (comint-send-string pytest-pdb-break--process "c\n")
    (should (pytest-pdb-break-test--expect-simple "finished\n.*"))))
 
@@ -1199,7 +1200,8 @@ Use \\' for end of string, and $ for end of line."
   (pytest-pdb-break--main-command-fixture
    "assert True"
    (ert-info ("Break in first method")
-     (should ($expect ">.*\\.py(4)test_foo()$")))
+     (should (save-excursion  ; already at prompt, so must search back
+               (search-backward-regexp ">.*\\.py(4)test_foo()$" nil t))))
    (ert-info ("Send string noninteractively (no minibuffer)")
      (with-current-buffer pytest-pdb-break--parent-buffer
        (python-shell-send-string "myvar = 21 * 2"))
