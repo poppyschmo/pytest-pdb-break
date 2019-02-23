@@ -31,7 +31,7 @@ if sys.version_info < (3, 6):
 
 module_logger = None
 try:
-    from helpers.logging_helper import LoggingHelper
+    from knotty_logger import LoggingHelper
     _logging_helper = LoggingHelper.from_logdefs("PDBBRK_LOGYAML")
     if _logging_helper:
         module_logger = _logging_helper.get_logger(__name__)
@@ -354,6 +354,7 @@ class PdbBreak:
                 self._l and self._l.printback()
                 raise
         finally:
+            # FIXME should unwind f_trace when --bt-all passed
             inst.quitting = True
             sys.settrace(None)
             self.last_pdb = None
@@ -481,6 +482,7 @@ def add_completion(config):
         pytestPDB._pdb_cls = orig
 
     config.add_cleanup(restore)
+    # FIXME not idempotent; should bail or raise if already patched
 
     import cmd
     import rlcompleter

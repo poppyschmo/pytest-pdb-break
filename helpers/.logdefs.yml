@@ -1,5 +1,6 @@
 ---
-? !!python/name:helpers.logging_helper.LoggingHelper
+# Logger was removed in 0.0.4; now at https://github.com/poppyschmo/knotty-logger
+? !!python/name:knotty_logger.LoggingHelper
 :
   init:
     LOGFILE: PDBBRK_LOGFILE
