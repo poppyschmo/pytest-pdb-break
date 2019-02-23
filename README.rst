@@ -3,11 +3,13 @@ pytest-pdb-break
 ================
 
 This is an aid to help **text editors** fire up the debugger and fast-forward
-to the point of interest. If you already have a solid workflow involving
+to the point of interest. If you already have a solid workflow with
 ``breakpoint()`` snippets and/or the ``--trace`` and ``--pdb`` options, there's
 nothing to see here.
 
-    This basically does the equivalent of
+    .. _actually:
+
+    This basically_ does ...
 
     .. code:: console
 
@@ -27,10 +29,11 @@ nothing to see here.
 
 
 Simpatico check
-    1. You prefer a noninvasive, one-click, carry-me approach to entering the
+    #. You prefer a noninvasive, one-click, carry-me approach to entering the
        debugger
-    2. You like tab completion of variables and attributes
-    3. You want inside ``unittest.TestCase`` s or your own fixtures
+    #. You like the certainty of stopping offered by the second example above
+    #. You like tab completion of variables and attributes
+    #. You want inside ``unittest.TestCase`` s and your own fixtures
        (experimental)
 
 Don't install
@@ -42,13 +45,46 @@ WIPs
     - `Emacs <https://github.com/poppyschmo/pytest-pdb-break/blob/master/emacs/>`_
     - `Vim <https://github.com/poppyschmo/pytest-pdb-break/blob/master/vim/>`_
 
-Caveats
-    1. This thing has only ever been tried/tested on Linux
-    2. It mainly exists for its author to learn about pytest, a decent
+Notes/caveats
+    #. Unfortunately, this thing has only ever been tried/tested on Linux
+
+    #. It mainly exists for its author to learn about pytest, a decent
        understanding of which continues to evade
-    3. It does not support the ``-m pytest`` style of invocation, meaning
+
+    #. It does not support the ``-m pytest`` style of invocation, meaning
        working directories are not implicitly prepended to ``sys.path``
-    4. When hacking on the main pytest plugin, disregard the imperative above
+
+    #.
+       .. _basically:
+
+       Actually_, it's more like ...
+
+       .. code:: console
+
+           $ echo until 42 > .pdbrc
+           $ pytest --trace spam.py::test_foo; rm -f .pdbrc
+           ========================== test session starts ==========================
+           ...
+            > /repo/spam.py(42)test_foo()
+           -> assert True  # line 42
+           (pdb) _
+
+       or ...
+
+       .. code:: console
+
+           $ cp spam.py spam.py~
+           $ sed -i -E \
+           >   '42{h;s/^(\s+)(.*)$/\1import pytest; pytest.set_trace()/p;g}' \
+           >   spam.py
+           $ pytest spam.py::test_foo; mv -f spam.py~ spam.py
+           ========================== test session starts ==========================
+           ...
+            > /repo/spam.py(43)test_foo()
+           -> assert True  # line 42
+           (pdb) _
+
+    #. When hacking on the main pytest plugin, disregard the imperative above
        and *do install*:
 
        .. code:: console
@@ -72,8 +108,8 @@ Caveats
                { cwd: rootdir, env: Object.assign({}, process.env, modified) }
            );  // or whatever
 
+
 TODOs
-    1. ``asyncio``
-    2. Ipdb
-    3. External helper returning an ``--options`` list for invocation
-       completion
+    #. External helper returning machine-readable locations of collected items
+    #. External helper returning ``--options`` list for invocation completion
+    #. ``asyncio``
