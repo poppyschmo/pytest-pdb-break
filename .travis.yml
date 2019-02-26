@@ -8,21 +8,24 @@ before_install: deactivate
 jobs:
   include:
     - name: tox
+      python: 3.5
       install:
         - |
-          if ! test -e /opt/python3.6; then
+          if ! test -e /opt/python/3.6; then
             three_six=$(ls -1 /opt/python | grep 3.6 | sort -Vr | head -n1)
-            cd /opt/python && ln -s "$three_six" 3.6 && cd -
+            cd /opt/python && ln -sv "$three_six" 3.6 && cd -
           fi
-        - pyenv shell 3.7 3.6
+        - pyenv shell 3.7 3.6 3.5
         - pip install tox
       script: tox
     - &test-emacs
       name: emacs
       dist: trusty
       python: 3.6
-      install:
+      before_install:
+        - deactivate
         - pyenv shell 3.6
+      install:
         - git clone --depth=1 https://github.com/rejeep/evm.git $HOME/.evm
         - export PATH="$HOME/.evm/bin:$PATH"
         - evm config path /tmp
@@ -31,6 +34,14 @@ jobs:
       script: emacs --version && cd emacs && make
     - <<: *test-emacs
       env: EVM_EMACS=emacs-25.1-travis
+    - <<: *test-emacs
+      python: 3.5
+      before_install:
+        - deactivate
+        - pyenv shell 3.5
+      env:
+        - EVM_EMACS=emacs-25.1-travis
+        - EMACS_PY35=1
     - name: vim8
       install:
         - pyenv shell 3.7
