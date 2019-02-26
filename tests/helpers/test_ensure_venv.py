@@ -43,11 +43,12 @@ def make_dummy_venv_tree(path, version=None, exes=None, cfg="pyvenv.cfg"):
     vbin.mkdir(parents=True)
     if not version:
         version = "%d.%d" % sys.version_info[:2]
-    versioned = f"python{version}"
-    for dname in ("include", f"lib/{versioned}/site-packages", "share"):
+    versioned = "python{}".format(version)
+    for dname in ("include", "lib/{}/site-packages".format(versioned),
+                  "share"):
         (path / dname).mkdir(parents=True)
     exes = (exes or []) + ["python", "python3",
-                           "pip", "pip3", f"pip{version}",
+                           "pip", "pip3", "pip{}".format(version),
                            "activate", versioned]
     for fname in set(exes):
         vexe = vbin / fname
