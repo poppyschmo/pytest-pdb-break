@@ -62,8 +62,8 @@ def _install_plugin_pip(destdir, pyexe, opts=default_pip_opts):
     project_dir = get_project_root()
     target = Path(destdir)
     assert target.exists(), target
-    cmdline = [pyexe, "-mpip", "install", *opts,
-               "--target", target, project_dir]
+    cmdline = [pyexe, "-mpip", "install"]
+    cmdline += list(opts) + ["--target", target, project_dir]
     return subprocess.check_call(cmdline, stdout=SUBOUT, stderr=SUBERR)
 
 
