@@ -1017,6 +1017,41 @@ class TestFoo:
   "Wait 5 secs for PATTERN before point."
   (pytest-pdb-break-test--timeout (lambda () (looking-back pattern nil))))
 
+(defun pytest-pdb-break-test--expect-last (proc pattern)
+  "Search forward for PATTERN in most recent output from PROC.
+Use \\' for end of string, and $ for end of line."
+  (or (pytest-pdb-break-test--timeout
+       (lambda nil
+         (string-match-p pattern
+                         (buffer-substring-no-properties
+                          comint-last-output-start (process-mark proc)))))
+      (error "\nNeedle: %s\nHaystack: %s" pattern
+             (buffer-substring-no-properties comint-last-output-start
+                                             (process-mark proc)))))
+
+(defun pytest-pdb-break-test--expect-marker (proc mkr pattern)
+  "Wait for PATTERN between MKR and PROC's `process-mark'."
+  (pytest-pdb-break-test--timeout
+   (lambda ()
+     (when (save-excursion
+             (and (goto-char mkr)
+                  (re-search-forward pattern (process-mark proc) t)))
+       (set-marker mkr (match-end 0) (process-buffer proc))))))
+
+(defmacro pytest-pdb-break-test--with-comint-expect (&rest body)
+  "Bind some expect helpers around BODY in a comint buffer.
+`$expect' -> `pytest-pdb-break-test--expect-marker'
+`$pleted' -> `pytest-pdb-break-test--expect-simple'."
+  `(let ((ex-mark (set-marker (make-marker) (point-min) (current-buffer)))
+         (proc (or pytest-pdb-break--process
+                   (get-buffer-process (current-buffer)))))
+     (cl-macrolet
+         (($expect (pat) `(should (pytest-pdb-break-test--expect-marker
+                                   proc ex-mark ,pat)))
+          ($pleted (pat) `(should (pytest-pdb-break-test--expect-simple
+                                   ,pat))))
+       ,@body)))
+
 (ert-deftest pytest-pdb-break-test-read-session-options ()
   ;; Eval: (compile "make PAT=read-session-options")
   ;; Eval: (compile "make debug PAT=read-session-options")
@@ -1132,16 +1167,8 @@ class TestFoo:
                                  'pytest-pdb-break--read-session-options)))
   (should-not pytest-pdb-break--options-history))
 
-(defun pytest-pdb-break-test--expect-last (proc pattern)
-  "Search forward for PATTERN in most recent output from PROC.
-Use \\' for end of string, and $ for end of line."
-  (pytest-pdb-break-test--timeout
-   (lambda nil (string-match-p pattern
-                               (buffer-substring comint-last-output-start
-                                                 (process-mark proc))))))
-
-(defmacro pytest-pdb-break--main-command-fixture (linepat &rest body)
-  "Run main command assertions in BODY from LINEPAT."
+(defmacro pytest-pdb-break-test--inferior-python-setup-fixture (&rest body)
+  "Run BODY with common setup."
   `(pytest-pdb-break-test-ensure-venv
     'base
     (let ((sample-source (nth 1 pytest-pdb-break-test--get-node-id-sources))
@@ -1151,43 +1178,49 @@ Use \\' for end of string, and $ for end of line."
           (pytest-pdb-break-processes (append pytest-pdb-break-processes nil))
           ($debuggin? (pytest-pdb-break-test-invoked-with-debug-p))
           (start-dir default-directory)
+          (inhibit-message t)
           case-fold-search)
       (pytest-pdb-break-test-with-python-buffer
-       (insert sample-source)
-       (write-file "test_class.py")
-       (should ($get-there ,linepat))
-       (call-interactively 'pytest-pdb-break-here)
-       (should (get-buffer "*pytest-PDB[test_class.py]*"))
-       (with-current-buffer "*pytest-PDB[test_class.py]*"
-         (advice-add 'ding :override (lambda (&rest _r) (ignore))
-                     '((name . neuter)))
-         (unwind-protect
-             (progn
-               (should (eq major-mode 'inferior-python-mode))
-               (should pytest-pdb-break-mode)
-               (should pytest-pdb-break--process)
-               (should (local-variable-p 'pytest-pdb-break--parent-buffer))
-               (should (eq pytest-pdb-break--parent-buffer
-                           (get-buffer "test_class.py")))
-               (should (pytest-pdb-break-test--expect-simple "(Pdb) "))
-               (cl-flet (($expect (pat) (pytest-pdb-break-test--expect-last
-                                         pytest-pdb-break--process pat)))
-                 (let ((inhibit-message t)) ,@body))
-               (should-not (get-buffer "*Warnings*")))
-           (advice-remove 'ding 'neuter)
-           (should-not (advice-member-p 'neuter 'ding))
-           (let ((cap (buffer-string)))
-             (with-temp-buffer
-               (insert (format "debuggin?: %S\n"
-                               (pytest-pdb-break-test-invoked-with-debug-p)))
-               (insert cap)
-               (write-file (expand-file-name "cap.out" start-dir))))
-           ;; Keep buffer open for inspection when running interactively
-           (unless $debuggin?
-             (when (process-live-p pytest-pdb-break--process)
-               (set-process-query-on-exit-flag pytest-pdb-break--process nil)
-               (kill-process pytest-pdb-break--process))
-             (kill-buffer))))))))
+       ,@body))))
+
+(defmacro pytest-pdb-break--main-command-fixture (linepat &rest body)
+  "Run main command assertions in BODY from LINEPAT."
+  `(pytest-pdb-break-test--inferior-python-setup-fixture
+    (insert sample-source)
+    (write-file "test_class.py")
+    (should ($get-there ,linepat))
+    (call-interactively 'pytest-pdb-break-here)
+    (should (get-buffer "*pytest-PDB[test_class.py]*"))
+    (with-current-buffer "*pytest-PDB[test_class.py]*"
+      (advice-add 'ding :override (lambda (&rest _r) (ignore))
+                  '((name . neuter)))
+      (unwind-protect
+          (ert-info ("In pytest-PDB buffer")
+            (should (eq major-mode 'inferior-python-mode))
+            (should pytest-pdb-break-mode)
+            (should pytest-pdb-break--process)
+            (should (local-variable-p 'pytest-pdb-break--parent-buffer))
+            (should (eq pytest-pdb-break--parent-buffer
+                        (get-buffer "test_class.py")))
+            (should (pytest-pdb-break-test--expect-simple "(Pdb) "))
+            ,@body
+            (should-not (get-buffer "*Warnings*")))
+        (advice-remove 'ding 'neuter)
+        (should-not (advice-member-p 'neuter 'ding))
+        (let ((cap (buffer-string)))
+          (with-temp-buffer
+            (insert (format "debuggin?: %S\n"
+                            (pytest-pdb-break-test-invoked-with-debug-p)))
+            (insert cap)
+            (write-file (expand-file-name "cap.out" start-dir))))
+        ;; Keep buffer open for inspection when running interactively
+        (unless $debuggin?
+          (when (process-live-p pytest-pdb-break--process)
+            (set-process-query-on-exit-flag pytest-pdb-break--process nil)
+            (kill-process pytest-pdb-break--process))
+          (kill-buffer)
+          (let ((cb (get-buffer "*Completions*")))
+            (when cb (kill-buffer cb))))))))
 
 ;; Note: none of the following cases covers `pytest-pdb-break-alt-installation'
 ;; because its implementation is trivial
@@ -1211,45 +1244,115 @@ Use \\' for end of string, and $ for end of line."
   ;; interacting with a live Emacs instance, this doesn't happen
   (pytest-pdb-break--main-command-fixture
    "assert True"
-   (ert-info ("Break in first method")
-     (should (save-excursion  ; already at prompt, so must search back
-               (search-backward-regexp ">.*\\.py(4)test_foo()$" nil t))))
-   (ert-info ("Send string noninteractively (no minibuffer)")
-     (with-current-buffer pytest-pdb-break--parent-buffer
-       (python-shell-send-string "myvar = 21 * 2"))
-     (ert-info ("Output is not echoed") ; same for all that follows
-       (should-not (save-excursion
-                     (search-backward-regexp "myvar" (point-min) t))))
-     (execute-kbd-macro "myvar\r")
-     (should ($expect "42$"))
-     (should ($expect "(Pdb) \\'")))
-   (ert-info ("Send defun")
-     (with-current-buffer pytest-pdb-break--parent-buffer
-       (goto-char (point-max))
-       (insert "\ndef some_func(x):\n    return x * 2")
-       (save-buffer)
-       (should ($get-there "return x * 2"))
-       (call-interactively #'python-shell-send-defun))
+   (cl-flet (($expect (pat) (pytest-pdb-break-test--expect-last
+                             pytest-pdb-break--process pat)))
+     (ert-info ("Break in first method")
+       (should (save-excursion  ; already at prompt, so must search back
+                 (search-backward-regexp ">.*\\.py(4)test_foo()$" nil t))))
+     (ert-info ("Send string noninteractively (no minibuffer)")
+       (with-current-buffer pytest-pdb-break--parent-buffer
+         (python-shell-send-string "myvar = 21 * 2"))
+       (ert-info ("Output is not echoed") ; same for all that follows
+         (should-not (save-excursion
+                       (search-backward-regexp "myvar" (point-min) t))))
+       (execute-kbd-macro "myvar\r")
+       (should ($expect "42$"))
+       (should ($expect "(Pdb) \\'")))
+     (ert-info ("Send defun")
+       (with-current-buffer pytest-pdb-break--parent-buffer
+         (goto-char (point-max))
+         (insert "\ndef some_func(x):\n    return x * 2")
+         (save-buffer)
+         (should ($get-there "return x * 2"))
+         (call-interactively #'python-shell-send-defun))
+       (should ($expect "(Pdb) \\'"))
+       (execute-kbd-macro "some_func(myvar)\r")
+       (should ($expect "84$")))
+     (ert-info ("Interactive")
+       (execute-kbd-macro "interact\r")
+       (should ($expect ">>> \\'"))
+       (with-current-buffer pytest-pdb-break--parent-buffer
+         (goto-char (point-max))
+         (insert "\ndef nother_func(x):\n    return x * 3")
+         (save-buffer)
+         (should ($get-there "return x * 3"))
+         (call-interactively #'python-shell-send-defun))
+       (should ($expect ">>> \\'"))
+       (execute-kbd-macro "nother_func(myvar)\r")
+       (should ($expect "126$"))
+       (execute-kbd-macro [4]))
      (should ($expect "(Pdb) \\'"))
-     (execute-kbd-macro "some_func(myvar)\r")
-     (should ($expect "84$")))
-   (ert-info ("Interactive")
-     (execute-kbd-macro "interact\r")
-     (should ($expect ">>> \\'"))
-     (with-current-buffer pytest-pdb-break--parent-buffer
-       (goto-char (point-max))
-       (insert "\ndef nother_func(x):\n    return x * 3")
-       (save-buffer)
-       (should ($get-there "return x * 3"))
-       (call-interactively #'python-shell-send-defun))
-     (should ($expect ">>> \\'"))
-     (execute-kbd-macro "nother_func(myvar)\r")
-     (should ($expect "126$"))
-     (execute-kbd-macro [4]))
-   (should ($expect "(Pdb) \\'"))
-   (comint-send-string pytest-pdb-break--process "c\n")
-   (unless $debuggin?
-     (should (pytest-pdb-break-test--expect-simple "finished\n.*")))))
+     (comint-send-string pytest-pdb-break--process "c\n")
+     (unless $debuggin?
+       (should (pytest-pdb-break-test--expect-simple "finished\n.*"))))))
+
+(defmacro pytest-pdb-break-test--completion-playlist ()
+  "Completion procedure for command loop and interactive REPL.
+PROC must be a comint-derived process.  For use with source #2 in
+TestFoo.test_bar(), starting at line 9."
+  '(pytest-pdb-break-test--with-comint-expect
+    (ert-info ("Local variable, single result autocompletes")
+      (execute-kbd-macro "somev\t")
+      (should-not (get-buffer "*Completions*"))
+      ;; XXX would think the kbd-macro and looking-back call might race, but
+      ;; guess they don't (i.e., seems no waiter needed)
+      ($pleted "somevar")
+      (execute-kbd-macro [13])
+      ($expect "^True$")
+      ($expect "(Pdb) \\'"))
+    (ert-info ("Attr in command loop")
+      (execute-kbd-macro "import sys\r")
+      ($expect "(Pdb) \\'")
+      (execute-kbd-macro "sys.\t")
+      (should (get-buffer "*Completions*"))
+      (with-current-buffer "*Completions*"
+        (save-excursion (goto-char (point-min))
+                        (should (search-forward "sys.path"))
+                        (should (search-forward "sys.version"))))
+      (execute-kbd-macro "version_info.maj\t")
+      ($pleted "sys\\.version_info\\.major")
+      (execute-kbd-macro [13])
+      ($expect "^3$")
+      ($expect "(Pdb) \\'"))
+    (ert-info ("PDB command, interactive REPL")
+      (execute-kbd-macro "inter\t")
+      ($pleted "interact")
+      (execute-kbd-macro [13])
+      ($expect "[*]interactive[*]$")
+      ($expect ">>> \\'")
+      (ert-info ("No commands in interactive")
+        (execute-kbd-macro "inter\t")
+        ($pleted "inter")
+        (execute-kbd-macro "act\r")
+        ($expect "NameError")
+        ($expect ">>> \\'"))
+      (ert-info ("Locals from test available")
+        (execute-kbd-macro "somev\t")
+        ($pleted "somevar")
+        (execute-kbd-macro [13])
+        ($expect ">>> \\'"))
+      (ert-info ("New locals")
+        (execute-kbd-macro "import pathlib\r")
+        ($expect ">>> \\'")
+        (execute-kbd-macro "pathlib.\t")
+        (with-current-buffer "*Completions*"
+          (save-excursion (goto-char (point-min))
+                          (should (search-forward "pathlib.Path"))))
+        (execute-kbd-macro "Path\r")
+        ($expect ">>> \\'"))
+      (execute-kbd-macro [4]))
+    (ert-info ("Interactive locals removed")
+      ($expect "(Pdb) \\'")
+      (execute-kbd-macro "pathlib\r")
+      ($expect "NameError")
+      ($expect "(Pdb) \\'"))
+    (ert-info ("Command completion still works")
+      (execute-kbd-macro "whe\t")
+      ($pleted "where")
+      (execute-kbd-macro [13])
+      ($expect ">.*\\.py(9)test_bar()$")
+      ($expect "(Pdb) \\'"))
+    (execute-kbd-macro "c\r")))
 
 (ert-deftest pytest-pdb-break-test-main-command-completion ()
   ;; Eval: (compile "make PAT=main-command-completion")
@@ -1262,70 +1365,49 @@ Use \\' for end of string, and $ for end of line."
      ;; Already waiting, so last-output-start has been cleared
      (should (save-excursion (search-backward-regexp ">.*\\.py(9)test_bar()$"
                                                      nil t))))
-   (ert-info ("Local variable, single result autocompletes")
-     (execute-kbd-macro "somev\t")
-     (should-not (get-buffer "*Completions*"))
-     ;; XXX would think the kbd-macro and looking-back call might race, but
-     ;; guess they don't (i.e., seems no waiter needed)
-     (should (looking-back "somevar"))
-     (execute-kbd-macro [13])
-     (should ($expect "^True$"))
-     (should ($expect "(Pdb) \\'")))
-   (ert-info ("Attr in command loop")
-     (execute-kbd-macro "import sys\r")
-     (should ($expect "(Pdb) \\'"))
-     (execute-kbd-macro "sys.\t")
-     (should (get-buffer "*Completions*"))
-     (with-current-buffer "*Completions*"
-       (save-excursion (goto-char (point-min))
-                       (should (search-forward "sys.path"))
-                       (should (search-forward "sys.version"))))
-     (execute-kbd-macro "version_info.maj\t")
-     (should (looking-back "sys\\.version_info\\.major"))
-     (execute-kbd-macro [13])
-     (should ($expect "^3$"))
-     (should ($expect "(Pdb) \\'")))
-   (ert-info ("PDB command, interactive REPL")
-     (execute-kbd-macro "inter\t")
-     (should (looking-back "interact"))
-     (execute-kbd-macro [13])
-     (should ($expect "[*]interactive[*]$"))
-     (should ($expect ">>> \\'"))
-     (ert-info ("No commands in interactive")
-       (execute-kbd-macro "inter\t")
-       (should (looking-back "inter"))
-       (execute-kbd-macro "act\r")
-       (should ($expect "NameError"))
-       (should ($expect ">>> \\'")))
-     (ert-info ("Locals from test available")
-       (execute-kbd-macro "somev\t")
-       (should (looking-back "somevar"))
-       (execute-kbd-macro [13])
-       (should ($expect ">>> \\'")))
-     (ert-info ("New locals")
-       (execute-kbd-macro "import pathlib\r")
-       (should ($expect ">>> \\'"))
-       (execute-kbd-macro "pathlib.\t")
-       (with-current-buffer "*Completions*"
-         (save-excursion (goto-char (point-min))
-                         (should (search-forward "pathlib.Path"))))
-       (execute-kbd-macro "Path\r")
-       (should ($expect ">>> \\'")))
-     (execute-kbd-macro [4]))
-   (ert-info ("Interactive locals removed")
-     (should ($expect "(Pdb) \\'"))
-     (execute-kbd-macro "pathlib\r")
-     (should ($expect "NameError"))
-     (should ($expect "(Pdb) \\'")))
-   (ert-info ("Command completion still works")
-     (execute-kbd-macro "whe\t")
-     (should (looking-back "where"))
-     (execute-kbd-macro [13])
-     (should ($expect ">.*\\.py(9)test_bar()$"))
-     (should ($expect "(Pdb) \\'")))
-   (execute-kbd-macro "c\r")
+   (pytest-pdb-break-test--completion-playlist)
    (should (pytest-pdb-break-test--expect-simple
             (if $debuggin? "passed.*\n?" "finished.*\n?")))))
+
+(ert-deftest pytest-pdb-break-test-completion-compat ()
+  "This is for testing against Python 3.5.
+The main pytest plugin requires 3.6+, but the minor-mode shouldn't."
+  ;; Eval: (compile "make PAT=completion-compat")
+  ;; Eval: (compile "make debug PAT=completion-compat")
+  (pytest-pdb-break-test--inferior-python-setup-fixture
+   ;; No -m option in pdb.main <3.7, i.e., can't just -m this
+   (insert sample-source "\n\nTestFoo().test_bar()")
+   (write-file "test_one.py")
+   (with-temp-file ".pdbrc"
+     (insert "b 9\nc\n"))
+   (let* ((buf (compile (format "%s -mpdb test_one.py" $pyexe)))
+          ($proc (get-buffer-process buf)))
+     (with-current-buffer buf
+       (setq-local python-shell-interpreter $pyexe)
+       (add-hook 'compilation-filter-hook
+                 'pytest-pdb-break--run-fail-compilation-filter nil t)
+       (advice-add 'ding :override (lambda (&rest _r) (ignore))
+                   '((name . neuter)))
+       (unwind-protect
+           (ert-info ("Main")
+             (should (pytest-pdb-break-test--timeout
+                      (lambda nil (and pytest-pdb-break-mode
+                                       (looking-back "(Pdb) " nil)))))
+             (switch-to-buffer buf)
+             (pytest-pdb-break-test--completion-playlist)
+             (execute-kbd-macro "quit\r")
+             (should (pytest-pdb-break-test--timeout
+                      (lambda nil (not (process-live-p $proc))))))
+         (unless $debuggin?
+           (advice-remove 'ding 'neuter)
+           (setq default-directory start-dir)
+           (write-file "capped.out")
+           (when (process-live-p pytest-pdb-break--process)
+             (set-process-query-on-exit-flag pytest-pdb-break--process nil)
+             (kill-process pytest-pdb-break--process))
+           (kill-buffer)
+           (let ((cb (get-buffer "*Completions*")))
+             (when cb (kill-buffer cb)))))))))
 
 (ert-deftest pytest-pdb-break-test-run-fail-compilation-filter ()
   ;; Eval: (compile "make PAT=run-fail-compilation-filter")
@@ -1445,83 +1527,13 @@ Use \\' for end of string, and $ for end of line."
    'comint-mode
    (ignore)))
 
-(defmacro pytest-pdb-break-test-run-fail-fixture (&rest body)
-  "Run BODY with common setup for run-fail."
-  `(pytest-pdb-break-test-ensure-venv
-    'base
-    (let ((sample-source (nth 1 pytest-pdb-break-test--get-node-id-sources))
-          (python-shell-virtualenv-root $venv)
-          (python-shell-interpreter $pyexe)
-          (pytest-pdb-break--setup-code-addendum nil)
-          (pytest-pdb-break-processes (append pytest-pdb-break-processes nil))
-          ($debuggin? (pytest-pdb-break-test-invoked-with-debug-p))
-          (start-dir default-directory)
-          (inhibit-message t)
-          case-fold-search)
-      (pytest-pdb-break-test-with-python-buffer
-       ,@body))))
-
-(ert-deftest pytest-pdb-break-test-completion-compat ()
-  "This is for testing against Python 3.5.
-The main pytest plugin requires 3.6+, but the minor-mode shouldn't."
-  ;; Eval: (compile "make PAT=completion-compat")
-  ;; Eval: (compile "make debug PAT=completion-compat")
-  (pytest-pdb-break-test-run-fail-fixture
-   ;; No -m option in < pdb.main 3.7, i.e., no -m this (safest to use own file)
-   (insert sample-source)
-   (write-file "test_one.py")
-   (let* ((buf (compile (format "%s -mpdb test_one.py" $pyexe) t))
-          ($proc (get-buffer-process buf)))
-     (with-current-buffer buf
-       (unwind-protect
-           (ert-info ("Main")
-             (should (pytest-pdb-break-test--timeout
-                      (lambda () (goto-char (point-max))
-                        (looking-back "(Pdb) " nil))))
-             (setq-local python-shell-interpreter $pyexe)
-             (pytest-pdb-break-go-inferior $proc)
-             (should pytest-pdb-break-mode)
-             (cl-flet (($expect (pat) (pytest-pdb-break-test--expect-last
-                                       pytest-pdb-break--process pat)))
-               (should (= (point) (process-mark $proc)))
-               (set-marker comint-last-output-start (point))
-               (ert-info ("Attr in command loop")
-                 (switch-to-buffer (current-buffer))
-                 (execute-kbd-macro "import sys\r")
-                 (should ($expect "(Pdb) \\'"))
-                 (execute-kbd-macro "sys.\t")
-                 (should (get-buffer "*Completions*"))
-                 (with-current-buffer "*Completions*"
-                   (save-excursion (goto-char (point-min))
-                                   (should (search-forward "sys.path"))
-                                   (should (search-forward "sys.version"))))
-                 (execute-kbd-macro "version_info.maj\t")
-                 (should (looking-back "sys\\.version_info\\.major"))
-                 (execute-kbd-macro [13])
-                 (should ($expect "^3$"))
-                 (should ($expect "(Pdb) \\'"))
-                 (execute-kbd-macro [4])))
-             (comint-goto-process-mark)
-             (execute-kbd-macro "c\r")
-             (should (pytest-pdb-break-test--timeout
-                      (lambda nil (not (process-live-p $proc))))))
-         (unless $debuggin?
-           (setq default-directory start-dir)
-           (write-file "capped.out")
-           (when (process-live-p pytest-pdb-break--process)
-             (set-process-query-on-exit-flag pytest-pdb-break--process nil)
-             (kill-process pytest-pdb-break--process))
-           (kill-buffer)))))))
-
 (ert-deftest pytest-pdb-break-test-run-fail-stay ()
   ;; Eval: (compile "make PAT=run-fail-stay")
   ;; Eval: (compile "make debug PAT=run-fail-stay")
-  (pytest-pdb-break-test-run-fail-fixture
+  (pytest-pdb-break-test--inferior-python-setup-fixture
    (insert sample-source)
    (write-file "test_class.py")
-   (should (and (goto-char (point-min))
-                (search-forward "assert True")
-                (goto-char (match-beginning 0))))
+   (should ($get-there "assert True"))
    (call-interactively 'pytest-pdb-break-run-fail)
    (with-current-buffer (get-buffer "*compilation*")
      (unwind-protect
@@ -1552,13 +1564,11 @@ The main pytest plugin requires 3.6+, but the minor-mode shouldn't."
 (ert-deftest pytest-pdb-break-test-run-fail-switch ()
   ;; Eval: (compile "make PAT=run-fail-switch")
   ;; Eval: (compile "make debug PAT=run-fail-switch")
-  (pytest-pdb-break-test-run-fail-fixture
+  (pytest-pdb-break-test--inferior-python-setup-fixture
    (insert (replace-regexp-in-string "assert True" "assert False"
                                      sample-source))
    (write-file "test_class.py")
-   (should (and (goto-char (point-min))
-                (search-forward "assert False")
-                (goto-char (match-beginning 0))))
+   (should ($get-there "assert False"))
    (call-interactively 'pytest-pdb-break-run-fail)
    (should (pytest-pdb-break-test--timeout
             (lambda nil (get-buffer "*pytest-PDB[test_class.py]*"))))

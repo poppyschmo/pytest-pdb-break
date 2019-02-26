@@ -45,16 +45,21 @@ This converts major or minor (comint) compilation modes to
                         (with-current-buffer parbuf
                           (pytest-pdb-break--get-proc-name))
                       (pytest-pdb-break--get-proc-name)))
-         (proc-buffer-name (format "*%s*" proc-name)))
+         (proc-buffer-name (format "*%s*" proc-name))
+         reshow)
     (with-current-buffer (process-buffer proc)
       (pcase major-mode
         ('comint-mode
          (compilation--unsetup))
-        ('compilation-mode (read-only-mode -1)
-                           (kill-all-local-variables)
-                           (comint-mode)
-                           (goto-char (point-max))
-                           (set-marker (process-mark proc) (point)))
+        ('compilation-mode
+         (read-only-mode -1)
+         (kill-all-local-variables)
+         (comint-mode)
+         (set-process-filter proc 'comint-output-filter)
+         ;; Run the comint filter once to force prompt detection. Should
+         ;; maybe look for other indicators in addition to the former major
+         ;; mode when setting flag.
+         (setq reshow t))
         ('inferior-python-mode
          (error "Setup called again on converted buffer"))
         (_ (error "Can't handle mode %s" major-mode))) ; impossible
@@ -67,16 +72,22 @@ This converts major or minor (comint) compilation modes to
       (defvar python-shell--interpreter)
       (defvar python-shell--interpreter-args)
       (python-shell-with-environment
-        (let ((python-shell--parent-buffer parbuf)
-              python-shell--interpreter
-              python-shell--interpreter-args)
-          (inferior-python-mode)
-          (setq pytest-pdb-break--process proc
-                pytest-pdb-break--parent-buffer parbuf)
-          (pytest-pdb-break-mode +1)
-          (select-window (get-buffer-window proc-buffer-name))
-          (sit-for 0)
-          (comint-goto-process-mark))))))
+       (let ((python-shell--parent-buffer parbuf)
+             python-shell--interpreter
+             python-shell--interpreter-args)
+         (inferior-python-mode)
+         (setq pytest-pdb-break--process proc
+               pytest-pdb-break--parent-buffer parbuf)
+         (pytest-pdb-break-mode +1)
+         (let ((win (get-buffer-window proc-buffer-name)))
+           (and win (select-window win)))
+         (if (not reshow)
+             (comint-goto-process-mark)
+           ;; Markers haven't been set yet, so just assume bol is prompt start
+           (let ((was (buffer-substring (point-at-bol) (process-mark proc))))
+             (delete-region (point-at-bol) (process-mark proc))
+             (comint-output-filter proc was))
+           (set-marker (process-mark proc) (goto-char (point-max)))))))))
 
 (defvar pytest-pdb-break--prompt-watcher-function
   'pytest-pdb-break-go-inferior)
