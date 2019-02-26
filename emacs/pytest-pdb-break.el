@@ -246,7 +246,7 @@ del _wrap_pyel
         (insert pytest-pdb-break--setup-code-reassignment)
         (setq pytest-pdb-break--setup-code-addendum
               (buffer-string)))))
-  (concat python-shell-completion-setup-code
+  (concat python-shell-completion-setup-code "\n\n"
           pytest-pdb-break--setup-code-addendum))
 
 (define-error 'pytest-pdb-break-process-exists

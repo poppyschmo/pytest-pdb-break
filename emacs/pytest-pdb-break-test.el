@@ -781,17 +781,17 @@ class TestFoo:
          (should (member (car exc) '(file-missing file-error)))))
      ;; No condition-case handler for resetting to nil
      (should (equal orig-home pytest-pdb-break--py-home))
-     (should-not pytest-pdb-break--setup-code-addendum)))
-  (ert-info ("Ordering of source snippets")
-    (with-temp-buffer
-      (insert (pytest-pdb-break--get-modified-setup-code))
-      (goto-char (point-min))
-      (ert-info ("Orig first, source second, call-snippet last")
-        (should (search-forward python-shell-completion-setup-code nil t))
-        (should (search-forward pytest-pdb-break--setup-code-addendum nil t))
-        (backward-char (length pytest-pdb-break--setup-code-reassignment))
-        (should (looking-at-p (regexp-quote
-                               pytest-pdb-break--setup-code-reassignment)))))))
+     (should-not pytest-pdb-break--setup-code-addendum))
+   (ert-info ("Ordering of source snippets")
+     (with-temp-file "joined.out"
+       (insert (pytest-pdb-break--get-modified-setup-code))
+       (goto-char (point-min))
+       (ert-info ("Orig first, source second, call-snippet last")
+         (should (search-forward python-shell-completion-setup-code nil t))
+         (should (search-forward pytest-pdb-break--setup-code-addendum nil t))
+         (backward-char (length pytest-pdb-break--setup-code-reassignment))
+         (should (looking-at-p (regexp-quote
+                                pytest-pdb-break--setup-code-reassignment))))))))
 
 (ert-deftest pytest-pdb-break-test-get-proc-name ()
   ;; Eval: (compile "make PAT=get-proc-name")

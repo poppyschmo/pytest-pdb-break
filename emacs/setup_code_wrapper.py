@@ -1,3 +1,4 @@
+# This file is part of https://github.com/poppyschmo/pytest-pdb-break
 
 
 def _wrap_pyel(orig):
@@ -72,7 +73,8 @@ def _wrap_pyel(orig):
                       and "complete" not in inst.__dict__):
                     inst.complete = _complete.__get__(inst)
                 elif not hasattr(inst._completions):
-                    raise RuntimeError(f"Unsupported PDB: {inst.__class__}")
+                    raise RuntimeError("Unsupported PDB: {}"
+                                       .format(inst.__class__))
                 inst.complete(text, 0)
                 return inst._completions[:]
             return orig(text)
