@@ -11,12 +11,12 @@
 ;;   but may not use the namesake pytest plugin
 ;;
 ;; `pytest-pdb-break-run-fail' is like `elpy-test-pytest-runner' except with
-;; support for pytest's --pdb option. For now, point must be located within
-;; the confines of the surrounding test body. In the future, some prefix arg
+;; support for pytest's --pdb option.  For now, point must be located within
+;; the confines of the surrounding test body.  In the future, some prefix arg
 ;; may spawn a `completing-read' buffer to offer a choice.
 ;;
 ;; Elpy users can try adding `pytest-pdb-break-advise-elpy-shell-get-proc' to
-;; `pytest-pdb-break-mode-hook'. It helps `elpy-shell-get-or-create-process'
+;; `pytest-pdb-break-mode-hook'.  It helps `elpy-shell-get-or-create-process'
 ;; recognize this package's processes as valid.
 ;;
 ;; Note: if there's an issue with the feature/prefix mismatch in this file, it
@@ -152,9 +152,9 @@ Return the source buffer's child process or call ORIG with REST."
   "A minor-mode hookee to help Elpy's send-related commands.
 
 This is experimental, but `elpy-shell-send-statement' and
-`elpy-shell-send-defun' seem to work. Unlike the stock send
-commands, the Elpy versions echo the input to the REPL (with proper
-indentation and continuation ellipses)."
+`elpy-shell-send-defun' seem to work.  Unlike the stock send commands,
+the Elpy versions echo the input to the REPL (with proper indentation
+and continuation ellipses)."
   (let ((a 'pytest-pdb-break--elpy-shell-get-or-create-process-advice))
     (if pytest-pdb-break-mode
         ;; Not sure it's worth checking for membership beforehand

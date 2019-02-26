@@ -5,7 +5,7 @@
 ;; This leaves around 30M of junk under /tmp/pytest-pdb-break-test/
 ;;
 ;; If revisiting the `query-helper'/`config-info'-centered approach, see
-;; 2824cc74d1e05bdbd2aed580f4a5844c4cae0495 or earlier. These used -mpytest,
+;; 2824cc74d1e05bdbd2aed580f4a5844c4cae0495 or earlier.  These used -mpytest,
 ;; rootdir as cwd, etc.
 
 ;;; Code:
@@ -48,7 +48,8 @@
     pytest-pdb-break-test-run-fail-stay
     pytest-pdb-break-test-run-fail-switch
     pytest-pdb-break-test-elpy-shell-get-or-create-process-advice
-    pytest-pdb-break-test-advise-elpy-shell-get-proc))
+    pytest-pdb-break-test-advise-elpy-shell-get-proc
+    pytest-pdb-break-test-checkdoc))
 
 (defvar pytest-pdb-break-test-repo-root
   (file-name-as-directory
@@ -137,9 +138,9 @@ This is for modifying PATH, PYTHONPATH, VIRTUAL_ENV, etc."
 (defmacro pytest-pdb-break-test-with-tmpdir (tail &rest body)
   "Run BODY in a temp directory, clobbering existing files.
 The directory inherits the test's name, minus the feature prefix, with
-an optional TAIL appended. If TAIL doesn't start with a dir sep (slash),
-the dir name itself is altered (suffixed). To create a subdir, TAIL
-should start with a dir sep."
+an optional TAIL appended.  If TAIL doesn't start with a dir
+sep (slash), the dir name itself is altered (suffixed).  To create a
+subdir, TAIL should start with a dir sep."
   (let ((name '(pytest-pdb-break-test--unprefix
                 (ert-test-name (ert-running-test))))
         (tmpdir (make-symbol "tmpdir")))
@@ -152,10 +153,20 @@ should start with a dir sep."
        (make-directory ,tmpdir t)
        (let ((default-directory ,tmpdir)) ,@body))))
 
+(defmacro pytest-pdb-break-test--with-messages (&rest body)
+  "Run BODY without echoing and return whatever would have been."
+  `(let ((inhibit-message t)
+         (where (with-current-buffer (messages-buffer)
+                  ;; Don't save excursion
+                  (set-marker (make-marker) (goto-char (point-max))))))
+     ,@body
+     (with-current-buffer (messages-buffer)
+       (buffer-substring where (point-max)))))
+
 (defmacro pytest-pdb-break-test-with-conditional-env-var (present absent)
   "Run PRESENT if test's name has been exported as an env var.
-Otherwise, run ABSENT. Vars `$test-sym' and `$env-var' are bound to the
-current test func and its env-var-ized string. High risk of infinite
+Otherwise, run ABSENT.  Vars `$test-sym' and `$env-var' are bound to the
+current test func and its env-var-ized string.  High risk of infinite
 looping."
   `(let* (($test-sym (ert-test-name (ert-running-test)))
           ($env-var (pytest-pdb-break-test--name-to-envvar $test-sym)))
@@ -165,7 +176,7 @@ looping."
 
 (defmacro pytest-pdb-break-test-with-python-buffer (&rest body)
   "Run BODY in a `python-mode' temp buffer with a temp environment.
-Note: this does *not* create and cd to a temp dir. Helper `$get-there'
+Note: this does *not* create and cd to a temp dir.  Helper `$get-there'
 moves to next occurrence of a fixed string (and returns point) or
 returns nil."
   `(pytest-pdb-break-test-with-environment
@@ -331,7 +342,7 @@ strings ((NAME . VALUE) ...)."
 
 (defmacro pytest-pdb-break-test-homer-setup-fixture (subform dir-body info-msg)
   "Run SUBFORM as the calling test in an Emacs ERT subprocess.
-DIR-BODY sets up build dir. INFO-MSG is passed to `ert-info'."
+DIR-BODY sets up build dir.  INFO-MSG is passed to `ert-info'."
   (setq info-msg (or info-msg (format "ERT subproc in %s" default-directory)))
   `(pytest-pdb-break-test-with-conditional-env-var
     ,subform
@@ -491,10 +502,10 @@ requirements installed."
 (defmacro pytest-pdb-break-test-ensure-venv (name &rest body)
   "Run BODY in a temp directory and temp environment.
 NAME is a venv from --get-requirements Does not modify `PATH' or
-`VIRTUAL_ENV' or `python-shell-interpreter'. Binds `$pyexe', `$venvbin',
-and `$venv'. The latter two have trailing slashes. Doesn't use pip3 or
-python3 because venvs are all created with python3 (not sure if this is
-a sound choice)."
+`VIRTUAL_ENV' or `python-shell-interpreter'.  Binds `$pyexe',
+`$venvbin', and `$venv'.  The latter two have trailing slashes.  Doesn't
+use pip3 or python3 because venvs are all created with python3 (not sure
+if this is a sound choice)."
   `(pytest-pdb-break-test-with-tmpdir
     (pytest-pdb-break-test-with-environment
      (let* (($pyexe (pytest-pdb-break-test--get-pyexe ,name))
@@ -992,7 +1003,7 @@ class TestFoo:
     (should (= (pytest-pdb-break--interpret-prefix-arg '-1) -1))))
 
 (defun pytest-pdb-break-test--timeout (func &optional max-secs)
-  "Dumb waiter. Wait MAX-SECS for FUNC to return non-nil."
+  "Dumb waiter.  Wait MAX-SECS for FUNC to return non-nil."
   (let ((st (float-time))
         (max-secs (or max-secs 5))
         found)
@@ -1571,6 +1582,32 @@ Use \\' for end of string, and $ for end of line."
         (pytest-pdb-break-advise-elpy-shell-get-proc)
         (should-not (advice-member-p elpy-a
                                      'elpy-shell-get-or-create-process))))))
+
+(ert-deftest pytest-pdb-break-test-checkdoc ()
+  ;; Eval: (compile "make PAT=checkdoc")
+  ;; XXX this should always run last
+  (skip-unless (= emacs-major-version 26))
+  (pytest-pdb-break-test-with-tmpdir
+   (let ((tmpdir default-directory)
+         (inhibit-message t)
+         output)
+     (cl-macrolet
+         ((checkit (msg file logfile)
+                   `(ert-info (,msg)
+                      (setq output (pytest-pdb-break-test--with-messages
+                                    (checkdoc-file ,file)))
+                      (with-temp-file ,logfile
+                        (setq default-directory tmpdir)
+                        (insert output))
+                      ;; Stdout on failure means compilation-mode text
+                      ;; properties still work (can jump to error location)
+                      (should (string-empty-p output)))))
+       (checkit "Run checkdoc on main file"
+                pytest-pdb-break-test-lisp-main
+                "main.out")
+       (checkit "Run checkdoc on extras file"
+                pytest-pdb-break-test-lisp-extra
+                "extras.out")))))
 
 (provide 'pytest-pdb-break-test)
 ;;; pytest-pdb-break-test.el ends here

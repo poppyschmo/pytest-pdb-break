@@ -15,7 +15,7 @@
 ;; Usage: with point in the body of some test, run M-x `pytest-pdb-break-here'
 ;;
 ;; This command can only handle the "console script"/entry-point invocation
-;; style (as opposed to "python -m pytest"). If a pytest executable doesn't
+;; style (as opposed to "python -m pytest").  If a pytest executable doesn't
 ;; appear in PATH, `pytest-pdb-break-pytest-executable' must be set.
 ;;
 ;; TODO:
@@ -37,18 +37,16 @@
 
 (defcustom pytest-pdb-break-extra-opts nil
   "List of extra options passed to all pytest invocations.
-
 For one-offs, see `pytest-pdb-break-options-function', which prompts for
-session options. This variable is best used in a `dir-locals-file'. For
-example, this `python-mode' entry unsets cmd-line options from a project
-ini: (pytest-pdb-break-extra-opts \"-o\" \"addopts=\")."
+session options.  This variable is best used in a `dir-locals-file'.
+For example, this `python-mode' entry unsets cmd-line options from a
+project ini: (pytest-pdb-break-extra-opts \"-o\" \"addopts=\")."
   :group 'pytest-pdb-break
   :type 'list)
 
 (defcustom pytest-pdb-break-pytest-executable nil
   "Path to an alternate pytest executable.
-
-If set, `executable-find' won't be consulted. For certain actions, like
+If set, `executable-find' won't be consulted.  For certain actions, like
 querying helpers, this script's shebanged Python may be used in place of
 `python-shell-interpreter'."
   :group 'pytest-pdb-break
@@ -57,7 +55,6 @@ querying helpers, this script's shebanged Python may be used in place of
 (defcustom pytest-pdb-break-options-function
   'pytest-pdb-break-default-options-function
   "Function determining any additional options to pass to pytest.
-
 Handed a single arg, which is either nil or an integer like that
 provided by (interactive \"P\"). Must return a list of strings or nil.
 See `pytest-pdb-break-default-options-function'."
@@ -66,24 +63,23 @@ See `pytest-pdb-break-default-options-function'."
 
 (defcustom pytest-pdb-break-alt-installation nil
   "Path to an existing installation of the pytest plugin.
-
 If set, this is used in lieu of creating a per-session, \"isolated\"
-installation. Useful for \"editable\" setups (working dir with egg
+installation.  Useful for \"editable\" setups (working dir with egg
 info)."
   :group 'pytest-pdb-break
   :type 'string)
 
 (defvar pytest-pdb-break-processes nil
-  "List of processes started via `pytest-pdb-break-here'.")
+  "List of processes belonging to a \"pytestPDB\" buffer.
+Actually, this is any buffer with the minor mode is currently enabled.")
 
 (defvar pytest-pdb-break--py-home nil
-  "Directory containing the uninstalled plugin and non-el scripts.")
+  "Directory containing the pytest plugin's source and non-el scripts.")
 
 (defun pytest-pdb-break--homer (&optional this-file)
   "Return the directory containing the plugin's setup.py script.
-
 And store the result in `pytest-pdb-break--py-home' as an absolute path
-with trailing sep. The likeliest locations are the root of the cloned
+with trailing sep.  The likeliest locations are the root of the cloned
 repo or a \"lib\" subtree of the installed package. THIS-FILE is used as
 a starting point, if provided."
   (let* ((this (or this-file (find-library-name "pytest-pdb-break")))
@@ -112,14 +108,12 @@ a starting point, if provided."
 
 (defvar pytest-pdb-break--tempdir nil
   "Temporary directory for this session.
-
 Should be an absolute path ending in a slash.")
 
 (defvar pytest-pdb-break--isolated nil
   "Temporary directory containing plugin and metadata.
-
-This should be an absolute path ending end in a slash and should point to a
-proper \"library\" installation, without dependencies, under
+This should be an absolute path ending in a slash and point to a proper
+\"library\" installation, without dependencies, under
 `pytest-pdb-break--tempdir'.")
 
 (defun pytest-pdb-break--on-kill-emacs ()
@@ -147,7 +141,6 @@ proper \"library\" installation, without dependencies, under
 
 (defun pytest-pdb-break-get-isolated (&optional interpreter)
   "Return path to an isolated plugin installation.
-
 Use INTERPRETER or `python-shell-interpreter' to run the helper script."
   (if pytest-pdb-break--isolated
       pytest-pdb-break--isolated
@@ -182,7 +175,7 @@ Use INTERPRETER or `python-shell-interpreter' to run the helper script."
 (defvar pytest-pdb-break--exe-alist nil)
 
 (defun pytest-pdb-break-get-python-interpreter (pytest-exe &optional force)
-  "Return PYTEST-EXE's interpreter. With FORCE, update existing."
+  "Return PYTEST-EXE's interpreter.  With FORCE, update existing."
   (let* ((entry (assoc pytest-exe pytest-pdb-break--exe-alist))
          (value (cdr entry)))
     (if (and (not force) value)
@@ -220,7 +213,6 @@ Use INTERPRETER or `python-shell-interpreter' to run the helper script."
 
 (defun pytest-pdb-break--get-args (session-opts breakpoint node-id-parts)
   "Generate arguments for the pytest subprocess.
-
 SESSION-OPTS, BREAKPOINT, and NODE-ID-PARTS are as required by the main
 command, `pytest-pdb-break-here' (which see)."
   (let ((nodeid (mapconcat #'identity node-id-parts "::"))
@@ -255,12 +247,11 @@ del _wrap_pyel
   "Live process already exists" 'error)
 
 (defconst pytest-pdb-break--proc-base-name "pytest-PDB"
-  "Base portion of subprocess names. Don't change this.
-
+  "Base portion of subprocess names.  Don't change this.
 String-sending functions that rely on `python-shell-get-process-name'
 need `python-shell-buffer-name' set to this in source buffers during PDB
-sessions. If a local binding already exists, it's stashed and restored
-later. This may not be desirable in certain situations, but it's
+sessions.  If a local binding already exists, it's stashed and restored
+later.  This may not be desirable in certain situations, but it's
 hard-wired, for now." )
 
 (defvar-local pytest-pdb-break--process nil)
@@ -351,15 +342,13 @@ hard-wired, for now." )
 
 (defun pytest-pdb-break--burp-options-history ()
   "Add the empty string to the front of the options history.
-
 Remove other instances and return the modified list."
   (setq pytest-pdb-break--options-history
         (cons "" (delete "" pytest-pdb-break--options-history))))
 
 (defun pytest-pdb-break--read-session-options ()
   "Ask for additional options and return the resulting string.
-
-Shell quoting won't work. Values containing spaces should be enclosed in
+Shell quoting won't work.  Values containing spaces should be enclosed in
 double quotes, e.g., prompt: -foO \"--data={\\\"bar\\\": 1}\" ./baz/"
   (let ((comint-file-name-chars
          (replace-regexp-in-string "[,:=]" "" comint-file-name-chars))
@@ -378,11 +367,10 @@ double quotes, e.g., prompt: -foO \"--data={\\\"bar\\\": 1}\" ./baz/"
 
 (defun pytest-pdb-break-default-options-function (&optional n)
   "Return a previously used options list or ask for a new one.
-
-Without N, return the most recent, which may be nil. When N is positive,
-ask for new options. When N is negative, return that many entries before
-the most recent. When N is 0, add \"\" to the front of the history and
-return nil."
+Without N, return the most recent, which may be nil.  When N is
+positive, ask for new options.  When N is negative, return that many
+entries before the most recent.  When N is 0, add \"\" to the front of
+the history and return nil."
   (let ((raw (cond
               ((null n) (car pytest-pdb-break--options-history))
               ((< n 0) (or (nth (- n) pytest-pdb-break--options-history)
@@ -392,16 +380,15 @@ return nil."
     (and raw (split-string-and-unquote raw))))
 
 (defun pytest-pdb-break--interpret-prefix-arg (arg)
-  "Convert prefix ARG to number if non-nil."
+  "Convert prefix ARG to integer if non-nil."
   (and arg (prefix-numeric-value arg)))
 
 ;;;###autoload
 (defun pytest-pdb-break-here (session-opts breakpoint node-id-parts)
   "Run pytest on the test at point and break at BREAKPOINT.
-
 BREAKPOINT may be a line number or cons of the form (FILENAME . LNUM).
 NODE-ID-PARTS should be a list of pytest node-id components and
-SESSION-OPTS a list of additional options. `prefix-arg' behavior is
+SESSION-OPTS a list of additional options.  `prefix-arg' behavior is
 determined by `pytest-pdb-break-options-function'."
   (interactive
    (list (funcall pytest-pdb-break-options-function
