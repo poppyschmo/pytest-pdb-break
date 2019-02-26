@@ -58,7 +58,10 @@ def shave_path(path, venv=None):
         return rest
     venv = Path(os.path.expanduser(venv))
     if not venv.is_absolute():
-        venv = venv.resolve(True)
+        try:
+            venv = venv.resolve(True)
+        except TypeError:
+            venv = venv.resolve()
     if Path(os.path.commonpath((venv, maybe))) == venv or is_venv(maybe):
         return rest
     return path

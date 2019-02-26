@@ -102,7 +102,10 @@ def _main():
 
 if __name__ == "__main__":
     from pathlib import Path
-    sys.path.insert(0, str(Path(__file__).resolve(True).parent.parent))
+    try:
+        sys.path.insert(0, str(Path(__file__).resolve(True).parent.parent))
+    except TypeError:  # 3.5
+        sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
     from helpers import common, ensure_venv, get_collected
 
     sys.exit(_main())
