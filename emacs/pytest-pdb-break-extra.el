@@ -49,17 +49,16 @@ This converts major or minor (comint) compilation modes to
     (with-current-buffer (process-buffer proc)
       (pcase major-mode
         ('comint-mode
-         (compilation--unsetup)
-         (set-process-sentinel proc nil))
+         (compilation--unsetup))
         ('compilation-mode (read-only-mode -1)
                            (kill-all-local-variables)
                            (comint-mode)
                            (goto-char (point-max))
-                           (set-marker (process-mark proc) (point))
-                           (setq-local comint-ptyp process-connection-type))
+                           (set-marker (process-mark proc) (point)))
         ('inferior-python-mode
          (error "Setup called again on converted buffer"))
         (_ (error "Can't handle mode %s" major-mode))) ; impossible
+      (setq-local comint-ptyp process-connection-type)
       (setq compilation-in-progress (delq proc compilation-in-progress))
       (when (buffer-live-p (get-buffer proc-buffer-name))
         (kill-buffer proc-buffer-name))
