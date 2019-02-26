@@ -26,9 +26,6 @@ try:
 except ValueError:
     pass  # assume some git-describe-like string: devNN+gdeadbeef
 
-if sys.version_info < (3, 6):
-    raise RuntimeError("For now, requires Python 3.6+")
-
 module_logger = None
 try:
     from knotty_logger import LoggingHelper
