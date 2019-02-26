@@ -77,7 +77,7 @@ def extend_conftest(td, rest):
     from textwrap import dedent
     conftest = td.tmpdir.join("conftest.py")
     data = dedent(rest).strip()
-    conftest.write(data=f"\n{data}", mode="a")
+    conftest.write(data="\n{}".format(data), mode="a")
 
 
 @pytest.fixture
