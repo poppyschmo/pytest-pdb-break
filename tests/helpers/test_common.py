@@ -24,7 +24,7 @@ def test_version():
     cmdline = [sys.executable,
                Path(get_project_root()) / "setup.py",
                "--version"]
-    out = check_output(cmdline)
+    out = check_output([str(a) for a in cmdline])
     assert __version__ == out.decode().strip()
 
 
@@ -33,11 +33,11 @@ def test_copy_plugin(tmp_path):
     wd = tmp_path
     src = get_project_root() / "pytest_pdb_break.py"
     dest = wd / "pytest_pdb_break.py"
-    assert copy_plugin(wd) == src.stat().st_size
+    assert copy_plugin(str(wd)) == src.stat().st_size
     assert dest.exists()
     #
     content = "fake\ncontent\n"
-    assert copy_plugin(wd, content) == len(content)
+    assert copy_plugin(str(wd), content) == len(content)
     assert dest.read_text() == content
 
 
@@ -77,7 +77,7 @@ def test_install_plugin(tmp_path, func):
         with stdout.open("w") as flout, stderr.open("w") as floer:
             common.SUBOUT, common.SUBERR = flout, floer
             try:
-                func(targ, pyexe)
+                func(str(targ), pyexe)
             finally:
                 common.SUBOUT, common.SUBERR = suborig
 
@@ -95,7 +95,7 @@ def test_ensconce(tmp_path, wants_symlink):
     setup_py.write_text(setup_py_src)
 
     with patch("helpers.common.get_project_root") as m_pr:
-        m_pr.return_value = Path(wd)
+        m_pr.return_value = Path(str(wd))
         #
         suborig = common.SUBOUT, common.SUBERR
         stdout, stderr = wd / "stdout.out", wd / "stderr.out"

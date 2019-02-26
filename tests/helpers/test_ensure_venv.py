@@ -19,7 +19,7 @@ def clean(*paths):
         if path.exists():
             assert len(path.parts) > 2
             assert str(path).startswith(deftemp)
-            shutil.rmtree(path)
+            shutil.rmtree(str(path))
 
 
 def setUpModule():
@@ -31,7 +31,7 @@ def make_workdir(name):
     workdir = test_path / name
     clean(workdir)
     workdir.mkdir()
-    os.chdir(workdir)
+    os.chdir(str(workdir))
     assert Path.cwd() == workdir
     return workdir
 
@@ -331,7 +331,10 @@ class TestGetPyExe(unittest.TestCase):
         #
         bare = make_dummy_venv_tree("bare", version=3.42)
         bexe = bare / "bin" / "python3.42"
-        bexe = bexe.resolve(True)
+        try:
+            bexe = bexe.resolve(True)
+        except TypeError:
+            bexe = bexe.resolve()
         m_ev.return_value = wd
         result = get_pyexe("bare")
         m_ev.assert_called_once()
