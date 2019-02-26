@@ -7,6 +7,8 @@ ifdef PAT
 	SELECTOR = "$(PAT)"
 else ifdef SYM
 	SELECTOR = (quote $(SYM))
+else ifdef SYMS
+	SELECTOR = (quote (member $(SYMS)))
 else ifdef ALL
 	PAT = 's/^\s*(ert-deftest\s*\([^ ]\+\).*$$/\1/'
 	MEMBERS != grep 'ert-deftest' pytest-pdb-break-test.el | sed $(PAT)
@@ -23,6 +25,11 @@ ifeq (x$(VIRTUAL_ENV),$(findstring x$(VIRTUAL_ENV),x$(PATH)))
 	unexport VIRTUAL_ENV
 	unexport PYTHONPATH
 endif
+endif
+
+ifdef EMACS_PY35
+	PYTEST_PDB_BREAK_TEST_SKIP_PLUGIN = 1
+	export PYTEST_PDB_BREAK_TEST_SKIP_PLUGIN
 endif
 
 export PYTEST_PDB_BREAK_TEST_TEMPDIR

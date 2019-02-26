@@ -78,6 +78,12 @@
 (defvar pytest-pdb-break-test-lisp-this
   (concat pytest-pdb-break-test-lisp-root "pytest-pdb-break-test.el"))
 
+(defvar pytest-pdb-break-test-skip-plugin
+  (getenv "PYTEST_PDB_BREAK_TEST_SKIP_PLUGIN")
+  "Don't run tests involving the actual pytest plugin.
+Calls to external helpers are fair game, but the actual plugin depends
+on Python 3.6.")
+
 (ert-deftest pytest-pdb-break-test-ert-setup ()
   ;; Eval: (compile "make PAT=ert-setup")
   (should (seq-set-equal-p (mapcar 'ert-test-name (ert-select-tests t t))
@@ -1227,6 +1233,7 @@ Use \\' for end of string, and $ for end of line."
 
 (ert-deftest pytest-pdb-break-test-main-command-basic ()
   ;; Eval: (compile "make PAT=main-command-basic")
+  (skip-unless (null pytest-pdb-break-test-skip-plugin))
   (pytest-pdb-break--main-command-fixture
    "assert True"
    (ert-info ("Break in first method")
@@ -1239,7 +1246,7 @@ Use \\' for end of string, and $ for end of line."
   "Test compatibility of `python.el''s string-sending functions."
   ;; Eval: (compile "make PAT=main-command-send-string")
   ;; Eval: (compile "make debug PAT=main-command-send-string")
-  ;;
+  (skip-unless (null pytest-pdb-break-test-skip-plugin))
   ;; XXX prompt is not filtered and appears before output; but when
   ;; interacting with a live Emacs instance, this doesn't happen
   (pytest-pdb-break--main-command-fixture
@@ -1357,6 +1364,7 @@ TestFoo.test_bar(), starting at line 9."
 (ert-deftest pytest-pdb-break-test-main-command-completion ()
   ;; Eval: (compile "make PAT=main-command-completion")
   ;; Eval: (compile "make debug PAT=main-command-completion")
+  (skip-unless (null pytest-pdb-break-test-skip-plugin))
   (pytest-pdb-break--main-command-fixture
    "# comment"
    (should (member 'python-shell-completion-at-point
