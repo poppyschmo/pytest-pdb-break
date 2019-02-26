@@ -1,3 +1,4 @@
+# This file is part of https://github.com/poppyschmo/pytest-pdb-break
 import os
 import sys
 import argparse
@@ -20,10 +21,11 @@ def _main():
                   sep="\n")
         return kwargs.get("rv")
 
-    commands = {k: v for k, v in vars(common).items() if
+    allvars = vars(common)
+    allvars.update(vars(ensure_venv))
+    allvars.update(vars(get_collected))
+    commands = {k: v for k, v in allvars.items() if
                 isinstance(v, FunctionType) and not k.startswith("_")}
-    commands.update({k: v for k, v in vars(ensure_venv).items() if
-                     isinstance(v, FunctionType) and not k.startswith("_")})
 
     ap = argparse.ArgumentParser(
         prog="ensure_venv",
@@ -33,7 +35,7 @@ def _main():
             ("\n    {}".format(o.__doc__.strip().split("\n")[0])
              if o.__doc__ else "") for n, o in commands.items()
         ),
-        description="Helpers for integrations tests using virtual environments"
+        description="Helpers for editor integratons"
     )
 
     commands["debug_cmdline"] = debug_cmdline
@@ -61,13 +63,21 @@ def _main():
         kwargs = {}
 
     logfile = os.getenv("PYTEST_PDB_BREAK_INSTALL_LOGFILE")
+    ec = 0
     if logfile:
         with open(logfile, "w") as flow:
             common.SUBOUT = flow
             common.SUBERR = subprocess.STDOUT
             rv = pargs.cmd(*args, **kwargs)
     else:
-        rv = pargs.cmd(*args, **kwargs)
+        try:
+            rv = pargs.cmd(*args, **kwargs)
+        except Exception:
+            from traceback import format_exception, format_exception_only
+            et, val, tb = sys.exc_info()
+            rv = dict(error=format_exception_only(et, val)[0].strip(),
+                      traceback=format_exception(et, val, tb))
+            ec = 1
 
     sep = "\x00" if pargs.null else "\n"
 
@@ -75,18 +85,24 @@ def _main():
         import json
         json.dump(rv, sys.stdout)
     elif isinstance(rv, MutableMapping):
+        if ec:
+            rv["traceback"] = "".join(rv["traceback"])
+            if not pargs.null:
+                print(rv["traceback"])
+                return ec
         print(*(f"{k}={v}" for k, v in rv.items()), sep=sep, end=sep)
     elif isinstance(rv, (MutableSequence, tuple)):
         print(*rv, sep=sep, end=sep)
     elif isinstance(rv, bool):
-        return int(not rv)
+        ec = ec or int(not rv)
     elif rv:
         print(rv, end="")
+    return ec
 
 
 if __name__ == "__main__":
     from pathlib import Path
     sys.path.insert(0, str(Path(__file__).resolve(True).parent.parent))
-    from helpers import common, ensure_venv
+    from helpers import common, ensure_venv, get_collected
 
     sys.exit(_main())

@@ -1,3 +1,4 @@
+# This file is part of https://github.com/poppyschmo/pytest-pdb-break
 import os
 import sys
 import shutil
