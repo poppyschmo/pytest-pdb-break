@@ -14,7 +14,8 @@ _tmp_venvdir = None
 
 def is_pyenv_shim(path):
     """Return True if path is a pyenv shim"""
-    out = subprocess.check_output(["file", "-b", "-L", "--mime-type", path])
+    out = subprocess.check_output(["file", "-b", "-L", "--mime-type",
+                                   str(path)])
     out = out.decode()
     if out.startswith("text"):
         return "PYENV" in Path(path).read_text()
@@ -56,13 +57,14 @@ def shave_path(path, venv=None):
         if not is_venv(venv):
             return path
         return rest
-    venv = Path(os.path.expanduser(venv))
+    venv = Path(os.path.expanduser(str(venv)))
     if not venv.is_absolute():
         try:
             venv = venv.resolve(True)
         except TypeError:
             venv = venv.resolve()
-    if Path(os.path.commonpath((venv, maybe))) == venv or is_venv(maybe):
+    if (Path(os.path.commonpath((str(venv), str(maybe))))
+            == venv or is_venv(maybe)):
         return rest
     return path
 
@@ -176,7 +178,11 @@ def get_pyexe(name):
         env = get_base_env()
         if is_pyenv_shim(sysexe):
             update_shim_env(env, sysexe)
-        subprocess.check_call([sysexe, "-mvenv", venv], env=env,
+
+        def strung(*args):
+            return [str(a) for a in args]
+
+        subprocess.check_call(strung(sysexe, "-mvenv", venv), env=env,
                               stdout=SUBOUT, stderr=SUBERR)
         assert pyexe.exists(), "{!r} exists".format(pyexe)
         if not (venv / "bin" / "pip").exists():
@@ -184,10 +190,12 @@ def get_pyexe(name):
             warn("{} did not create a pip in {}".format(sysexe, pyexe.parent))
         if name != "bare":
             if name == "base":
-                subprocess.check_call([pyexe, "-mpip", "install", "pytest"],
-                                      stdout=SUBOUT, stderr=SUBERR)
+                subprocess.check_call(
+                    strung(pyexe, "-mpip", "install", "pytest"),
+                    stdout=SUBOUT, stderr=SUBERR
+                )
             elif name == "self":
-                subprocess.check_call([pyexe, "-mpip", "install",
-                                       get_project_root()],
+                subprocess.check_call(strung(pyexe, "-mpip", "install",
+                                             get_project_root()),
                                       stdout=SUBOUT, stderr=SUBERR)
     return pyexe

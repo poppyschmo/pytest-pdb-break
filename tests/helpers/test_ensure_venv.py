@@ -362,9 +362,10 @@ class TestGetPyExe(unittest.TestCase):
         sysexe = ensure_venv.get_base_pyexe()
         pyexe = wd.joinpath("base", "bin", versioned)
         m_cc.assert_has_calls([
-            call([sysexe, "-mvenv", wd / "base"], env={"PATH": "foo:bar"},
+            call([str(sysexe), "-mvenv", str(wd / "base")],
+                 env={"PATH": "foo:bar"},
                  stdout=common.SUBOUT, stderr=common.SUBERR),
-            call([pyexe, "-mpip", "install", "pytest"],
+            call([str(pyexe), "-mpip", "install", "pytest"],
                  stdout=common.SUBOUT, stderr=common.SUBERR)
         ])
 
@@ -389,8 +390,9 @@ class TestGetPyExe(unittest.TestCase):
         sysexe = ensure_venv.get_base_pyexe()
         pyexe = wd.joinpath("self", "bin", versioned)
         m_cc.assert_has_calls([
-            call([sysexe, "-mvenv", wd / "self"], env={"PATH": "foo:bar"},
+            call([str(sysexe), "-mvenv", str(wd / "self")],
+                 env={"PATH": "foo:bar"},
                  stdout=common.SUBOUT, stderr=common.SUBERR),
-            call([pyexe, "-mpip", "install", "<proj root>"],
+            call([str(pyexe), "-mpip", "install", "<proj root>"],
                  stdout=common.SUBOUT, stderr=common.SUBERR)
         ])

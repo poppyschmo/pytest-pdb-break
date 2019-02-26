@@ -35,13 +35,14 @@ def _call_setup_in_subproc(cmdline, project_dir):
     else:
         env = os.environ
     try:
-        return subprocess.check_call(cmdline, cwd=project_dir, env=env,
+        return subprocess.check_call([str(a) for a in cmdline],
+                                     cwd=str(project_dir), env=env,
                                      stdout=SUBOUT, stderr=SUBERR)
     finally:
         for subdir in ("build", "pytest_pdb_break.egg-info"):
             path = Path(project_dir) / subdir
             if path.exists():
-                shutil.rmtree(path)
+                shutil.rmtree(str(path))
 
 
 def _install_plugin_setuptools(destdir, pyexe):
@@ -64,7 +65,8 @@ def _install_plugin_pip(destdir, pyexe, opts=default_pip_opts):
     assert target.exists(), target
     cmdline = [pyexe, "-mpip", "install"]
     cmdline += list(opts) + ["--target", target, project_dir]
-    return subprocess.check_call(cmdline, stdout=SUBOUT, stderr=SUBERR)
+    return subprocess.check_call([str(a) for a in cmdline],
+                                 stdout=SUBOUT, stderr=SUBERR)
 
 
 def install_plugin(destdir, pyexe=None, use_pip=False, **kwargs):
