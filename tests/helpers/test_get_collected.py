@@ -81,6 +81,9 @@ def test_get_locations(repo):
 
 
 def test_get_collected(repo):
+    import sys
+    if sys.version_info < (3, 6):
+        pytest.skip("Needs pytest plugin, which is 3.6+")
     rv = get_collected.get_collected()
     repo.tmpdir.join("got.out").write(pformat(rv))
     pfun = repo.tmpdir.join("test_fun.py").strpath
