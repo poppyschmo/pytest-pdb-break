@@ -36,7 +36,7 @@ def get_locations(*args):
         filename, lnum, name = item.location
         lnum += 1
         if item.originalname:
-            name = name.replace(f"[{item.callspec.id}]", "")
+            name = name.replace("[{}]".format(item.callspec.id), "")
         modules.add((str(filename), lnum, name))
     return sorted(modules)
 

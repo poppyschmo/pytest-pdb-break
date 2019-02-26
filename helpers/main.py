@@ -13,11 +13,11 @@ def _main():
 
     def debug_cmdline(*args, **kwargs):
         if not kwargs.get("quiet"):
-            print(f"--json: {pargs.json!r}",
-                  f"--kwargs: {pargs.kwargs!r}",
-                  f"--null: {pargs.null!r}",
-                  f"args: {args!r}",
-                  f"kwargs: {kwargs!r}",
+            print("--json: {!r}".format(pargs.json),
+                  "--kwargs: {!r}".format(pargs.kwargs),
+                  "--null: {!r}".format(pargs.null),
+                  "args: {!r}".format(args),
+                  "kwargs: {!r}".format(kwargs),
                   sep="\n")
         return kwargs.get("rv")
 
@@ -31,7 +31,7 @@ def _main():
         prog="ensure_venv",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="\n".join(
-            f"  \x1b[1m{n}\x1b[m{signature(o)}" +
+            "  \x1b[1m{}\x1b[m{}".format(n, signature(o)) +
             ("\n    {}".format(o.__doc__.strip().split("\n")[0])
              if o.__doc__ else "") for n, o in commands.items()
         ),
@@ -90,7 +90,7 @@ def _main():
             if not pargs.null:
                 print(rv["traceback"])
                 return ec
-        print(*(f"{k}={v}" for k, v in rv.items()), sep=sep, end=sep)
+        print(*("{}={}".format(*i) for i in rv.items()), sep=sep, end=sep)
     elif isinstance(rv, (MutableSequence, tuple)):
         print(*rv, sep=sep, end=sep)
     elif isinstance(rv, bool):

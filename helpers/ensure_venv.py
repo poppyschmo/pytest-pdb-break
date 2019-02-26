@@ -21,7 +21,8 @@ def is_pyenv_shim(path):
     elif out.startswith("application"):
         return False
     else:
-        raise RuntimeError(f"Unrecognized file type {out} for {path}")
+        raise RuntimeError("Unrecognized file type {} for {}"
+                           .format(out, path))
 
 
 def update_shim_env(env, exe):
@@ -95,7 +96,7 @@ def get_pyvenv_cfg(parent=None):
         parent = Path(sys.executable).parent.parent
     path = Path(parent) / "pyvenv.cfg"
     if not path.exists():
-        raise FileNotFoundError(f"No pyvenv.cfg in {parent}")
+        raise FileNotFoundError("No pyvenv.cfg in {}".format(parent))
     from configparser import ConfigParser
     cfg = ConfigParser()
     cfg.read_string("[main]\n" + path.read_text())
@@ -116,12 +117,13 @@ def get_base_pyexe():
     version = "%d.%d" % sys.version_info[:2]
     if not is_venv(Path(sys.executable).parent):
         if not sys.executable.endswith(version):
-            versioned = Path(sys.executable).parent / f"python{version}"
+            versioned = Path(sys.executable).parent.joinpath("python{}"
+                                                             .format(version))
             if versioned.exists():
                 return str(versioned)
         return sys.executable
     path = shave_path(os.getenv("PATH"), os.getenv("VIRTUAL_ENV"))
-    found = shutil.which(f"python{version}", path=path)
+    found = shutil.which("python{}".format(version), path=path)
     if found:
         # XXX why realpath here (and not elsewhere)?
         return os.path.realpath(found)
@@ -161,10 +163,10 @@ def ensure_venvdir():
 def get_pyexe(name):
     "Return path to python executable in temporary venv"
     if name not in NAMES:
-        raise ValueError(f"{name!r} must be one of {NAMES}")
+        raise ValueError("{!r} must be one of {}".format(name, NAMES))
     venv = ensure_venvdir() / name
     version = "%d.%d" % sys.version_info[:2]
-    pyexe = venv / "bin" / f"python{version}"
+    pyexe = venv / "bin" / "python{}".format(version)
     if not pyexe.exists():
         from .common import SUBERR, SUBOUT, get_project_root
         sysexe = get_base_pyexe()
@@ -173,10 +175,10 @@ def get_pyexe(name):
             update_shim_env(env, sysexe)
         subprocess.check_call([sysexe, "-mvenv", venv], env=env,
                               stdout=SUBOUT, stderr=SUBERR)
-        assert pyexe.exists(), f"{pyexe!r} exists"
+        assert pyexe.exists(), "{!r} exists".format(pyexe)
         if not (venv / "bin" / "pip").exists():
             from warnings import warn
-            warn(f"{sysexe} did not create a pip in {pyexe.parent}")
+            warn("{} did not create a pip in {}".format(sysexe, pyexe.parent))
         if name != "bare":
             if name == "base":
                 subprocess.check_call([pyexe, "-mpip", "install", "pytest"],

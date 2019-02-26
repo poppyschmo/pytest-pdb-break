@@ -22,7 +22,7 @@ def get_project_root():
     if not _project_root:
         # Ensure this module was imported
         root = Path(__file__).parent.parent
-        assert root.is_absolute(), f"root: {root}"
+        assert root.is_absolute(), "root: {}".format(root)
         assert root.joinpath("setup.py").exists()
         _project_root = root
     return _project_root
@@ -48,12 +48,12 @@ def _install_plugin_setuptools(destdir, pyexe):
     """Install this project into destdir using setuptools
     """
     project_dir = get_project_root()
-    cmdline = [pyexe] + f"""
+    cmdline = [pyexe] + """
         setup.py
             install_lib --install-dir {destdir}
             install_egg_info --install-dir {destdir}
             clean --all
-    """.split()
+    """.format(destdir=destdir).split()
     return _call_setup_in_subproc(cmdline, project_dir)
 
 
