@@ -857,17 +857,25 @@ class TestFoo:
           (pytest-pdb-break--set-shell-buffer-name parbuf)))
       (should (string= python-shell-buffer-name "pytest-PDB"))
       (should (local-variable-p 'python-shell-buffer-name))))
+  (ert-info ("Existing, but ours")
+    (should-not pytest-pdb-break--existing-python-shell-buffer-name)
+    (pytest-pdb-break-test-with-python-buffer
+     (setq-local python-shell-buffer-name "pytest-PDB")
+     (with-temp-buffer
+       (should (string-empty-p
+                (pytest-pdb-break-test--with-messages
+                 (pytest-pdb-break--set-shell-buffer-name
+                  (current-buffer)))))
+       (should (string= python-shell-buffer-name "pytest-PDB"))
+       (should (local-variable-p 'python-shell-buffer-name)))))
   (ert-info ("Existing")
     (should-not pytest-pdb-break--existing-python-shell-buffer-name)
     (with-temp-buffer
       (setq-local python-shell-buffer-name "Foo")
-      (let ((parbuf (current-buffer))
-            (inhibit-message t))
-        (with-current-buffer (messages-buffer)
-          (pytest-pdb-break--set-shell-buffer-name parbuf)
-          (save-excursion
-            (goto-char (point-min))
-            (should (search-forward "Moving existing")))))
+      (should (string-match-p
+               "Moving existing"
+               (pytest-pdb-break-test--with-messages
+                (pytest-pdb-break--set-shell-buffer-name (current-buffer)))))
       (should (local-variable-p 'python-shell-buffer-name))
       (should (local-variable-p
                'pytest-pdb-break--existing-python-shell-buffer-name))

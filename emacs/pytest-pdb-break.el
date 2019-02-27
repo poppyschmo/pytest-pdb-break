@@ -172,7 +172,7 @@ Use INTERPRETER or `python-shell-interpreter' to run the helper script."
     (insert-file-contents-literally pytest-exe)
     (goto-char (point-min))
     (let (maybe)
-      (if (and (looking-at "#!\\(.+\\)$")
+      (if (and (looking-at "#!\\(.+\\)")  ; till newline
                (setq maybe (match-string-no-properties 1))
                (file-executable-p maybe))
           maybe
@@ -279,7 +279,7 @@ hard-wired, for now." )
   (let* ((bufname (buffer-name))
          (pat (concat "\\(" (regexp-quote pytest-pdb-break--proc-base-name)
                       "\\|" (regexp-quote python-shell-buffer-name) "\\)"
-                      "\\[\\(.+\\)\\]\\*$"))
+                      "\\[\\(.+\\)\\]\\*\\'"))
          (m (and (string-match pat bufname) (match-string 2 bufname)))
          (buf (and m (get-buffer m))))
     (and buf (with-current-buffer buf (eq major-mode 'python-mode)) buf)))
@@ -287,7 +287,10 @@ hard-wired, for now." )
 (defun pytest-pdb-break--set-shell-buffer-name (parent-buffer)
   "Set `python-shell-buffer-name' in PARENT-BUFFER."
   (with-current-buffer parent-buffer
-    (when (local-variable-p 'python-shell-buffer-name)
+    (when (and (local-variable-p 'python-shell-buffer-name)
+               (or (not (stringp python-shell-buffer-name))
+                   (not (string= python-shell-buffer-name
+                                 pytest-pdb-break--proc-base-name))))
       (message "Moving existing python-shell-buffer-name %S to %s"
                python-shell-buffer-name
                'pytest-pdb-break--existing-python-shell-buffer-name)
