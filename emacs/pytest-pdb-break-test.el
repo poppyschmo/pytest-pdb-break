@@ -29,6 +29,7 @@
     pytest-pdb-break-test-call-interpreter
     pytest-pdb-break-test-get-isolated
     pytest-pdb-break-test-get-pytest-executable
+    pytest-pdb-break-test-get-interpreter-version
     pytest-pdb-break-test-get-python-interpreter
     pytest-pdb-break-test-get-node-id
     pytest-pdb-break-test-get-args
@@ -606,6 +607,44 @@ if this is a sound choice)."
      (let ((pytest-pdb-break-pytest-executable "/tmp/foo"))
        (should (string= "/tmp/foo"
                         (pytest-pdb-break-get-pytest-executable)))))))
+
+(ert-deftest pytest-pdb-break-test-get-interpreter-version ()
+  ;; Eval: (compile "make PAT=get-interpreter-version")
+  (pytest-pdb-break-test-ensure-venv
+   'bare
+   (should-not pytest-pdb-break--versions-alist)
+   (let (pytest-pdb-break--versions-alist)
+     (ert-info ("Fake interpreter")
+       (let ((python-exe (concat default-directory "fake-python")))
+         (with-temp-file python-exe
+           (insert "#!/bin/sh\nprintf '3.7.2'\n"))
+         (chmod python-exe #o0700)
+         (should (string=
+                  "3.7.2"
+                  (pytest-pdb-break--get-interpreter-version python-exe)))
+         (should (equal `(,python-exe . "3.7.2")
+                        (assoc python-exe pytest-pdb-break--versions-alist)))
+         (ert-info ("Returns existing")
+           (with-temp-file python-exe (insert "#!/bin/sh\nexit 1\n"))
+           (chmod python-exe #o0700)
+           (should (string=
+                    "3.7.2"
+                    (pytest-pdb-break--get-interpreter-version python-exe))))
+         (ert-info ("Update")
+           (with-temp-file python-exe
+             (insert "#!/bin/sh\nprintf '2.7.2'\n"))
+           (chmod python-exe #o0700)
+           (should (string=
+                    "2.7.2"
+                    (pytest-pdb-break--get-interpreter-version python-exe
+                                                               'force)))
+           (should (equal `((,python-exe . "2.7.2"))
+                          pytest-pdb-break--versions-alist)))))
+     (ert-info ("Real interpreter")
+       (let ((rv (pytest-pdb-break--get-interpreter-version $pyexe)))
+         (should (version<= "2.7" rv))
+         (should (version< rv "4.0")))))
+   (should-not pytest-pdb-break--versions-alist)))
 
 (ert-deftest pytest-pdb-break-test-get-python-interpreter ()
   ;; Eval: (compile "make PAT=get-python-interpreter")

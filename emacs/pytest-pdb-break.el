@@ -181,6 +181,40 @@ Use INTERPRETER or `python-shell-interpreter' to run the helper script."
                                           script "install_plugin" name)
       (setq pytest-pdb-break--isolated name))))
 
+(defun pytest-pdb-break--maybe-add-to-alist (func key alist-symbol force)
+  "Call FUNC with KEY and add result to ALIST-SYMBOL under KEY.
+With FORCE, update the list."
+  (let* ((entry (assoc key (symbol-value alist-symbol)))
+         (value (cdr entry)))
+    (if (and (not force) value)
+        value
+      (condition-case err
+          (setq value (funcall func key))
+        (error
+         (when entry
+           (set alist-symbol (delete entry (symbol-value alist-symbol))))
+         (signal (car err) (cdr err))))
+      (unless entry
+        (push (setq entry (list key)) (symbol-value alist-symbol)))
+      (setcdr entry value))))
+
+(defvar pytest-pdb-break--versions-alist nil)
+
+(defun pytest-pdb-break--query-interpreter-for-version-string (python-exe)
+  "Ask PYTHON-EXE for its version string."
+  (let ((argstr "import sys; print(sys.version.split()[0], end='')"))
+    (pytest-pdb-break--call-interpreter python-exe "-c" argstr)))
+
+;; TODO check whether python.el already has something that does this
+(defun pytest-pdb-break--get-interpreter-version (interpreter &optional force)
+  "Get Python version number for INTERPRETER.  With FORCE, update.
+Returns version string."
+  (pytest-pdb-break--maybe-add-to-alist
+   'pytest-pdb-break--query-interpreter-for-version-string
+   interpreter 'pytest-pdb-break--versions-alist force))
+
+(defvar pytest-pdb-break--exe-alist nil)
+
 (defun pytest-pdb-break--extract-shebang (pytest-exe)
   "Extract PYTEST-EXE's shebanged interpreter."
   (with-temp-buffer
@@ -193,24 +227,11 @@ Use INTERPRETER or `python-shell-interpreter' to run the helper script."
           maybe
         (error "Cannot find interpreter for pytest exe %S" pytest-exe)))))
 
-(defvar pytest-pdb-break--exe-alist nil)
-
 (defun pytest-pdb-break-get-python-interpreter (pytest-exe &optional force)
   "Return PYTEST-EXE's interpreter.  With FORCE, update existing."
-  (let* ((entry (assoc pytest-exe pytest-pdb-break--exe-alist))
-         (value (cdr entry)))
-    (if (and (not force) value)
-        value
-      (condition-case err
-          (setq value (pytest-pdb-break--extract-shebang pytest-exe))
-        (error
-         (when entry
-           (setq pytest-pdb-break--exe-alist
-                 (delete entry pytest-pdb-break--exe-alist)))
-         (signal (car err) (cdr err))))
-      (unless entry
-        (push (setq entry (list pytest-exe)) pytest-pdb-break--exe-alist))
-      (setcdr entry value))))
+  (pytest-pdb-break--maybe-add-to-alist
+   'pytest-pdb-break--extract-shebang
+   pytest-exe 'pytest-pdb-break--exe-alist force))
 
 
 (define-error 'pytest-pdb-break-test-not-found "Test not found" 'error)
