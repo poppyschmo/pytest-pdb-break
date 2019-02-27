@@ -215,6 +215,7 @@ Returns version string."
 
 (defvar pytest-pdb-break--exe-alist nil)
 
+;; TODO accommodate pyenv shims -> "/usr/bin/env bash"
 (defun pytest-pdb-break--extract-shebang (pytest-exe)
   "Extract PYTEST-EXE's shebanged interpreter."
   (with-temp-buffer
@@ -442,41 +443,44 @@ determined by `pytest-pdb-break-options-function'."
          nil nil))
   ;; As per (info "(elisp) Programming Tips"), the "repetition" thing
   (unless node-id-parts (setq node-id-parts (pytest-pdb-break--get-node-id)))
-  (let ((process-environment (append process-environment nil))
-        (proc-name (pytest-pdb-break--get-proc-name)))
+  (let* ((process-environment (append process-environment nil))
+         (proc-name (pytest-pdb-break--get-proc-name))
+         (pytest-exe (pytest-pdb-break-get-pytest-executable))
+         (pyexe (pytest-pdb-break-get-python-interpreter pytest-exe))
+         (pyvers (pytest-pdb-break--get-interpreter-version pyexe)))
+    (unless (version<= "3.6" pyvers)
+      (error "Python version %s is less than 3.6" pyvers))
     (defvar python-shell--interpreter)
     (defvar python-shell--interpreter-args)
-    (let* ((pytest-exe (pytest-pdb-break-get-pytest-executable))
-           (pyexe (pytest-pdb-break-get-python-interpreter pytest-exe))
-           (python-shell-extra-pythonpaths
-            (append (list (or pytest-pdb-break-alt-installation
-                              (pytest-pdb-break-get-isolated pyexe)))
-                    python-shell-extra-pythonpaths))
-           ;; Make pdb++ prompt trigger non-native-completion fallback
-           (python-shell-prompt-pdb-regexp pytest-pdb-break-prompt-regexp)
-           (args (pytest-pdb-break--get-args session-opts
-                                             (or breakpoint
-                                                 (line-number-at-pos))
-                                             node-id-parts))
-           ;; Triggers local-while-let-bound warning in 25.x
-           (python-shell--parent-buffer (current-buffer))
-           ;; Ensure `python-shell-prompt-detect' doesn't use ipython, etc.
-           (python-shell--interpreter pyexe)
-           python-shell--interpreter-args
-           buffer)
+    (let ((python-shell-extra-pythonpaths
+           (append (list (or pytest-pdb-break-alt-installation
+                             (pytest-pdb-break-get-isolated pyexe)))
+                   python-shell-extra-pythonpaths))
+          ;; Make pdb++ prompt trigger non-native-completion fallback
+          (python-shell-prompt-pdb-regexp pytest-pdb-break-prompt-regexp)
+          (args (pytest-pdb-break--get-args session-opts
+                                            (or breakpoint
+                                                (line-number-at-pos))
+                                            node-id-parts))
+          ;; Triggers local-while-let-bound warning in 25.x
+          (python-shell--parent-buffer (current-buffer))
+          ;; Ensure `python-shell-prompt-detect' doesn't use ipython, etc.
+          (python-shell--interpreter pyexe)
+          python-shell--interpreter-args
+          buffer)
       (save-excursion
         ;; Allow "calculate-" funcs to consider "python-shell-" options and
         ;; modify process-environment and exec-path accordingly
         (python-shell-with-environment
-          (setq buffer (apply #'make-comint-in-buffer proc-name nil
-                              pytest-exe nil args))
-          ;; Only python- prefixed local vars get cloned in child buffer
-          (with-current-buffer buffer
-            (inferior-python-mode)
-            (setq pytest-pdb-break--process (get-buffer-process buffer)
-                  pytest-pdb-break--parent-buffer python-shell--parent-buffer)
-            (pytest-pdb-break-mode +1))
-          (display-buffer buffer))))))
+         (setq buffer (apply #'make-comint-in-buffer proc-name nil
+                             pytest-exe nil args))
+         ;; Only python- prefixed local vars get cloned in child buffer
+         (with-current-buffer buffer
+           (inferior-python-mode)
+           (setq pytest-pdb-break--process (get-buffer-process buffer)
+                 pytest-pdb-break--parent-buffer python-shell--parent-buffer)
+           (pytest-pdb-break-mode +1))
+         (display-buffer buffer))))))
 
 
 (provide 'pytest-pdb-break)

@@ -42,6 +42,7 @@
     pytest-pdb-break-test-interpret-prefix-arg
     pytest-pdb-break-test-read-session-options
     pytest-pdb-break-test-default-options-function
+    pytest-pdb-break-test-main-command-min-version
     pytest-pdb-break-test-main-command-basic
     pytest-pdb-break-test-main-command-send-string
     pytest-pdb-break-test-main-command-completion
@@ -1322,6 +1323,13 @@ Use \\' for end of string, and $ for end of line."
 
 ;; Note: none of the following cases covers `pytest-pdb-break-alt-installation'
 ;; because its implementation is trivial
+
+(ert-deftest pytest-pdb-break-test-main-command-min-version ()
+  ;; Eval: (compile "make PAT=main-command-min-version")
+  (skip-unless pytest-pdb-break-test-skip-plugin)
+  (let ((exc (should-error (pytest-pdb-break--main-command-fixture
+                            "assert True" (ignore)))))
+    (should (string-match-p "Python version.*less than.*" (cadr exc)))))
 
 (ert-deftest pytest-pdb-break-test-main-command-basic ()
   ;; Eval: (compile "make PAT=main-command-basic")
