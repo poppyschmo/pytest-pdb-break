@@ -19,6 +19,7 @@
   '(pytest-pdb-break-test-ert-setup
     pytest-pdb-break-test-library-version
     pytest-pdb-break-test-upstream-env-updaters
+    pytest-pdb-break-test-dump-internal-error
     pytest-pdb-break-test-homer
     pytest-pdb-break-test-homer-installed
     pytest-pdb-break-test-homer-symlink
@@ -311,6 +312,25 @@ generated VIRTUAL_ENV var never end in a /, even when orig does.
               (before (should (= (sxhash-equal exec-path) orig)))
               (during (should (= (sxhash-equal exec-path) orig)))
               (after (should (= (sxhash-equal exec-path) orig))))))))
+
+(ert-deftest pytest-pdb-break-test-dump-internal-error ()
+  ;; Eval: (compile "make PAT=dump-internal-error")
+  (should-not (get-buffer pytest-pdb-break--errors-buffer-name))
+  (let (capped)
+    (pytest-pdb-break-test-with-tmpdir
+     (pytest-pdb-break--dump-internal-error "1\n2\n3")
+     (with-current-buffer pytest-pdb-break--errors-buffer-name
+       (goto-char (point-min))
+       (should (search-forward-regexp "[[].+[]][[:space:]123]+")))
+     (pytest-pdb-break--dump-internal-error "a\nb\nc")
+     (with-current-buffer pytest-pdb-break--errors-buffer-name
+       (goto-char (point-min))
+       (should (search-forward-regexp "[[].+[]][[:space:]123]+"))
+       (should (search-forward-regexp "[[].+[]][[:space:]abc]+"))
+       (setq capped (buffer-string))
+       (kill-buffer))
+     (with-temp-file "abc123.out"
+       (insert capped)))))
 
 (defmacro pytest-pdb-break-test-homer-repo-fixture ()
   "Common assertions for the home-finder when not installed.

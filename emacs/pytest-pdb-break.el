@@ -79,6 +79,15 @@ info)."
   "List of processes belonging to a \"pytestPDB\" buffer.
 Actually, this is any buffer with the minor mode is currently enabled.")
 
+(defvar pytest-pdb-break--errors-buffer-name "pytest-PDB-errors")
+
+(defun pytest-pdb-break--dump-internal-error (long-msg)
+  "Print LONG-MSG to own buffer instead of *Messages*."
+  (with-current-buffer
+      (get-buffer-create pytest-pdb-break--errors-buffer-name)
+    (goto-char (point-max))
+    (insert (format-time-string "\n[%F %T.%6N]\n") long-msg "\n")))
+
 (defvar pytest-pdb-break--py-home nil
   "Directory containing the pytest plugin's source and non-el scripts.")
 
@@ -163,6 +172,7 @@ Use INTERPRETER or `python-shell-interpreter' to run the helper script."
                                      script "install_plugin" name))
           ;; The traceback dumped here isn't helpful because the script calls
           ;; another subprocess; try exporting PYTEST_PDB_BREAK_INSTALL_LOGFILE
+          (pytest-pdb-break--dump-internal-error (buffer-string))
           (error "Call to %s install_plugin returned non-zero" script)))
       (setq pytest-pdb-break--isolated name))))
 
