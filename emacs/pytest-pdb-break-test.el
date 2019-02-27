@@ -26,6 +26,7 @@
     pytest-pdb-break-test-homer-missing
     pytest-pdb-break-test-on-kill-emacs
     pytest-pdb-break-test-create-tempdir
+    pytest-pdb-break-test-call-interpreter
     pytest-pdb-break-test-get-isolated
     pytest-pdb-break-test-get-pytest-executable
     pytest-pdb-break-test-get-python-interpreter
@@ -543,6 +544,30 @@ if this is a sound choice)."
        (should (directory-name-p $venv))
        (should (directory-name-p $venvbin))
        ,@body))))
+
+(ert-deftest pytest-pdb-break-test-call-interpreter ()
+  ;; Eval: (compile "make PAT=call-interpreter")
+  (pytest-pdb-break-test-ensure-venv
+   'bare
+   (should-not (get-buffer pytest-pdb-break--errors-buffer-name))
+   (ert-info ("Successful call")
+     (let ((rv (pytest-pdb-break--call-interpreter
+                $pyexe "-c" "import sys; print(sys.argv)" "--" "foo")))
+       (should (string-match-p "[[].-c.*foo.[]]" rv))))
+   (should-not (get-buffer pytest-pdb-break--errors-buffer-name))
+   (ert-info ("Bad call")
+     (let ((exc (should-error
+                 (pytest-pdb-break--call-interpreter $pyexe "-c" "foo")))
+           case-fold-search outstr)
+       (should (string-match-p "Call to.*exited.*" (cadr exc)))
+       (with-current-buffer
+           pytest-pdb-break--errors-buffer-name
+         (setq outstr (buffer-string))
+         (with-temp-file "traceback.out" (insert outstr))
+         (goto-char (point-min))
+         (should (search-forward-regexp "Traceback"))
+         (should (search-forward-regexp "NameError"))
+         (kill-buffer))))))
 
 (ert-deftest pytest-pdb-break-test-get-isolated ()
   ;; Eval: (compile "make PAT=get-isolated")

@@ -154,6 +154,16 @@ This should be an absolute path ending in a slash and point to a proper
     (add-hook 'kill-emacs-hook #'pytest-pdb-break--on-kill-emacs))
   pytest-pdb-break--tempdir)
 
+(defun pytest-pdb-break--call-interpreter (exe &rest args)
+  "Call Python EXE synchronously with ARGS.  Return stdout."
+  (let (ec)
+    (with-temp-buffer
+      (unless (zerop (setq ec (apply #'call-process exe nil
+                                     (current-buffer) nil args)))
+        (pytest-pdb-break--dump-internal-error (buffer-string))
+        (error "Call to %S exited %d" (cons exe args) ec))
+      (buffer-string))))
+
 (defun pytest-pdb-break-get-isolated (&optional interpreter)
   "Return path to an isolated plugin installation.
 Use INTERPRETER or `python-shell-interpreter' to run the helper script."
@@ -164,16 +174,11 @@ Use INTERPRETER or `python-shell-interpreter' to run the helper script."
                        (pytest-pdb-break--create-tempdir)))
            (name (file-name-as-directory (concat tmpdir "self")))
            (script (concat home "helpers/main.py")))
-      (with-temp-buffer
-        (unless (zerop (call-process (or interpreter
-                                         python-shell-interpreter)
-                                     nil
-                                     (current-buffer) nil
-                                     script "install_plugin" name))
-          ;; The traceback dumped here isn't helpful because the script calls
-          ;; another subprocess; try exporting PYTEST_PDB_BREAK_INSTALL_LOGFILE
-          (pytest-pdb-break--dump-internal-error (buffer-string))
-          (error "Call to %s install_plugin returned non-zero" script)))
+      ;; The traceback dumped here isn't helpful because the script calls
+      ;; another subprocess; try exporting PYTEST_PDB_BREAK_INSTALL_LOGFILE
+      (pytest-pdb-break--call-interpreter (or interpreter
+                                              python-shell-interpreter)
+                                          script "install_plugin" name)
       (setq pytest-pdb-break--isolated name))))
 
 (defun pytest-pdb-break--extract-shebang (pytest-exe)
