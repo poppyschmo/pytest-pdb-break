@@ -47,6 +47,7 @@
     pytest-pdb-break-test-default-options-function
     pytest-pdb-break-test-main-command-min-version
     pytest-pdb-break-test-main-command-basic
+    pytest-pdb-break-test-main-command-outside
     pytest-pdb-break-test-main-command-send-string
     pytest-pdb-break-test-main-command-completion
     pytest-pdb-break-test-run-fail-compilation-filter
@@ -789,7 +790,20 @@ class TestFoo:
         def test_f():
             return 3
         assert test_f()
-")
+"
+    "
+import pytest
+
+@pytest.fixture
+def fixie():
+    somevar = 1
+    yield somevar
+    del somevar
+
+def test_foo(fixie):
+    assert fixie == 1
+"
+    )
   "The first line (1) is a single newline char.")
 
 (ert-deftest pytest-pdb-break-test-call-helper-json ()
@@ -1509,6 +1523,26 @@ SRCFILE is the filename to save the src element as."
                (search-backward-regexp ">.*\\.py(4)test_foo()$" nil t))))
    (comint-send-string pytest-pdb-break--process "c\n")
    (should (pytest-pdb-break-test--expect-simple "finished\n.*"))))
+
+(ert-deftest pytest-pdb-break-test-main-command-outside ()
+  ;; Eval: (compile "make PAT=main-command-outside")
+  ;; Eval: (compile "make debug PAT=main-command-outside")
+  (skip-unless (null pytest-pdb-break-test-skip-plugin))
+  (let (called-with)
+    (advice-add 'pytest-pdb-break--prompt-for-test-item
+                :before
+                (lambda (&rest r) (push r called-with)) '((name . wrapped)))
+    (unwind-protect
+        (pytest-pdb-break--main-command-fixture
+         3 "test_fixture.py" "somevar = 1"
+         (ert-info ("Break before yield")
+           (should (save-excursion
+                     (search-backward-regexp ">.*\\.py(6)fixie()$" nil t))))
+         (comint-send-string pytest-pdb-break--process "c\n")
+         (should (equal (car called-with) (list nil $pyexe)))
+         (unless $debuggin?
+           (should (pytest-pdb-break-test--expect-simple "finished\n.*"))))
+      (advice-remove 'pytest-pdb-break--prompt-for-test-item 'wrapped))))
 
 (ert-deftest pytest-pdb-break-test-main-command-send-string ()
   "Test compatibility of `python.el''s string-sending functions."
