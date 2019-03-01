@@ -62,22 +62,23 @@ def _main():
         args = pargs.args
         kwargs = {}
 
-    logfile = os.getenv("PYTEST_PDB_BREAK_INSTALL_LOGFILE")
     ec = 0
-    if logfile:
-        with open(logfile, "w") as flow:
-            common.SUBOUT = flow
+    logfile = os.getenv("PYTEST_PDB_BREAK_INSTALL_LOGFILE")
+    try:
+        if logfile:
+            common.SUBOUT = open(logfile, "w")
             common.SUBERR = subprocess.STDOUT
-            rv = pargs.cmd(*args, **kwargs)
-    else:
-        try:
-            rv = pargs.cmd(*args, **kwargs)
-        except Exception:
-            from traceback import format_exception, format_exception_only
-            et, val, tb = sys.exc_info()
-            rv = dict(error=format_exception_only(et, val)[0].strip(),
-                      traceback=format_exception(et, val, tb))
-            ec = 1
+        # So far, no need to capture/divert stdout/stderr with --json
+        rv = pargs.cmd(*args, **kwargs)
+    except Exception:
+        from traceback import format_exception, format_exception_only
+        et, val, tb = sys.exc_info()
+        rv = dict(error=format_exception_only(et, val)[0].strip(),
+                  traceback=format_exception(et, val, tb))
+        ec = 1
+    finally:
+        if logfile:
+            common.SUBOUT.close()
 
     sep = "\x00" if pargs.null else "\n"
 
