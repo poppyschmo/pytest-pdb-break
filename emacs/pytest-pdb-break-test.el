@@ -1431,30 +1431,34 @@ Use \\' for end of string, and $ for end of line."
   (should-not pytest-pdb-break--options-history))
 
 (defmacro pytest-pdb-break-test--inferior-python-setup-fixture (&rest body)
-  "Run BODY with common setup."
+  "Run BODY with common python shell setup.
+Bind vars `$sources', `$start-dir', `$debuggin?'."
   `(pytest-pdb-break-test-ensure-venv
     'base
-    (let ((sample-source (nth 1 pytest-pdb-break-test--get-node-id-sources))
+    (let (($sources pytest-pdb-break-test--get-node-id-sources)
           (python-shell-virtualenv-root $venv)
           (python-shell-interpreter $pyexe)
           (pytest-pdb-break--setup-code-addendum nil)
           (pytest-pdb-break-processes (append pytest-pdb-break-processes nil))
           ($debuggin? (pytest-pdb-break-test-invoked-with-debug-p))
-          (start-dir default-directory)
+          ($start-dir default-directory)
           (inhibit-message t)
           case-fold-search)
       (pytest-pdb-break-test-with-python-buffer
        ,@body))))
 
-(defmacro pytest-pdb-break--main-command-fixture (linepat &rest body)
-  "Run main command assertions in BODY from LINEPAT."
+(defmacro pytest-pdb-break--main-command-fixture (srcdex srcfile linepat
+                                                         &rest body)
+  "Run main command assertions in BODY from LINEPAT.
+SRCDEX is an index of `pytest-pdb-break-test--get-node-id-sources'.
+SRCFILE is the filename to save the src element as."
   `(pytest-pdb-break-test--inferior-python-setup-fixture
-    (insert sample-source)
-    (write-file "test_class.py")
+    (insert (nth ,srcdex $sources))
+    (write-file ,srcfile)
     (should ($get-there ,linepat))
     (call-interactively 'pytest-pdb-break-here)
-    (should (get-buffer "*pytest-PDB[test_class.py]*"))
-    (with-current-buffer "*pytest-PDB[test_class.py]*"
+    (should (get-buffer ,(format "*pytest-PDB[%s]*" srcfile)))
+    (with-current-buffer ,(format "*pytest-PDB[%s]*" srcfile)
       (advice-add 'ding :override (lambda (&rest _r) (ignore))
                   '((name . neuter)))
       (unwind-protect
@@ -1464,7 +1468,7 @@ Use \\' for end of string, and $ for end of line."
             (should pytest-pdb-break--process)
             (should (local-variable-p 'pytest-pdb-break--parent-buffer))
             (should (eq pytest-pdb-break--parent-buffer
-                        (get-buffer "test_class.py")))
+                        (get-buffer ,srcfile)))
             (should (pytest-pdb-break-test--expect-simple "(Pdb) "))
             ,@body
             (should-not (get-buffer "*Warnings*")))
@@ -1475,7 +1479,7 @@ Use \\' for end of string, and $ for end of line."
             (insert (format "debuggin?: %S\n"
                             (pytest-pdb-break-test-invoked-with-debug-p)))
             (insert cap)
-            (write-file (expand-file-name "cap.out" start-dir))))
+            (write-file (expand-file-name "cap.out" $start-dir))))
         ;; Keep buffer open for inspection when running interactively
         (unless $debuggin?
           (when (process-live-p pytest-pdb-break--process)
@@ -1492,14 +1496,14 @@ Use \\' for end of string, and $ for end of line."
   ;; Eval: (compile "make PAT=main-command-min-version")
   (skip-unless pytest-pdb-break-test-skip-plugin)
   (let ((exc (should-error (pytest-pdb-break--main-command-fixture
-                            "assert True" (ignore)))))
+                            1 "test_class.py" "assert True" (ignore)))))
     (should (string-match-p "Python version.*less than.*" (cadr exc)))))
 
 (ert-deftest pytest-pdb-break-test-main-command-basic ()
   ;; Eval: (compile "make PAT=main-command-basic")
   (skip-unless (null pytest-pdb-break-test-skip-plugin))
   (pytest-pdb-break--main-command-fixture
-   "assert True"
+   1 "test_class.py" "assert True"
    (ert-info ("Break in first method")
      (should (save-excursion  ; already at prompt, so must search back
                (search-backward-regexp ">.*\\.py(4)test_foo()$" nil t))))
@@ -1514,7 +1518,7 @@ Use \\' for end of string, and $ for end of line."
   ;; XXX prompt is not filtered and appears before output; but when
   ;; interacting with a live Emacs instance, this doesn't happen
   (pytest-pdb-break--main-command-fixture
-   "assert True"
+   1 "test_class.py" "assert True"
    (cl-flet (($expect (pat) (pytest-pdb-break-test--expect-last
                              pytest-pdb-break--process pat)))
      (ert-info ("Break in first method")
@@ -1630,7 +1634,7 @@ TestFoo.test_bar(), starting at line 9."
   ;; Eval: (compile "make debug PAT=main-command-completion")
   (skip-unless (null pytest-pdb-break-test-skip-plugin))
   (pytest-pdb-break--main-command-fixture
-   "# comment"
+   1 "test_class.py" "# comment"
    (should (member 'python-shell-completion-at-point
                    completion-at-point-functions))
    (ert-info ("Break in second method")
@@ -1648,7 +1652,7 @@ The main pytest plugin requires 3.6+, but the minor-mode shouldn't."
   ;; Eval: (compile "make debug PAT=completion-compat")
   (pytest-pdb-break-test--inferior-python-setup-fixture
    ;; No -m option in pdb.main <3.7, i.e., can't just -m this
-   (insert sample-source "\n\nTestFoo().test_bar()")
+   (insert (nth 1 $sources) "\n\nTestFoo().test_bar()")
    (write-file "test_one.py")
    (with-temp-file ".pdbrc"
      (insert "b 9\nc\n"))
@@ -1672,7 +1676,7 @@ The main pytest plugin requires 3.6+, but the minor-mode shouldn't."
                       (lambda nil (not (process-live-p $proc))))))
          (unless $debuggin?
            (advice-remove 'ding 'neuter)
-           (setq default-directory start-dir)
+           (setq default-directory $start-dir)
            (write-file "capped.out")
            (when (process-live-p pytest-pdb-break--process)
              (set-process-query-on-exit-flag pytest-pdb-break--process nil)
@@ -1803,7 +1807,7 @@ The main pytest plugin requires 3.6+, but the minor-mode shouldn't."
   ;; Eval: (compile "make PAT=run-fail-stay")
   ;; Eval: (compile "make debug PAT=run-fail-stay")
   (pytest-pdb-break-test--inferior-python-setup-fixture
-   (insert sample-source)
+   (insert (nth 1 $sources))
    (write-file "test_class.py")
    (should ($get-there "assert True"))
    (call-interactively 'pytest-pdb-break-run-fail)
@@ -1825,7 +1829,7 @@ The main pytest plugin requires 3.6+, but the minor-mode shouldn't."
            (insert (format "debuggin?: %S\n"
                            (pytest-pdb-break-test-invoked-with-debug-p)))
            (insert cap)
-           (write-file (expand-file-name "cap.out" start-dir))))
+           (write-file (expand-file-name "cap.out" $start-dir))))
        ;; Keep buffer open for inspection when running interactively
        (unless $debuggin?
          (when (process-live-p pytest-pdb-break--process)
@@ -1838,7 +1842,7 @@ The main pytest plugin requires 3.6+, but the minor-mode shouldn't."
   ;; Eval: (compile "make debug PAT=run-fail-switch")
   (pytest-pdb-break-test--inferior-python-setup-fixture
    (insert (replace-regexp-in-string "assert True" "assert False"
-                                     sample-source))
+                                     (nth 1 $sources)))
    (write-file "test_class.py")
    (should ($get-there "assert False"))
    (call-interactively 'pytest-pdb-break-run-fail)
@@ -1864,7 +1868,7 @@ The main pytest plugin requires 3.6+, but the minor-mode shouldn't."
            (insert (format "debuggin?: %S\n"
                            (pytest-pdb-break-test-invoked-with-debug-p)))
            (insert cap)
-           (write-file (expand-file-name "cap.out" start-dir))))
+           (write-file (expand-file-name "cap.out" $start-dir))))
        ;; Keep buffer open for inspection when running interactively
        (unless $debuggin?
          (when (process-live-p pytest-pdb-break--process)
