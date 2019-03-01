@@ -25,7 +25,7 @@
 ;; the "extras" file should support 3.5.
 ;;
 ;; TODO:
-;; - Fixture breaking
+;; - Smarten up test-items prompter
 ;; - Option-name completions (would require external helper)
 ;; - Tramp
 ;;
@@ -282,6 +282,30 @@ Return a json object or dump traceback and raise."
       (error "Call to %s %s exited %s" script command ec))
     data))
 
+(defun pytest-pdb-break--prompt-for-test-item (session-opts
+                                               &optional interpreter)
+  "Prompt for a test item and return it as node-id components.
+SESSION-OPTS are as required by the main command.  Use INTERPRETER if
+provided."
+  (unless interpreter
+    (setq interpreter (pytest-pdb-break-get-python-interpreter
+                       (pytest-pdb-break-get-pytest-executable))))
+  (let* ((items (apply #'pytest-pdb-break--call-helper-json
+                       interpreter "get_collected"
+                       (append pytest-pdb-break-extra-opts session-opts)))
+         (by-file (seq-group-by (lambda (e) (plist-get e :file)) items))
+         (file (if (cdr by-file) (completing-read "File: " by-file)
+                 (caar by-file)))
+         (files (cdr (assoc file by-file)))
+         (by-name (seq-group-by (lambda (e) (plist-get e :name)) files))
+         (name (if (cdr by-name) (completing-read "Test: " by-name)
+                 (caar by-name)))
+         (item (cadr (assoc name by-name)))
+         (out (list (plist-get item :func_name)))
+         (cls (plist-get item :class_name)))
+    (when cls (push cls out))
+    (push (plist-get item :file) out)))
+
 (define-error 'pytest-pdb-break-test-not-found "Test not found" 'error)
 
 (defun pytest-pdb-break--get-node-id ()
@@ -301,10 +325,17 @@ Return a json object or dump traceback and raise."
       (signal 'pytest-pdb-break-test-not-found (list test)))
     (cons buffer-file-name parts)))
 
-(defun pytest-pdb-break--get-args (session-opts breakpoint node-id-parts)
+(defun pytest-pdb-break--get-args (session-opts breakpoint node-id-parts
+                                                &optional interpreter)
   "Generate arguments for the pytest subprocess.
 SESSION-OPTS, BREAKPOINT, and NODE-ID-PARTS are as required by the main
-command, `pytest-pdb-break-here' (which see)."
+command, `pytest-pdb-break-here' (which see).  INTERPRETER is passed
+along to the test-item prompter."
+  (unless breakpoint
+    (setq breakpoint (line-number-at-pos)))
+  (unless node-id-parts
+    (setq node-id-parts (pytest-pdb-break--prompt-for-test-item session-opts
+                                                                interpreter)))
   (let ((nodeid (mapconcat #'identity node-id-parts "::"))
         (break (format "--break=%s:%s"
                        (or (car-safe breakpoint) (car node-id-parts))
@@ -489,7 +520,12 @@ determined by `pytest-pdb-break-options-function'."
                    current-prefix-arg))
          nil nil))
   ;; As per (info "(elisp) Programming Tips"), the "repetition" thing
-  (unless node-id-parts (setq node-id-parts (pytest-pdb-break--get-node-id)))
+  (unless node-id-parts
+    (condition-case exc
+        (setq node-id-parts (pytest-pdb-break--get-node-id))
+      ;; Should maybe just pass the buck (plugin may fare better)
+      (pytest-pdb-break-test-not-found (unless (cadr exc)
+                                         (signal (car exc) (cdr exc))))))
   (let* ((process-environment (append process-environment nil))
          (proc-name (pytest-pdb-break--get-proc-name))
          (pytest-exe (pytest-pdb-break-get-pytest-executable))
@@ -505,10 +541,8 @@ determined by `pytest-pdb-break-options-function'."
                    python-shell-extra-pythonpaths))
           ;; Make pdb++ prompt trigger non-native-completion fallback
           (python-shell-prompt-pdb-regexp pytest-pdb-break-prompt-regexp)
-          (args (pytest-pdb-break--get-args session-opts
-                                            (or breakpoint
-                                                (line-number-at-pos))
-                                            node-id-parts))
+          (args (pytest-pdb-break--get-args session-opts breakpoint
+                                            node-id-parts pyexe))
           ;; Triggers local-while-let-bound warning in 25.x
           (python-shell--parent-buffer (current-buffer))
           ;; Ensure `python-shell-prompt-detect' doesn't use ipython, etc.
@@ -519,15 +553,15 @@ determined by `pytest-pdb-break-options-function'."
         ;; Allow "calculate-" funcs to consider "python-shell-" options and
         ;; modify process-environment and exec-path accordingly
         (python-shell-with-environment
-         (setq buffer (apply #'make-comint-in-buffer proc-name nil
-                             pytest-exe nil args))
-         ;; Only python- prefixed local vars get cloned in child buffer
-         (with-current-buffer buffer
-           (inferior-python-mode)
-           (setq pytest-pdb-break--process (get-buffer-process buffer)
-                 pytest-pdb-break--parent-buffer python-shell--parent-buffer)
-           (pytest-pdb-break-mode +1))
-         (display-buffer buffer))))))
+          (setq buffer (apply #'make-comint-in-buffer proc-name nil
+                              pytest-exe nil args))
+          ;; Only python- prefixed local vars get cloned in child buffer
+          (with-current-buffer buffer
+            (inferior-python-mode)
+            (setq pytest-pdb-break--process (get-buffer-process buffer)
+                  pytest-pdb-break--parent-buffer python-shell--parent-buffer)
+            (pytest-pdb-break-mode +1))
+          (display-buffer buffer))))))
 
 
 (provide 'pytest-pdb-break)

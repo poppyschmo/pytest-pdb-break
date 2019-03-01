@@ -33,6 +33,7 @@
     pytest-pdb-break-test-extract-shebang
     pytest-pdb-break-test-get-python-interpreter
     pytest-pdb-break-test-call-helper-json
+    pytest-pdb-break-test-prompt-for-test-item
     pytest-pdb-break-test-get-node-id
     pytest-pdb-break-test-get-args
     pytest-pdb-break-test-get-modified-setup-code
@@ -826,6 +827,76 @@ class TestFoo:
          (kill-buffer pytest-pdb-break--errors-buffer-name))))
    (unless (pytest-pdb-break-test-invoked-with-debug-p)
      (should-not (get-buffer pytest-pdb-break--errors-buffer-name)))))
+
+(ert-deftest pytest-pdb-break-test-prompt-for-test-item ()
+  ;; Eval: (compile "make PAT=prompt-for-test-item")
+  ;; Eval: (compile "make debug PAT=prompt-for-test-item")
+  (skip-unless (null pytest-pdb-break-test-skip-plugin))
+  (pytest-pdb-break-test-ensure-venv
+   'base
+   (dotimes (n 3)
+     (with-temp-file (format "test_s%d.py" n)
+       (insert (nth n pytest-pdb-break-test--get-node-id-sources))))
+   (add-hook 'term-mode-hook (lambda () (term-reset-size 20 120)))
+   (let* ((logfile (file-truename "ert.out")) ; must be bound here
+          ;; When called interactively, CWD reverts to this project's lisp dir
+          (src `(progn (require 'pytest-pdb-break)
+                       (push ,$venvbin exec-path)
+                       (setq enable-recursive-minibuffers t)
+                       (with-current-buffer (messages-buffer)
+                         (setq default-directory ,default-directory))))
+          (args (list "-Q" "-nw" "-L" pytest-pdb-break-test-lisp-root
+                      "--eval" (format "%S" src)))
+          (buf (apply #'make-term "ert-term" "emacs" nil args))
+          (proc (get-buffer-process buf)))
+     (with-current-buffer buf
+       (unwind-protect
+           (ert-info ("Term subprocess")
+             (term-char-mode)
+             (goto-char (process-mark proc))
+             (term-send-raw-string "\C-x\C-f:")
+             (should (pytest-pdb-break-test--expect-simple "Find file.*/?"))
+             (term-send-raw-string "test_s0.py\n")
+             (term-send-raw-string "\e>")
+             (ert-info ("Files prompt")
+               (term-send-raw-string "\e:")
+               (should (pytest-pdb-break-test--expect-simple "Eval: ?"))
+               (term-send-string
+                proc "(pytest-pdb-break--prompt-for-test-item nil)\n")
+               (ert-info ("Common prefix autocompletes")
+                 (should (pytest-pdb-break-test--expect-simple "File: ?"))
+                 (term-send-string proc "\t")
+                 (should (pytest-pdb-break-test--expect-simple "/test_s ?")))
+               (ert-info ("Completions buffer on tab")
+                 (term-send-string proc "\t")
+                 (term-send-raw-string "\e:")
+                 (should (pytest-pdb-break-test--expect-simple "Eval: ?"))
+                 (term-send-string proc "(get-buffer \"*Completions*\")\n")
+                 (should (pytest-pdb-break-test--expect-simple "/test_s ?"))
+                 (term-send-string proc "1.py\n"))
+               (ert-info ("Test prompt")
+                 (should (pytest-pdb-break-test--expect-simple "Test: ?"))
+                 (term-send-string proc "\t\t")
+                 (should (pytest-pdb-break-test--expect-simple "\\.test_"))
+                 (term-send-string proc "f\t")
+                 (should (pytest-pdb-break-test--expect-simple "test_foo"))
+                 (term-send-string proc "\n"))
+               (ert-info ("Check return value")
+                 (term-send-raw-string "\e:")
+                 (should (pytest-pdb-break-test--expect-simple "Eval: ?"))
+                 (term-send-string proc
+                                   "(switch-to-buffer (messages-buffer))\n")
+                 (term-send-raw-string "\e>")
+                 (should (pytest-pdb-break-test--expect-simple "Mark set\n.*"))
+                 (term-line-mode)
+                 (should (search-backward-regexp
+                          "/test_s1.*TestFoo.*[[:space:]]*.*test_foo"))))
+             (term-send-raw-string "\C-x\C-c")
+             (should (pytest-pdb-break-test--timeout
+                      (lambda nil (not (process-live-p proc))))))
+         (unless (pytest-pdb-break-test-invoked-with-debug-p)
+           (write-file logfile)
+           (kill-buffer buf)))))))
 
 (ert-deftest pytest-pdb-break-test-get-node-id ()
   ;; Eval: (compile "make PAT=get-node-id")
