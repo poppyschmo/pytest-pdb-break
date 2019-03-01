@@ -181,10 +181,10 @@ Use INTERPRETER or `python-shell-interpreter' to run the helper script."
                                           script "install_plugin" name)
       (setq pytest-pdb-break--isolated name))))
 
-(defun pytest-pdb-break--maybe-add-to-alist (func key alist-symbol force)
-  "Call FUNC with KEY and add result to ALIST-SYMBOL under KEY.
+(defun pytest-pdb-break--maybe-add-to-alist (func key alist-var force)
+  "Call FUNC with KEY and add result to ALIST-VAR under KEY.
 With FORCE, update the list."
-  (let* ((entry (assoc key (symbol-value alist-symbol)))
+  (let* ((entry (assoc key (symbol-value alist-var)))
          (value (cdr entry)))
     (if (and (not force) value)
         value
@@ -192,10 +192,10 @@ With FORCE, update the list."
           (setq value (funcall func key))
         (error
          (when entry
-           (set alist-symbol (delete entry (symbol-value alist-symbol))))
+           (set alist-var (delete entry (symbol-value alist-var))))
          (signal (car err) (cdr err))))
       (unless entry
-        (push (setq entry (list key)) (symbol-value alist-symbol)))
+        (push (setq entry (list key)) (symbol-value alist-var)))
       (setcdr entry value))))
 
 (defvar pytest-pdb-break--versions-alist nil)
