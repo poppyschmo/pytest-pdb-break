@@ -154,15 +154,22 @@ This should be an absolute path ending in a slash and point to a proper
     (add-hook 'kill-emacs-hook #'pytest-pdb-break--on-kill-emacs))
   pytest-pdb-break--tempdir)
 
-(defun pytest-pdb-break--call-interpreter (exe &rest args)
-  "Call Python EXE synchronously with ARGS.  Return stdout."
+(defun pytest-pdb-break--call-interpreter (exe &optional no-error &rest args)
+  "Call Python EXE synchronously with ARGS.  Return stdout.
+If NO-ERROR is a non-nil symbol like t, return a cons of (EC . STDOUT).
+This is mainly useful for json objects."
+  (unless (and no-error (symbolp no-error))
+    (push no-error args) (setq no-error nil))
   (let (ec)
     (with-temp-buffer
-      (unless (zerop (setq ec (apply #'call-process exe nil
-                                     (current-buffer) nil args)))
+      (unless (or (zerop (setq ec (apply #'call-process exe nil
+                                         (current-buffer) nil args)))
+                  no-error)
         (pytest-pdb-break--dump-internal-error (buffer-string))
         (error "Call to %S exited %d" (cons exe args) ec))
-      (buffer-string))))
+      (if no-error
+          (cons ec (buffer-string))
+        (buffer-string)))))
 
 (defun pytest-pdb-break-get-isolated (&optional interpreter)
   "Return path to an isolated plugin installation.
