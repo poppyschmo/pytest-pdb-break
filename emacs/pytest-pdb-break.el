@@ -215,25 +215,38 @@ Returns version string."
 
 (defvar pytest-pdb-break--exe-alist nil)
 
-;; TODO accommodate pyenv shims -> "/usr/bin/env bash"
 (defun pytest-pdb-break--extract-shebang (pytest-exe)
   "Extract PYTEST-EXE's shebanged interpreter."
   (with-temp-buffer
     (insert-file-contents-literally pytest-exe)
     (goto-char (point-min))
-    (let (maybe)
-      (if (and (looking-at "#!\\(.+\\)")  ; till newline
-               (setq maybe (match-string-no-properties 1))
-               (file-executable-p maybe))
-          maybe
-        (error "Cannot find interpreter for pytest exe %S" pytest-exe)))))
+    (let ((found (and (looking-at "#!\\(.+\\)")  ; till newline
+                      (match-string-no-properties 1)))
+          case-fold-search rv ec)
+      (cond
+       ((and found (file-executable-p found)) found)  ; setuptools entrypoint
+       ((and found (string-match-p "/env bash\\'" found)  ; pyenv, UNIX only
+             (save-excursion (search-forward "PYENV")))
+        (setq rv (string-trim-right
+                  (with-output-to-string
+                    (setq ec (call-process "pyenv" nil standard-output nil
+                                           "which" "pytest")))))
+        ;; leave pytest-exe as is, just redirect via cdr
+        (if (and (zerop ec) (file-executable-p rv)
+                 (string-match-p "/pytest\\'" rv))
+            (pytest-pdb-break--extract-shebang rv)
+          (pytest-pdb-break--dump-internal-error
+           (format "extract-shebang ec: %s, rv: %s" ec rv))
+          (error "Cannot handle pyenv shim %s" pytest-exe)))
+       (t (pytest-pdb-break--dump-internal-error
+           (format "extract-shebang found: %s" found))  ; likely a bug
+          (error "Cannot find interpreter for pytest exe %S" pytest-exe))))))
 
 (defun pytest-pdb-break-get-python-interpreter (pytest-exe &optional force)
   "Return PYTEST-EXE's interpreter.  With FORCE, update existing."
   (pytest-pdb-break--maybe-add-to-alist
    'pytest-pdb-break--extract-shebang
    pytest-exe 'pytest-pdb-break--exe-alist force))
-
 
 (define-error 'pytest-pdb-break-test-not-found "Test not found" 'error)
 

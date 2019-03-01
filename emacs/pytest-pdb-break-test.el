@@ -30,6 +30,7 @@
     pytest-pdb-break-test-get-isolated
     pytest-pdb-break-test-get-pytest-executable
     pytest-pdb-break-test-get-interpreter-version
+    pytest-pdb-break-test-extract-shebang
     pytest-pdb-break-test-get-python-interpreter
     pytest-pdb-break-test-get-node-id
     pytest-pdb-break-test-get-args
@@ -647,6 +648,39 @@ if this is a sound choice)."
          (should (version< rv "4.0")))))
    (should-not pytest-pdb-break--versions-alist)))
 
+(defun pytest-pdb-break-test--remove-pytest-pyenv ()
+  "Return exec path without pytest or pyenv bins."
+  (seq-filter (lambda (p)
+                (let ((exec-path (list p)))
+                  (not (or (executable-find "pyenv")
+                           (executable-find "pytest")))))
+              exec-path))
+
+(ert-deftest pytest-pdb-break-test-extract-shebang ()
+  ;; Eval: (compile "make PAT=extract-shebang-pyenv-shim")
+  (pytest-pdb-break-test-with-tmpdir
+   (let* ((pyenv-libexec (concat default-directory "pyenv-libexec/"))
+          (versions-bin (concat default-directory "versions-bin/"))
+          (fake-pyenv (concat pyenv-libexec "pyenv"))
+          (pytest-exe (concat versions-bin "pytest"))
+          (exec-path (cons (directory-file-name pyenv-libexec)
+                           (pytest-pdb-break-test--remove-pytest-pyenv)))
+          (real-python (executable-find "python"))
+          (shim (concat default-directory "shim")))
+     (mkdir pyenv-libexec)
+     (mkdir versions-bin)
+     (with-temp-file "shim"
+       (insert "#!/usr/bin/env bash\nset -e\nexport PYENV_ROOT"))
+     (with-temp-file fake-pyenv
+       (insert (format "#!/bin/sh\necho %s" pytest-exe))) ; want newline
+     (with-temp-file pytest-exe
+       (insert "#!" real-python "\n\n# -*- coding: utf-8 -*-\nimport re\n"))
+     (chmod shim #o0700)
+     (chmod fake-pyenv #o0700)
+     (chmod pytest-exe #o0700)
+     (should (string= (pytest-pdb-break--extract-shebang shim)
+                      real-python)))))
+
 (ert-deftest pytest-pdb-break-test-get-python-interpreter ()
   ;; Eval: (compile "make PAT=get-python-interpreter")
   (pytest-pdb-break-test-ensure-venv
@@ -689,7 +723,7 @@ if this is a sound choice)."
    (ert-info ("Real match returned successfully")
      (let* ((python-shell-virtualenv-root $venv)
             (pytest-exe (python-shell-with-environment
-                         (executable-find "pytest")))
+                          (executable-find "pytest")))
             rv)
        (should (file-executable-p pytest-exe))
        (setq rv (pytest-pdb-break-get-python-interpreter pytest-exe))
