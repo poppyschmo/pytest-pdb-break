@@ -84,6 +84,8 @@ Notes/caveats
            -> assert True  # line 42
            (pdb) _
 
+       (assuming the target line opens with a new statement)
+
     #. When hacking on the main pytest plugin, disregard the imperative above
        and *do install*:
 
@@ -110,6 +112,5 @@ Notes/caveats
 
 
 TODOs
-    #. External helper returning machine-readable locations of collected items
-    #. External helper returning ``--options`` list for invocation completion
+    #. External helper returning ``--options`` list
     #. ``asyncio``
