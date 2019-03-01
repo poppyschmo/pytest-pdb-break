@@ -79,7 +79,7 @@ info)."
   "List of processes belonging to a \"pytestPDB\" buffer.
 Actually, this is any buffer with the minor mode is currently enabled.")
 
-(defvar pytest-pdb-break--errors-buffer-name "pytest-PDB-errors")
+(defvar pytest-pdb-break--errors-buffer-name "*pytest-PDB-errors*")
 
 (defun pytest-pdb-break--dump-internal-error (long-msg)
   "Print LONG-MSG to own buffer instead of *Messages*."
