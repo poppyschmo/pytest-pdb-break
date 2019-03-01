@@ -35,6 +35,7 @@
 (require 'find-func)
 (require 'subr-x)
 (require 'python)
+(require 'json)
 
 (defgroup pytest-pdb-break nil
   "Emacs integration for the pytest plugin of the same name."
@@ -254,6 +255,32 @@ Returns version string."
   (pytest-pdb-break--maybe-add-to-alist
    'pytest-pdb-break--extract-shebang
    pytest-exe 'pytest-pdb-break--exe-alist force))
+
+(defun pytest-pdb-break--call-helper-json (interpreter command &rest args)
+  "Run helper COMMAND in INTERPRETER with ARGS.
+Return a json object or dump traceback and raise."
+  (let* ((home (or pytest-pdb-break--py-home (pytest-pdb-break--homer)))
+         (script (concat home "helpers/main.py"))
+         (raw (apply #'pytest-pdb-break--call-interpreter
+                     interpreter 'no-error script "--json" command "--"
+                     (append pytest-pdb-break-extra-opts args)))
+         (ec (car raw))
+         (rv (cdr raw))
+         (json-object-type 'plist)
+         (json-array-type 'list)
+         (data (condition-case err
+                   (json-read-from-string rv)
+                 (error (pytest-pdb-break--dump-internal-error
+                         (format "get-test-items ec: %s, rv: %s" ec rv))
+                        (signal (car err) (cdr err))))))
+    (unless (zerop ec)
+      (cl-assert (json-plist-p data) t)
+      (pytest-pdb-break--dump-internal-error
+       (format "get-test-items error: %s\n%s"
+               (plist-get data :error)
+               (string-join (plist-get data :traceback) "")))
+      (error "Call to %s %s exited %s" script command ec))
+    data))
 
 (define-error 'pytest-pdb-break-test-not-found "Test not found" 'error)
 

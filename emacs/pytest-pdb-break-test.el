@@ -32,6 +32,7 @@
     pytest-pdb-break-test-get-interpreter-version
     pytest-pdb-break-test-extract-shebang
     pytest-pdb-break-test-get-python-interpreter
+    pytest-pdb-break-test-call-helper-json
     pytest-pdb-break-test-get-node-id
     pytest-pdb-break-test-get-args
     pytest-pdb-break-test-get-modified-setup-code
@@ -711,14 +712,19 @@ if this is a sound choice)."
        (setq exc (should-error (pytest-pdb-break-get-python-interpreter
                                 pytest-exe)))
        (should-not pytest-pdb-break--exe-alist)
-       (should (string-match-p "Cannot find.*" (cadr exc))))
+       (should (string-match-p "Cannot find.*" (cadr exc)))
+       (should (get-buffer pytest-pdb-break--errors-buffer-name))
+       (kill-buffer pytest-pdb-break--errors-buffer-name))
      (push (list pytest-exe) pytest-pdb-break--exe-alist)
      (with-temp-file python-exe (insert "#!/bin/true\n"))
      (ert-info ("Not executable, bad entry cleared from alist")
        (setq exc (should-error (pytest-pdb-break-get-python-interpreter
                                 pytest-exe)))
        (should-not pytest-pdb-break--exe-alist)
-       (should (string-match-p "Cannot find.*" (cadr exc))))
+       (should (string-match-p "Cannot find.*" (cadr exc)))
+       (should (get-buffer pytest-pdb-break--errors-buffer-name))
+       (kill-buffer pytest-pdb-break--errors-buffer-name))
+     (should-not (get-buffer pytest-pdb-break--errors-buffer-name))
      (chmod python-exe #o0700)
      (ert-info ("Mocked path returned when target is executable")
        (should (string= python-exe (pytest-pdb-break-get-python-interpreter
@@ -744,7 +750,8 @@ if this is a sound choice)."
        (should (file-executable-p pytest-exe))
        (setq rv (pytest-pdb-break-get-python-interpreter pytest-exe))
        (ert-info ("Matches verified")
-         (should (string= rv $pyexe)))))))
+         (should (string= rv $pyexe)))))
+   (should-not (get-buffer pytest-pdb-break--errors-buffer-name))))
 
 (defvar pytest-pdb-break-test--get-node-id-sources
   '("
@@ -783,6 +790,42 @@ class TestFoo:
         assert test_f()
 ")
   "The first line (1) is a single newline char.")
+
+(ert-deftest pytest-pdb-break-test-call-helper-json ()
+  ;; Eval: (compile "make PAT=call-helper-json")
+  ;; Eval: (compile "make debug PAT=call-helper-json")
+  (pytest-pdb-break-test-ensure-venv
+   'base
+   (dotimes (n 3)
+     (with-temp-file (format "test_s%d.py" n)
+       (insert (nth n pytest-pdb-break-test--get-node-id-sources))))
+   (ert-info ("Call get_node_ids")
+     (should-not (get-buffer pytest-pdb-break--errors-buffer-name))
+     (let* ((data (pytest-pdb-break--call-helper-json $pyexe "get_node_ids")))
+       (should (equal "test_s0.py::test_foo" (nth 0 data)))))
+   (unless pytest-pdb-break-test-skip-plugin
+     (ert-info ("Call get_collected")
+       (should-not (get-buffer pytest-pdb-break--errors-buffer-name))
+       (let* ((data (pytest-pdb-break--call-helper-json $pyexe
+                                                        "get_collected")))
+         (should (equal `(:file ,(concat default-directory "test_s0.py")
+                                :lnum 2
+                                :name "test_foo"
+                                :class_name nil
+                                :func_name "test_foo"
+                                :param_id nil
+                                :nodeid "test_s0.py::test_foo")
+                        (nth 0 data))))))
+   (ert-info ("Call get_node_ids, pytest error")
+     (should-not (get-buffer pytest-pdb-break--errors-buffer-name))
+     (let* ((exc (should-error (pytest-pdb-break--call-helper-json
+                                $pyexe "get_node_ids" "--bad-option"))))
+       (should (string-match-p "Call to.*exited [[:digit:]]+" (cadr exc)))
+       (should (get-buffer pytest-pdb-break--errors-buffer-name))
+       (unless (pytest-pdb-break-test-invoked-with-debug-p)
+         (kill-buffer pytest-pdb-break--errors-buffer-name))))
+   (unless (pytest-pdb-break-test-invoked-with-debug-p)
+     (should-not (get-buffer pytest-pdb-break--errors-buffer-name)))))
 
 (ert-deftest pytest-pdb-break-test-get-node-id ()
   ;; Eval: (compile "make PAT=get-node-id")
