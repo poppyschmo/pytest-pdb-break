@@ -426,7 +426,7 @@ DIR-BODY sets up build dir.  INFO-MSG is passed to `ert-info'."
   ;; Eval: (compile "make PAT=homer-symlink")
   (pytest-pdb-break-test-homer-setup-fixture
    (ert-info ("Subproc")
-     (should-not (fboundp 'ffip-project-root))
+     (should-not (file-symlink-p pytest-pdb-break--this-file))
      (should (file-symlink-p (find-library-name "pytest-pdb-break")))
      (should (file-symlink-p (find-library-name "pytest-pdb-break-extra")))
      (pytest-pdb-break-test-homer-repo-fixture))

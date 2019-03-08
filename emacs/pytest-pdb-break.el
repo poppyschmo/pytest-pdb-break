@@ -32,7 +32,6 @@
 
 ;;; Code:
 
-(require 'find-func)
 (require 'subr-x)
 (require 'python)
 (require 'json)
@@ -78,7 +77,7 @@ info)."
 
 (defvar pytest-pdb-break-processes nil
   "List of processes belonging to a \"pytestPDB\" buffer.
-Actually, this is any buffer with the minor mode is currently enabled.")
+Actually, this is any buffer with the minor mode currently enabled.")
 
 (defvar pytest-pdb-break--errors-buffer-name "*pytest-PDB-errors*")
 
@@ -92,13 +91,15 @@ Actually, this is any buffer with the minor mode is currently enabled.")
 (defvar pytest-pdb-break--py-home nil
   "Directory containing the pytest plugin's source and non-el scripts.")
 
+(defconst pytest-pdb-break--this-file load-file-name)
+
 (defun pytest-pdb-break--homer (&optional this-file)
   "Return the directory containing the plugin's setup.py script.
 And store the result in `pytest-pdb-break--py-home' as an absolute path
 with trailing sep.  The likeliest locations are the root of the cloned
 repo or a \"lib\" subtree of the installed package. THIS-FILE is used as
 a starting point, if provided."
-  (let* ((this (or this-file (find-library-name "pytest-pdb-break")))
+  (let* ((this (or this-file pytest-pdb-break--this-file))
          (parent/ (file-name-directory this))
          (lib/? (file-name-as-directory (expand-file-name "lib" parent/))))
     (cond
@@ -108,7 +109,10 @@ a starting point, if provided."
            (setq lib/? (file-name-directory (directory-file-name parent/)))
            (file-exists-p (expand-file-name "pytest_pdb_break.py" lib/?)))
       (setq pytest-pdb-break--py-home lib/?))
-     ((file-symlink-p this)  ; only dereference as a last resort
+     ;; Only dereference as a last resort
+     ((file-symlink-p (if (string-suffix-p ".elc" this)
+                          (setq this (substring this 0 -1))
+                        this))
       (pytest-pdb-break--homer (file-truename this)))
      (t (error "Cannot find pytest-pdb-break's Python files")))))
 

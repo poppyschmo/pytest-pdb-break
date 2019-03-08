@@ -36,7 +36,6 @@
 
 (defun pytest-pdb-break-go-inferior (proc)
   "Enable PDB interaction in PROC, a failed pytest session.
-
 This converts major or minor (comint) compilation modes to
 `inferior-python-mode'."
   (let* ((python-shell-prompt-pdb-regexp pytest-pdb-break-prompt-regexp)
@@ -94,7 +93,6 @@ This converts major or minor (comint) compilation modes to
 
 (defun pytest-pdb-break--run-fail-compilation-filter ()
   "Look for PDB prompt on pytest failure.
-
 When using something like `elpy-test-pytest-runner', add this to
 `compilation-filter-hook'."
   (when (save-excursion (beginning-of-line)
@@ -106,7 +104,6 @@ When using something like `elpy-test-pytest-runner', add this to
 
 (defun pytest-pdb-break--run-fail-comint-process-filter (proc input-string)
   "Defer to default output filter till PDB prompt is encountered.
-
 PROC and INPUT-STRING are as required by `comint-output-filter'."
   (when (with-temp-buffer
           (insert input-string)
@@ -121,7 +118,6 @@ PROC and INPUT-STRING are as required by `comint-output-filter'."
 ;;;###autoload
 (defun pytest-pdb-break-run-fail ()
   "Run pytest on test at point, dropping into PDB on first failure.
-
 Otherwise, finish normally."
   (interactive)
   (let* ((process-environment (append process-environment nil))
@@ -133,8 +129,8 @@ Otherwise, finish normally."
          (parbuf (current-buffer))
          buf)
     (python-shell-with-environment
-      ;; For `compilation-shell-minor-mode', `compilation-start' delegates
-      ;; to `shell-file-name', which knows nothing of `exec-path', meaning
+      ;; For `compilation-shell-minor-mode', `compilation-start' delegates to
+      ;; `shell-file-name', which knows nothing of `exec-path', meaning
       ;; `python-shell-calculate-exec-path' has no effect.
       (setenv "PATH" (string-join exec-path path-separator))
       (setq buf (compile cmd-line t)))
@@ -151,7 +147,6 @@ Otherwise, finish normally."
 (defun pytest-pdb-break--elpy-shell-get-or-create-process-advice
     (orig &rest rest)
   "Advice around `elpy-shell-get-or-create-process'.
-
 Return the source buffer's child process or call ORIG with REST."
   (condition-case exc
       (progn (pytest-pdb-break--get-proc-name) (apply orig rest))
@@ -160,7 +155,6 @@ Return the source buffer's child process or call ORIG with REST."
 ;;;###autoload
 (defun pytest-pdb-break-advise-elpy-shell-get-proc ()
   "A minor-mode hookee to help Elpy's send-related commands.
-
 This is experimental, but `elpy-shell-send-statement' and
 `elpy-shell-send-defun' seem to work.  Unlike the stock send commands,
 the Elpy versions echo the input to the REPL (with proper indentation
