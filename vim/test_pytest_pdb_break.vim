@@ -29,6 +29,7 @@ let s:pfx = printf('<SNR>%s_', pytest_pdb_break#run())
 let s:this_buffer = bufname('%')
 let s:s = g:pytest_pdb_break_testing.s
 let s:o = g:pytest_pdb_break_testing.o
+let s:i = g:pytest_pdb_break_testing.i
 let s:errors = []
 
 if expand('%:p:h') . '/autoload/pytest_pdb_break.vim' != s:s.get('file')
@@ -222,7 +223,7 @@ function s:test_call()
   let Call = funcref(s:pfx . 'call')
   let overrideables = [
         \ 'extend_python_path', 'get_context', 'get_node_id',
-        \ 'init', 'runner', 'split'
+        \ 'init', 'prompt_for_item', 'runner', 'split'
         \ ]
   call assert_equal(overrideables, sort(keys(s:o)))
   let s:g['get_context'] = {-> a:000}
@@ -406,7 +407,7 @@ endfunction
 call s:pybuf('test_get_context')
 
 
-" get_node_id -----------------------------------------------------------------
+" get_node_id_parts -----------------------------------------------------------
 
 let s:src_two_funcs = [
       \ 'def test_first():',
@@ -452,33 +453,33 @@ function s:test_get_node_id_two_funcs()
   call assert_true(getline('.') =~# 'def test_first')
   " String
   call cursor(pos)
-  let rv = s:o.get_node_id()
+  let rv = s:i._get_node_id_parts()
   call assert_equal(join([buf, 'test_first'], '::'), rv)
   " External
   let ext_pos = searchpos('# a comment')
   call assert_notequal([0, 0], ext_pos)
   let [line_num, column] = pos
-  let rv = s:o.get_node_id(1, [0, line_num, column, 0])
+  let rv = s:i._get_node_id_parts(1, [0, line_num, column, 0])
   call assert_equal([buf, 'test_first'], rv)
   call assert_equal(ext_pos, getpos('.')[1:2])
   " List
   call cursor(pos)
-  let rv = s:o.get_node_id(1)
+  let rv = s:i._get_node_id_parts(1)
   call assert_equal([buf, 'test_first'], rv)
   call assert_equal(pos, getpos('.')[1:2])
   " In def line
   call cursor(1, 1)
   call assert_true(search('test_first') > 0)
-  let rv = s:o.get_node_id(1)
+  let rv = s:i._get_node_id_parts(1)
   call assert_equal([buf, 'test_first'], rv)
   " Last line
   call cursor(line('$'), 1)
   normal! $
-  let rv = s:o.get_node_id(1)
+  let rv = s:i._get_node_id_parts(1)
   call assert_equal([buf, 'test_last'], rv)
   " No match
   call cursor(ext_pos)
-  let [__, out] = s:capture(funcref(s:o.get_node_id, [1]))
+  let [__, out] = s:capture(funcref(s:i._get_node_id_parts, [1]))
   call assert_match('No test found', out, 'Got: '. string(__))
   call assert_equal(ext_pos, getpos('.')[1:2])
 endfunction
@@ -496,29 +497,29 @@ function s:test_get_node_id_one_class()
   call assert_true(getline('.') =~# 'def test_one')
   " String
   call cursor(pos)
-  let rv = s:o.get_node_id()
+  let rv = s:i._get_node_id_parts()
   call assert_equal(buf .'::TestClass::test_one', rv)
   " With signature
   call setline(1, 'class TestClass(object):')
   call assert_equal(pos, getpos('.')[1:2])
-  let rv = s:o.get_node_id()
+  let rv = s:i._get_node_id_parts()
   call assert_equal(buf .'::TestClass::test_one', rv)
   " Between
   call cursor(1, 1)
   let pos = searchpos('^$')
   call assert_notequal([0, 0], pos)
-  let [__, out] = s:capture(funcref(s:o.get_node_id, []))
+  let [__, out] = s:capture(funcref(s:i._get_node_id_parts, []))
   call assert_match('No test found', out)
   " Last line
   call cursor(line('$'), 1)
-  let rv = s:o.get_node_id()
+  let rv = s:i._get_node_id_parts()
   call assert_equal(buf .'::TestClass::test_two', rv)
   " Indentation level
   " FIXME bad example (implies there's some fixture named 'self')
   let unlikely = ['', 'def test_arg(self):', '    return self']
   call s:write_src(s:src_one_class + unlikely)
   call cursor(line('$'), 1)
-  let rv = s:o.get_node_id()
+  let rv = s:i._get_node_id_parts()
   call assert_equal(buf .'::test_arg', rv)
 endfunction
 
@@ -653,7 +654,7 @@ function s:test_runner()
   let dirname = fnamemodify(bufname('%'), ':h')
   let isolib = s:s.get('isolib')
   let s:g.split = {-> a:000}
-  let s:g.get_node_id = {-> [thisbuf, 'test_first']}
+  let s:g.get_node_id = {-> join([thisbuf, 'test_first'], '::')}
   let b:pytest_pdb_break_pytest_exe = '/bin/true'
   let ctx = s:o.get_context()
   call assert_false(exists('ctx.PP'))
@@ -670,7 +671,7 @@ function s:test_runner()
   endif
   call assert_equal(['⁉'], ctx.last.uopts)
   call assert_equal(['--break='. thisbuf .':1'], ctx.last.opts)
-  call assert_equal([thisbuf, 'test_first'], ctx.last.node_id)
+  call assert_equal(thisbuf .'::test_first', ctx.last.node_id)
   let expect_jobd = {}
   if !has('nvim')
     let expect_jobd.env = {'PYTHONPATH': isolib}

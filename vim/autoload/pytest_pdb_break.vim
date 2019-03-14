@@ -117,7 +117,7 @@ function! s:_search_back(pat, test) abort
   return line('.')
 endfunction
 
-function! s:get_node_id(...) abort
+function! s:_get_node_id_parts(...) abort
   " ... => [want list][start pos]
   let spos = getcurpos()
   try
@@ -239,6 +239,38 @@ function! s:_populate_loclist(context, locs) abort
   endtry
 endfunction
 
+function! s:prompt_for_item(ctx, ...) abort
+  " TODO make denite source if installed
+  let locs = call('s:_check_json', [a:ctx, 'get_collected'] + a:000)
+  function! a:ctx.ll_callback(obj) abort closure
+    let self.new_item = [a:obj.file] + split(a:obj.nodeid, '::')[1:]
+    return s:call('runner', a:000)
+  endfunction
+  call s:_populate_loclist(a:ctx, locs)
+  throw 'Awaitathon'
+endfunction
+
+function! s:get_node_id(ctx, ...) abort
+  let nid = get(a:ctx, 'new_item', [])
+  if empty(nid)
+    try
+      silent let nid = s:_get_node_id_parts(1)
+    catch /^Search failed/
+      try
+        let nid = s:call('prompt_for_item', [a:ctx] + a:000)
+      catch /^Awaitathon/
+        return []
+      catch /.*/
+        silent! unlet! a:ctx.new_item " docs say unlet! form suppresses, but?
+        throw substitute(v:exception,'^Vim\(.\+\)$', '\1', '')
+      endtry
+    endtry
+  else
+    unlet a:ctx.new_item
+  endif
+  return join(nid, '::')
+endfunction
+
 function! s:extend_python_path(ctx) abort
   " Stash modified copy of PYTHONPATH, should be unset if unneeded
   let ctx = a:ctx
@@ -254,11 +286,12 @@ endfunction
 
 function! s:runner(...) abort
   let ctx = s:call('get_context', [])
-  let nid = s:call('get_node_id', [1])
+  let nid = s:call('get_node_id', [ctx] + a:000)
+  if empty(nid)
+    return 0
+  endif
   let cmd = [ctx.exe]
-  let arg = join(nid, '::')
   let opts = []
-  let last = get(ctx, 'last', {})
   let jd = {}
   let preenv = s:call('extend_python_path', [ctx])
   if has('nvim')
@@ -266,12 +299,12 @@ function! s:runner(...) abort
   else
     let jd.env = {'PYTHONPATH': preenv}
   endif
-  call add(opts,  printf('--break=%s:%s', nid[0], line('.')))
+  call add(opts,  printf('--break=%s:%s', expand('%:p'), line('.')))
   let ctx.last = {
         \ 'cmd': cmd, 'uopts': a:000, 'opts': opts,
         \ 'node_id': nid, 'jd': jd
         \ }
-  return s:call('split', [cmd + a:000 + opts + [arg], jd])
+  return s:call('split', [cmd + a:000 + opts + [nid], jd])
 endfunction
 
 function! s:split(cmdl, jobd) abort
@@ -297,12 +330,16 @@ let s:defuncs = {
       \ 'get_context': funcref('s:get_context'),
       \ 'init': funcref('s:init'),
       \ 'extend_python_path': funcref('s:extend_python_path'),
+      \ 'prompt_for_item': funcref('s:prompt_for_item'),
       \ 'get_node_id': funcref('s:get_node_id'),
       \ 'runner': funcref('s:runner'),
       \ 'split': funcref('s:split')
       \ }
 
 if exists('g:pytest_pdb_break_testing')
+  let g:pytest_pdb_break_testing.i = {
+        \ '_get_node_id_parts': funcref('s:_get_node_id_parts'),
+        \ }
   let g:pytest_pdb_break_testing.s = {
         \ 'exists': {n -> exists('s:'. n)},
         \ 'get': {n -> eval('s:'. n)},
