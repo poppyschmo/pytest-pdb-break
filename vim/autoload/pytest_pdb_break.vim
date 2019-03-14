@@ -193,6 +193,52 @@ function! s:_check_json(ctx, cmd, ...) abort
   return decoded
 endfunction
 
+function! s:_populate_loclist(context, locs) abort
+  let ctx = a:context
+  let curwin = winnr()
+  let curview = winsaveview()
+  let orig = getloclist(curwin, {'all': 1})
+  let act = empty(orig) ? 'f' : 'r'
+  let F = {k, v -> {'filename': v.file, 'lnum': v.lnum, 'text': v.name}}
+  function! s:_select_and_remove(want) closure abort
+    let dex = line('.') - 1
+    nunmap <buffer> <cr>
+    nunmap <buffer> q
+    call timer_stop(ctx.ll_timer)
+    silent! call setloclist(curwin, [], act, orig)
+    if act ==# 'r'  " remove prepended colon (hack?)
+      silent! call setloclist(curwin, [], 'r', {'title': orig.title})
+    endif
+    lclose
+    call winrestview(curview)
+    if a:want
+      call ctx.ll_callback(a:locs[dex])
+    endif
+  endfunction
+  function! s:_p(...) abort
+    echohl ModeMsg | echo '<CR> selects, q aborts' | echohl None
+  endfunction
+  try
+    let locs = map(copy(a:locs), F)
+    " Would prefer rootdir over bufname, but we're flying blind here
+    let title = printf('Pytest[items]: %s (%d)', bufname('%'), len(locs))
+    let what = {'items': locs, 'title': title, 'context': ctx}
+    call setloclist(curwin, [], 'r', what)  " clobber
+    lopen
+    noremap <buffer><nowait><silent> <cr> :call <SID>_select_and_remove(1)<cr>
+    noremap <buffer><nowait><silent> q :call <SID>_select_and_remove(0)<cr>
+    let ctx.ll_timer = timer_start(100, funcref('<SID>_p'))
+  catch /.*/
+    silent! call setloclist(curwin, [], act, orig)  " restore
+    if &buftype ==# 'quickfix'
+      silent! nunmap <buffer> <cr>
+      silent! nunmap <buffer> q
+      silent! lclose
+    endif
+    throw v:exception
+  endtry
+endfunction
+
 function! s:extend_python_path(ctx) abort
   " Stash modified copy of PYTHONPATH, should be unset if unneeded
   let ctx = a:ctx

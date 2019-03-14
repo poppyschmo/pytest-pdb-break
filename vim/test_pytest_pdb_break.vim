@@ -164,6 +164,15 @@ function s:write_src(src)
   silent write
 endfunction
 
+function s:wait_for(test, maxwait)
+  let n = a:maxwait
+  while !a:test() && n > 0
+    sleep 1m
+    let n -= 1
+  endwhile
+  call assert_true(n)
+endfunction
+
 
 " Utils (above) ---------------------------------------------------------------
 
@@ -548,6 +557,51 @@ function s:test_check_json()
 endfunction
 
 call s:pybuf('test_check_json')
+
+
+" populate_loclist ------------------------------------------------------------
+
+function! s:test_populate_loclist()
+  let curwin = winnr()
+  call assert_equal(0, getloclist(curwin, {'nr': '$'}).nr)
+  let vbin = s:venvdir .'/base/bin'
+  let fstr = 'grep -Hn if '. vbin .'/activate*'
+  call setloclist(curwin, [], ' ', {'title': 'Foo', 'lines' : systemlist(fstr)})
+  call assert_equal(1, getloclist(curwin, {'nr': '$'}).nr)
+  let title = getloclist(curwin, {'title': 0, 'nr': '$'}).title
+  call assert_equal('Foo', title)
+  " Mock context, use output from previous test
+  let lines = readfile(s:temphome .'/test_check_json/rv.json')
+  call assert_true(len(lines))
+  let locs = json_decode(join(lines, ''))
+  let seen = []
+  let ctx = {}
+  let ctx.ll_callback = {ti -> add(seen, ti)}
+  function s:_await_poploc() closure
+    call call(s:pfx . '_populate_loclist', [ctx, locs])
+    let T = {-> (exists('ctx.ll_timer') && empty(timer_info(ctx.ll_timer)))}
+    call s:wait_for(T, 1000)
+  endfunction
+  let [__, out] = s:capture(funcref('s:_await_poploc'))
+  "
+  call assert_match('selects', out)
+  call assert_equal('quickfix', &buftype)
+  call assert_equal(1, getloclist(curwin, {'nr': '$'}).nr)
+  let title = getloclist(curwin, {'title': 1}).title
+  call assert_match('Pytest', title)
+  call assert_notequal(curwin, winnr())
+  call assert_false(empty(maparg('<cr>', 'n')))
+  execute "normal \<CR>"
+  call s:wait_for({-> len(seen)}, 1000)
+  call assert_equal(curwin, winnr())
+  call assert_equal(locs[0], seen[0])
+  call assert_equal('', &buftype)
+  call assert_equal(1, getloclist(curwin, {'nr': '$'}).nr)
+  let title = getloclist(curwin, {'title': 1}).title
+  call assert_equal('Foo', title)
+endfunction
+
+call s:pybuf('test_populate_loclist')
 
 
 " extend_python_path ----------------------------------------------------------
