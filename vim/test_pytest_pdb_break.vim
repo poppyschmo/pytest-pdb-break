@@ -517,6 +517,39 @@ call s:pybuf('test_get_node_id_two_funcs')
 call s:pybuf('test_get_node_id_one_class')
 
 
+" check_json ------------------------------------------------------------------
+
+function s:test_check_json()
+  let vbin = s:venvdir .'/base/bin'
+  let vers = fnamemodify(s:venvdir, ':t')
+  let vpy = vbin .'/python'. vers
+  let context = {'exe': vpy}
+  call writefile(s:src_two_funcs, 'test_two_funcs.py')
+  call writefile(s:src_one_class, 'test_one_class.py')
+  " No such method
+  let args = [context, 'fake', 'foo', 'bar']
+  let [__, out] = s:capture(funcref(s:pfx . '_check_json', args))
+  call assert_match('usage.*cmdline', out)
+  " Subproc error
+  let args = [context, 'get_collected', '--fakeopt']
+  let [__, out] = s:capture(funcref(s:pfx . '_check_json', args))
+  call assert_match('Traceback.*UsageError', out)
+  " OK
+  let args = [context, 'get_collected']
+  let rv = call(s:pfx . '_check_json', args)
+  call assert_equal(v:t_list, type(rv))
+  for loc in rv
+    call assert_true(has_key(loc, 'file'))
+    call assert_true(has_key(loc, 'lnum'))
+    call assert_true(has_key(loc, 'name'))
+    call assert_true(has_key(loc, 'nodeid'))
+  endfor
+  call writefile([json_encode(rv)], 'rv.json')
+endfunction
+
+call s:pybuf('test_check_json')
+
+
 " extend_python_path ----------------------------------------------------------
 
 function s:test_extend_python_path()

@@ -63,7 +63,6 @@ function! s:init() abort
   let s:plugin = fnamemodify(plugin, ':p') " covers the rare './plugin'
   let s:home = fnamemodify(s:plugin, ':h:p') " no trailing/
   let s:helper = simplify(s:home . '/helpers/main.py')
-  let s:config_info_helper = simplify(s:home . '/helpers/get_config_info.py')
   if exists('g:pytest_pdb_break_alt_lib')
     " Glob still passes if pat contains double / (no need to simplify)
     let alt_lib = g:pytest_pdb_break_alt_lib
@@ -150,6 +149,48 @@ function! s:get_node_id(...) abort
   endtry
   call add(nodeid, expand('%:p'))
   return a:0 && a:1 ? reverse(nodeid) : join(reverse(nodeid), '::')
+endfunction
+
+function! s:_print_error(msg, kwargs) abort
+    echohl WarningMsg | echo a:msg | echohl None
+    for [k, V] in items(a:kwargs)
+      echo k .': '. (type(V) != v:t_string ? string(V) : V)
+    endfor
+endfunction
+
+function! s:_check_json(ctx, cmd, ...) abort
+  let context = a:ctx
+  let cmdline = [context.exe, s:helper, '--json', a:cmd, '--'] + a:000
+  if !has('nvim')
+    let cmdline = join(cmdline)
+  endif
+  try
+    let result = system(cmdline)
+    try
+      let decoded = json_decode(result)
+    catch /^Vim\%((\a\+)\)\=:E474/
+      throw result
+    endtry
+    if type(decoded) == v:t_dict && has_key(decoded, 'error')
+      let result = join(decoded.traceback, '')
+      throw result
+    endif
+  catch /.*/
+    let md = {'path': s:helper, 'cmdline': cmdline,}
+    " Truncation often lops off final exc (most recent call last)
+    if exists('result') && v:exception =~# 'Traceback'
+      if stridx(v:exception, result) == -1
+        let md.exc = matchstr(v:exception, '.*\zeTraceback') . result
+      else
+        let md.exc = result
+      endif
+    else
+      let md.exc = v:exception
+    endif
+    call s:_print_error('Problem calling helper', md)
+    echoerr 'HelperError'
+  endtry
+  return decoded
 endfunction
 
 function! s:extend_python_path(ctx) abort
