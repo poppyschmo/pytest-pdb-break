@@ -31,10 +31,12 @@ function! s:_get_pytest_exe() abort
   return exe
 endfunction
 
-function! s:_get_interpreter() abort
+function! s:_get_interpreter(vars) abort
   try
-    let pytest_exe = s:_get_pytest_exe()
-    let shebang = readfile(pytest_exe, '', 1)[0]
+    if !has_key(a:vars, 'pytest_exe')
+      let a:vars['pytest_exe'] =  s:_get_pytest_exe()
+    endif
+    let shebang = readfile(a:vars.pytest_exe, '', 1)[0]
     let exe = substitute(shebang, '^#!', '', '')
   catch /.*/
     let exe = ''
@@ -53,7 +55,11 @@ function! s:_get_interpreter() abort
   throw 'Could not find a python executable'
 endfunction
 
-function! s:init() abort
+function! s:init(vars) abort
+  " vars => dict with optional items:
+  "   'interpreter': path to python interpreter
+  "   'pytest_exe': path to pytest exe
+  "
   call assert_equal(&filetype, 'python')
   let path = fnamemodify(s:file, ':h:p') . ';'
   let plugin = findfile('pytest_pdb_break.py', path)
@@ -73,7 +79,10 @@ function! s:init() abort
     let s:isolib = alt_lib
   else
     let s:isolib = tempname()
-    let cmdline = [s:_get_interpreter(), s:helper, 'install_plugin', s:isolib]
+    if !has_key(a:vars, 'interpreter')
+      let a:vars['interpreter'] = s:_get_interpreter(a:vars)
+    endif
+    let cmdline = [a:vars.interpreter, s:helper, 'install_plugin', s:isolib]
     if !has('nvim')
       let cmdline = join(cmdline)
     endif
@@ -86,18 +95,22 @@ function! s:init() abort
 endfunction
 
 function! s:get_context() abort
-  " Save env info in buffer-local dict, keyed by pytest exe
+  " Save session/env info in buffer-local dict, keyed by pytest exe
   " XXX the context-dict thing may have made sense under the old 'rootdir'
   " setup but now seems needlessly complicated; consider ditching
+  let vars = {}
   if !s:initialized
-    call s:call('init', [])
+    call s:call('init', [vars])
   endif
   if !exists('b:pytest_pdb_break_context')
     let b:pytest_pdb_break_context = {}
   endif
-  let exe = s:_get_pytest_exe()
+  if !exists('vars.interpreter') " implies no pytest_exe
+    let vars.interpreter = s:_get_interpreter(vars)
+  endif
+  let exe = vars.pytest_exe
   if !has_key(b:pytest_pdb_break_context, exe)
-    let b:pytest_pdb_break_context[exe] = {'exe': exe}
+    let b:pytest_pdb_break_context[exe] = vars
   endif
   return b:pytest_pdb_break_context[exe]
 endfunction
@@ -160,7 +173,7 @@ endfunction
 
 function! s:_check_json(ctx, cmd, ...) abort
   let context = a:ctx
-  let cmdline = [context.exe, s:helper, '--json', a:cmd, '--'] + a:000
+  let cmdline = [context.interpreter, s:helper, '--json', a:cmd, '--'] + a:000
   if !has('nvim')
     let cmdline = join(cmdline)
   endif
@@ -290,7 +303,7 @@ function! s:runner(...) abort
   if empty(nid)
     return 0
   endif
-  let cmd = [ctx.exe]
+  let cmd = [ctx.pytest_exe]
   let opts = []
   let jd = {}
   let preenv = s:call('extend_python_path', [ctx])
@@ -338,6 +351,8 @@ let s:defuncs = {
 
 if exists('g:pytest_pdb_break_testing')
   let g:pytest_pdb_break_testing.i = {
+        \ '_get_pytest_exe': funcref('s:_get_pytest_exe'),
+        \ '_get_interpreter': funcref('s:_get_interpreter'),
         \ '_get_node_id_parts': funcref('s:_get_node_id_parts'),
         \ }
   let g:pytest_pdb_break_testing.s = {

@@ -260,8 +260,6 @@ call s:runfail(funcref('s:test_call'))
 " _get_pytest_exe and _get_exe ------------------------------------------------
 
 function s:test_get_executables()
-  let FuncPytest = funcref(s:pfx . '_get_pytest_exe')
-  let FuncInterp = funcref(s:pfx . '_get_interpreter')
   "
   let bin_path = fnamemodify('fake', ':p')
   let pytest_path = bin_path . '/pytest'
@@ -272,20 +270,26 @@ function s:test_get_executables()
   call setfperm(pytest_path, 'rwx------')
   call setfperm(interp_path, 'rwx------')
   "
+  let vars = {}
   " Explicit b: option
   let b:pytest_pdb_break_pytest_exe = pytest_path
-  call assert_equal(FuncPytest(), pytest_path)
-  call assert_equal(FuncInterp(), interp_path)
+  call assert_equal(pytest_path, s:i._get_pytest_exe())
+  call assert_equal(interp_path, s:i._get_interpreter(vars))
+  call assert_false(has_key(vars, 'interpreter'))
+  call assert_equal(pytest_path, vars.pytest_exe)
   unlet b:pytest_pdb_break_pytest_exe
   "
   " Fake PATH
   let origpath = $PATH
+  let vars = {}
   try
     let $PATH = bin_path .':'. $PATH
     call assert_equal(pytest_path, exepath('pytest'))
     call assert_equal(interp_path, exepath('python'))
-    call assert_equal(pytest_path, FuncPytest())
-    call assert_equal(interp_path, FuncInterp())
+    call assert_equal(pytest_path, s:i._get_pytest_exe())
+    call assert_equal(interp_path, s:i._get_interpreter(vars))
+    call assert_equal(pytest_path, vars.pytest_exe)
+    call assert_false(has_key(vars, 'interpreter'))
     "
     " Fallbacks
     call assert_false(exists('g:python3_host_prog'))  " skip
@@ -294,16 +298,16 @@ function s:test_get_executables()
     let interp_path = bin_path . '/python3'
     call writefile([], interp_path)
     call setfperm(interp_path, 'rwx------')
-    call assert_equal(interp_path, FuncInterp())
+    call assert_equal(interp_path, s:i._get_interpreter({}))
     "
     let $PATH = bin_path . ':' " otherwise, /usr/bin/python3 wins
     call delete(interp_path)
     let interp_path = bin_path . '/python'
-    call assert_equal(interp_path, FuncInterp())
+    call assert_equal(interp_path, s:i._get_interpreter({}))
     "
     call delete(interp_path)
     try
-      call FuncInterp()
+      call s:i._get_interpreter({})
     catch /.*/
       call assert_exception('Could not find')
     endtry
@@ -333,7 +337,7 @@ function s:test_init()
   call mkdir(fake_lib)
   let g:pytest_pdb_break_alt_lib = fake_lib
   try
-    call s:o.init()
+    call s:o.init({})
   catch /.*/
     call assert_exception('Invalid alt lib:')
   endtry
@@ -348,7 +352,7 @@ function s:test_init()
   if isdirectory(fake_lib)  " os should throw permissions error anyway
     call mkdir(fake_lib . '/pytest_pdb_break-x.x.x.dist-info')
   endif
-  call s:o.init()
+  call s:o.init({})
   call s:s.assign('initialized', 'v:false')
   call s:s.forget('plugin')
   call s:s.forget('home')
@@ -358,7 +362,7 @@ function s:test_init()
   "
   " Normal run
   call s:_assert_clean_slate()
-  call s:o.init()
+  call s:o.init({})
   "
   call assert_true(s:s.get('initialized'))
   call assert_true(s:s.exists('plugin'))
@@ -533,7 +537,7 @@ function s:test_check_json()
   let vbin = s:venvdir .'/base/bin'
   let vers = fnamemodify(s:venvdir, ':t')
   let vpy = vbin .'/python'. vers
-  let context = {'exe': vpy}
+  let context = {'interpreter': vpy}
   call writefile(s:src_two_funcs, 'test_two_funcs.py')
   call writefile(s:src_one_class, 'test_one_class.py')
   " No such method
