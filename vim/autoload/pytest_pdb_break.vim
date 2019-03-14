@@ -252,14 +252,26 @@ function! s:_populate_loclist(context, locs) abort
   endtry
 endfunction
 
+function! s:_call_denite(context, locs, args) abort
+  let d = {'_pytest_pdb_break': {'ctx': a:context, 'args': a:args, 'locs': a:locs}}
+  " Would be nice to avoid this workaround and just use some action__* method,
+  " but can't figure out how to access funcrefs from a py module.
+  call denite#custom#action('pytest_item', 'execute',
+        \ {c -> a:context.ll_callback(c['targets'][0]['action__command'])})
+  call denite#start([{'name': 'pytest_items', 'args': []}], d)
+endfunction
+
 function! s:prompt_for_item(ctx, ...) abort
-  " TODO make denite source if installed
   let locs = call('s:_check_json', [a:ctx, 'get_collected'] + a:000)
   function! a:ctx.ll_callback(obj) abort closure
     let self.new_item = [a:obj.file] + split(a:obj.nodeid, '::')[1:]
     return s:call('runner', a:000)
   endfunction
-  call s:_populate_loclist(a:ctx, locs)
+  if exists('g:loaded_denite')
+    call s:_call_denite(a:ctx, locs, a:000)
+  else
+    call s:_populate_loclist(a:ctx, locs)
+  endif
   throw 'Awaitathon'
 endfunction
 
