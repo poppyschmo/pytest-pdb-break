@@ -4,221 +4,223 @@ let s:file = expand('<sfile>')
 let s:initialized = v:false
 
 function! pytest_pdb_break#run(...) abort
-	return s:call('runner', a:000, 1)
+  return s:call('runner', a:000, 1)
 endfunction
 
-function! s:call(name, args, ...) abort "{{{
-	" ... => [clear]
-	let d = a:0 && a:1 ?
-				\ {} : get(g:pytest_pdb_break_overrides, '_flattened', {})
-	if empty(d)
-		let d = filter(copy(g:pytest_pdb_break_overrides), 'v:key !~# "^_"')
-		call extend(d, s:defuncs, 'keep')
-		let g:pytest_pdb_break_overrides._flattened = d
-	endif
-	return call(d[a:name], a:args, d)
-endfunction "}}}
+function! s:call(name, args, ...) abort
+  " ... => [clear]
+  let d = a:0 && a:1 ?
+        \ {} : get(g:pytest_pdb_break_overrides, '_flattened', {})
+  if empty(d)
+    let d = filter(copy(g:pytest_pdb_break_overrides), 'v:key !~# "^_"')
+    call extend(d, s:defuncs, 'keep')
+    let g:pytest_pdb_break_overrides._flattened = d
+  endif
+  return call(d[a:name], a:args, d)
+endfunction
 
-function! s:_get_pytest_exe() abort "{{{
-	if exists('b:pytest_pdb_break_pytest_exe')
-		let exe = b:pytest_pdb_break_pytest_exe
-	else
-		let exe = exepath('pytest')
-	endif
-	if !executable(exe)
-		throw 'Cannot find pytest'
-	endif
-	return exe
-endfunction "}}}
+function! s:_get_pytest_exe() abort
+  if exists('b:pytest_pdb_break_pytest_exe')
+    let exe = b:pytest_pdb_break_pytest_exe
+  else
+    let exe = exepath('pytest')
+  endif
+  if !executable(exe)
+    throw 'Cannot find pytest'
+  endif
+  return exe
+endfunction
 
-function! s:_get_interpreter() abort "{{{
-	try
-		let pytest_exe = s:_get_pytest_exe()
-		let shebang = readfile(pytest_exe, '', 1)[0]
-		let exe = substitute(shebang, '^#!', '', '')
-	catch /.*/
-		let exe = ''
-	endtry
-	if executable(exe)
-		return exe
-	endif
-	" Plain python will fail if not python3
-	let backups = exists('g:python3_host_prog') ? [g:python3_host_prog] : []
-	let backups += ['python3', 'python']
-	for exe in backups
-		if executable(exe)
-			return exepath(exe)
-		endif
-	endfor
-	throw 'Could not find a python executable'
-endfunction "}}}
+function! s:_get_interpreter() abort
+  try
+    let pytest_exe = s:_get_pytest_exe()
+    let shebang = readfile(pytest_exe, '', 1)[0]
+    let exe = substitute(shebang, '^#!', '', '')
+  catch /.*/
+    let exe = ''
+  endtry
+  if executable(exe)
+    return exe
+  endif
+  " Plain python will fail if not python3
+  let backups = exists('g:python3_host_prog') ? [g:python3_host_prog] : []
+  let backups += ['python3', 'python']
+  for exe in backups
+    if executable(exe)
+      return exepath(exe)
+    endif
+  endfor
+  throw 'Could not find a python executable'
+endfunction
 
-function! s:init() abort "{{{
-	call assert_equal(&filetype, 'python')
-	let path = fnamemodify(s:file, ':h:p') . ';'
-	let plugin = findfile('pytest_pdb_break.py', path)
-	if empty(plugin)
-		throw 'Could not find plugin root above entry in &rtp'
-	endif
-	let s:plugin = fnamemodify(plugin, ':p') " covers the rare './plugin'
-	let s:home = fnamemodify(s:plugin, ':h:p') " no trailing/
-	let s:helper = simplify(s:home . '/helpers/main.py')
-	let s:config_info_helper = simplify(s:home . '/helpers/get_config_info.py')
-	if exists('g:pytest_pdb_break_alt_lib')
-		" Glob still passes if pat contains double / (no need to simplify)
-		let alt_lib = g:pytest_pdb_break_alt_lib
-		if !isdirectory(alt_lib) ||
-					\ empty(glob(alt_lib .'/pytest_pdb_break*-info'))
-			throw 'Invalid alt lib: ' . alt_lib
-		endif
-		let s:isolib = alt_lib
-	else
-		let s:isolib = tempname()
-		let cmdline = [s:_get_interpreter(), s:helper, 'install_plugin', s:isolib]
-		if !has('nvim')
-			let cmdline = join(cmdline)
-		endif
-		call system(cmdline)
-		if !isdirectory(s:isolib)
-			throw 'Problem calling '. s:helper
-		endif
-	endif
-	let s:initialized = v:true
-endfunction "}}}
+function! s:init() abort
+  call assert_equal(&filetype, 'python')
+  let path = fnamemodify(s:file, ':h:p') . ';'
+  let plugin = findfile('pytest_pdb_break.py', path)
+  if empty(plugin)
+    throw 'Could not find plugin root above entry in &rtp'
+  endif
+  let s:plugin = fnamemodify(plugin, ':p') " covers the rare './plugin'
+  let s:home = fnamemodify(s:plugin, ':h:p') " no trailing/
+  let s:helper = simplify(s:home . '/helpers/main.py')
+  let s:config_info_helper = simplify(s:home . '/helpers/get_config_info.py')
+  if exists('g:pytest_pdb_break_alt_lib')
+    " Glob still passes if pat contains double / (no need to simplify)
+    let alt_lib = g:pytest_pdb_break_alt_lib
+    if !isdirectory(alt_lib) ||
+          \ empty(glob(alt_lib .'/pytest_pdb_break*-info'))
+      throw 'Invalid alt lib: ' . alt_lib
+    endif
+    let s:isolib = alt_lib
+  else
+    let s:isolib = tempname()
+    let cmdline = [s:_get_interpreter(), s:helper, 'install_plugin', s:isolib]
+    if !has('nvim')
+      let cmdline = join(cmdline)
+    endif
+    call system(cmdline)
+    if !isdirectory(s:isolib)
+      throw 'Problem calling '. s:helper
+    endif
+  endif
+  let s:initialized = v:true
+endfunction
 
-function! s:get_context() abort "{{{
-	" Save env info in buffer-local dict, keyed by pytest exe
-	" XXX the context-dict thing may have made sense under the old 'rootdir'
-	" setup but now seems needlessly complicated; consider ditching
-	if !s:initialized
-		call s:call('init', [])
-	endif
-	if !exists('b:pytest_pdb_break_context')
-		let b:pytest_pdb_break_context = {}
-	endif
-	let exe = s:_get_pytest_exe()
-	if !has_key(b:pytest_pdb_break_context, exe)
-		let b:pytest_pdb_break_context[exe] = {'exe': exe}
-	endif
-	return b:pytest_pdb_break_context[exe]
-endfunction "}}}
+function! s:get_context() abort
+  " Save env info in buffer-local dict, keyed by pytest exe
+  " XXX the context-dict thing may have made sense under the old 'rootdir'
+  " setup but now seems needlessly complicated; consider ditching
+  if !s:initialized
+    call s:call('init', [])
+  endif
+  if !exists('b:pytest_pdb_break_context')
+    let b:pytest_pdb_break_context = {}
+  endif
+  let exe = s:_get_pytest_exe()
+  if !has_key(b:pytest_pdb_break_context, exe)
+    let b:pytest_pdb_break_context[exe] = {'exe': exe}
+  endif
+  return b:pytest_pdb_break_context[exe]
+endfunction
 
-function! s:_search_back(pat, test) abort "{{{
-	let begd = indent('.')
-	let begl = line('.')
-	while 1
-		if !search(a:pat, 'Wb')
-			return 0
-		endif
-		let sid = synID(line('.'), col('.'), 1)
-		if synIDattr(sid, 'name') !~? 'comment\|string' && a:test(begl, begd)
-			break
-		endif
-	endwhile
-	return line('.')
-endfunction "}}}
+function! s:_search_back(pat, test) abort
+  let begd = indent('.')
+  let begl = line('.')
+  while 1
+    if !search(a:pat, 'Wb')
+      return 0
+    endif
+    let sid = synID(line('.'), col('.'), 1)
+    if synIDattr(sid, 'name') !~? 'comment\|string' && a:test(begl, begd)
+      break
+    endif
+  endwhile
+  return line('.')
+endfunction
 
-function! s:get_node_id(...) abort "{{{
-	" ... => [want list][start pos]
-	let spos = getcurpos()
-	try
-		if a:0 == 2
-			call setpos('.', a:2)
-		endif
-		normal! $
-		let gr = []
-		if s:_search_back('\v^\s*(def|async def)>',
-					\ {l, d -> indent('.') < d || line('.') == l})
-			let pat = '^\s*\(def\|async def\)\s\+\(test_\w\+\)(\(.*\)).*$'
-			let gr = matchlist(getline('.'), pat)
-		endif
-		if empty(gr) || empty(gr[2])
-			echohl WarningMsg | echo 'No test found!' | echohl Normal
-			echo printf(' beg(%d): %s', spos[1], shellescape(getline(spos[1])))
-			echo printf(' end(%d): %s', line('.'), shellescape(getline('.')))
-			echo ' match: ' . string(gr)
-			throw 'Search failed'
-		endif
-		let nodeid = [gr[2]]
-		if gr[3] =~# '^self.*' &&
-					\ s:_search_back('\_^\s*class\s', {_, d -> indent('.') < d})
-			let cgr = matchlist(getline('.'), '^\s*class\s\(\w\+\).*:.*')
-			call add(nodeid, cgr[1])
-		endif
-	finally
-		call setpos('.', spos)
-	endtry
-	call add(nodeid, expand('%:p'))
-	return a:0 && a:1 ? reverse(nodeid) : join(reverse(nodeid), '::')
-endfunction "}}}
+function! s:get_node_id(...) abort
+  " ... => [want list][start pos]
+  let spos = getcurpos()
+  try
+    if a:0 == 2
+      call setpos('.', a:2)
+    endif
+    normal! $
+    let gr = []
+    if s:_search_back('\v^\s*(def|async def)>',
+          \ {l, d -> indent('.') < d || line('.') == l})
+      let pat = '^\s*\(def\|async def\)\s\+\(test_\w\+\)(\(.*\)).*$'
+      let gr = matchlist(getline('.'), pat)
+    endif
+    if empty(gr) || empty(gr[2])
+      echohl WarningMsg | echo 'No test found!' | echohl Normal
+      echo printf(' beg(%d): %s', spos[1], shellescape(getline(spos[1])))
+      echo printf(' end(%d): %s', line('.'), shellescape(getline('.')))
+      echo ' match: ' . string(gr)
+      throw 'Search failed'
+    endif
+    let nodeid = [gr[2]]
+    if gr[3] =~# '^self.*' &&
+          \ s:_search_back('\_^\s*class\s', {_, d -> indent('.') < d})
+      let cgr = matchlist(getline('.'), '^\s*class\s\(\w\+\).*:.*')
+      call add(nodeid, cgr[1])
+    endif
+  finally
+    call setpos('.', spos)
+  endtry
+  call add(nodeid, expand('%:p'))
+  return a:0 && a:1 ? reverse(nodeid) : join(reverse(nodeid), '::')
+endfunction
 
-function! s:extend_python_path(ctx) abort "{{{
-	" Stash modified copy of PYTHONPATH, should be unset if unneeded
-	let ctx = a:ctx
-	if has_key(ctx, 'PP')
-		return ctx.PP
-	endif
-	let val = empty($PYTHONPATH) ? [] : split($PYTHONPATH, ':')
-	let val = filter(val, 'v:val != s:isolib')
-	call insert(val, s:isolib)
-	let ctx.PP = join(val, ':')
-	return ctx.PP
-endfunction "}}}
+function! s:extend_python_path(ctx) abort
+  " Stash modified copy of PYTHONPATH, should be unset if unneeded
+  let ctx = a:ctx
+  if has_key(ctx, 'PP')
+    return ctx.PP
+  endif
+  let val = empty($PYTHONPATH) ? [] : split($PYTHONPATH, ':')
+  let val = filter(val, 'v:val != s:isolib')
+  call insert(val, s:isolib)
+  let ctx.PP = join(val, ':')
+  return ctx.PP
+endfunction
 
-function! s:runner(...) abort "{{{
-	let ctx = s:call('get_context', [])
-	let nid = s:call('get_node_id', [1])
-	let cmd = [ctx.exe]
-	let arg = join(nid, '::')
-	let opts = []
-	let last = get(ctx, 'last', {})
-	let jd = {}
-	let preenv = s:call('extend_python_path', [ctx])
-	if has('nvim')
-		let cmd = ['env', printf('PYTHONPATH=%s', preenv)] + cmd
-	else
-		let jd.env = {'PYTHONPATH': preenv}
-	endif
-	call add(opts,  printf('--break=%s:%s', nid[0], line('.')))
-	let ctx.last = {
-				\ 'cmd': cmd, 'uopts': a:000, 'opts': opts,
-				\ 'node_id': nid, 'jd': jd
-				\ }
-	return s:call('split', [cmd + a:000 + opts + [arg], jd])
-endfunction "}}}
+function! s:runner(...) abort
+  let ctx = s:call('get_context', [])
+  let nid = s:call('get_node_id', [1])
+  let cmd = [ctx.exe]
+  let arg = join(nid, '::')
+  let opts = []
+  let last = get(ctx, 'last', {})
+  let jd = {}
+  let preenv = s:call('extend_python_path', [ctx])
+  if has('nvim')
+    let cmd = ['env', printf('PYTHONPATH=%s', preenv)] + cmd
+  else
+    let jd.env = {'PYTHONPATH': preenv}
+  endif
+  call add(opts,  printf('--break=%s:%s', nid[0], line('.')))
+  let ctx.last = {
+        \ 'cmd': cmd, 'uopts': a:000, 'opts': opts,
+        \ 'node_id': nid, 'jd': jd
+        \ }
+  return s:call('split', [cmd + a:000 + opts + [arg], jd])
+endfunction
 
-function! s:split(cmdl, jobd) abort "{{{
-	if !has_key(a:jobd, 'vertical')
-		if exists('b:pytest_pdb_break_vertical')
-			let a:jobd.vertical = b:pytest_pdb_break_vertical
-		else
-			let wn = winnr()
-			let a:jobd.vertical = (winwidth(wn) + 0.0) / winheight(wn) > 2.5
-		endif
-	endif
-	if has('nvim')
-		execute a:jobd.vertical ? 'vnew' : 'new'
-		let a:jobd.job = termopen(a:cmdl, a:jobd)
-		startinsert
-	else
-		let a:jobd.job = term_getjob(term_start(a:cmdl, a:jobd))
-	endif
-endfunction "}}}
+function! s:split(cmdl, jobd) abort
+  if !has_key(a:jobd, 'vertical')
+    if exists('b:pytest_pdb_break_vertical')
+      let a:jobd.vertical = b:pytest_pdb_break_vertical
+    else
+      let wn = winnr()
+      let a:jobd.vertical = (winwidth(wn) + 0.0) / winheight(wn) > 2.5
+    endif
+  endif
+  if has('nvim')
+    execute a:jobd.vertical ? 'vnew' : 'new'
+    let a:jobd.job = termopen(a:cmdl, a:jobd)
+    startinsert
+  else
+    let a:jobd.job = term_getjob(term_start(a:cmdl, a:jobd))
+  endif
+endfunction
 
 
-let s:defuncs = {'get_context': funcref('s:get_context'),
-				\ 'init': funcref('s:init'),
-				\ 'extend_python_path': funcref('s:extend_python_path'),
-				\ 'get_node_id': funcref('s:get_node_id'),
-				\ 'runner': funcref('s:runner'),
-				\ 'split': funcref('s:split')}
+let s:defuncs = {
+      \ 'get_context': funcref('s:get_context'),
+      \ 'init': funcref('s:init'),
+      \ 'extend_python_path': funcref('s:extend_python_path'),
+      \ 'get_node_id': funcref('s:get_node_id'),
+      \ 'runner': funcref('s:runner'),
+      \ 'split': funcref('s:split')
+      \ }
 
 if exists('g:pytest_pdb_break_testing')
-	let g:pytest_pdb_break_testing.s = {
-				\ 'exists': {n -> exists('s:'. n)},
-				\ 'get': {n -> eval('s:'. n)},
-				\ 'assign': {n, v -> execute('let s:'. n .' = '. v)},
-				\ 'forget': {n -> execute('unlet s:'. n)}
-				\ }
-	let g:pytest_pdb_break_testing.o = copy(s:defuncs)
+  let g:pytest_pdb_break_testing.s = {
+        \ 'exists': {n -> exists('s:'. n)},
+        \ 'get': {n -> eval('s:'. n)},
+        \ 'assign': {n, v -> execute('let s:'. n .' = '. v)},
+        \ 'forget': {n -> execute('unlet s:'. n)}
+        \ }
+  let g:pytest_pdb_break_testing.o = copy(s:defuncs)
 endif

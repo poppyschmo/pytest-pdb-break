@@ -1,6 +1,6 @@
 
 if exists('g:loaded_pytest_pdb_break')
-	finish
+  finish
 endif
 
 let g:loaded_pytest_pdb_break = 1
