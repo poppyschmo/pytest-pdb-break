@@ -2,7 +2,7 @@
 
 *pytest_pdb_break.txt*            For Nvim and Vim 8         Updated: 2018 Dec
 
-An example Vim integration.
+A launcher for pytest's built-in debugger.
 
 
 Commands~
@@ -13,7 +13,26 @@ Commands~
     current line. Any {args} are passed on to pytest. For example, this will
     cancel out addopts in your pytest ini: `:PytestBreakHere -o addopts=`
 
-Overrides~
+
+Functions~
+
+pytest_pdb_break#new([{dict}])
+
+    Generate a new session context for a pytest subprocess. If provided, items
+    in {dict} will be favored over those in `g:pytest_pdb_break_overrides`.
+    For a general-purpose runner (no PDB):
+>
+    function s:PytestRunner(...)
+      let session = pytest_pdb_break#new()
+      let cmdline = ['pytest'] + a:000 + [session.get_node_id()]
+      return session.split(cmdline, {})
+    endfunction
+
+    autocmd FileType python
+        \ nnoremap <buffer> <F5> :call <SID>PytestRunner('-x', '-v')<cr>
+<
+
+Options~
 
 b:pytest_pdb_break_pytest_exe
 
@@ -28,23 +47,7 @@ g:pytest_pdb_break_alt_lib
 
 g:pytest_pdb_break_overrides
 
-    Most autoloaded funcs can be overridden. For example, a general-purpose
-    runner (no PDB):
->
-    function s:PytestRunner(...)
-        let cmdline = ['pytest'] + a:000
-        function! g:pytest_pdb_break_overrides.runner(...) closure
-            call add(cmdline, self.get_node_id())
-            return self.split(cmdline, {})
-        endfunction
-        try
-            call pytest_pdb_break#run()
-        finally
-            unlet g:pytest_pdb_break_overrides.runner
-        endtry
-    endfunction
+    Dictionary containing permanent overrides. Keys must match those in
+    `dfuncs`, a dict at the bottom of the autoload script.
 
-    autocmd FileType python
-        \ nnoremap <buffer> <F5> :call <SID>PytestRunner('-x', '-v')<cr>
-<
  vim:ft=help
