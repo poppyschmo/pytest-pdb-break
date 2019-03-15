@@ -29,7 +29,9 @@ let s:pfx = printf('<SNR>%s_', pytest_pdb_break#run())
 let s:this_buffer = bufname('%')
 let s:s = g:pytest_pdb_break_testing.s
 let s:o = g:pytest_pdb_break_testing.o
-let s:i = g:pytest_pdb_break_testing.i
+let s:i = {}
+let s:playlist = []
+let s:tests = {}
 let s:errors = []
 
 if expand('%:p:h') . '/autoload/pytest_pdb_break.vim' != s:s.get('file')
@@ -61,15 +63,8 @@ function s:has_overrides()
   return len(filter(copy(s:g), 'v:key !~# "^_"'))
 endfunction
 
-function s:reset_chain()
-  if has_key(s:g, '_flattened')
-    unlet s:g._flattened
-  endif
-endfunction
-
 function s:clear_overrides()
-  call filter(s:g, '!has_key(s:o, v:key)')
-  call s:reset_chain()
+  call filter(s:g, '0')
 endfunction
 
 function s:runfail(test_func, ...)
@@ -174,6 +169,23 @@ function s:wait_for(test, maxwait)
   call assert_true(n)
 endfunction
 
+function s:set_ifuncs(...)
+  for f in a:000
+    let s = s:pfx . f
+    call assert_true(exists('*'. s))
+    let s:i[f] = funcref(s)
+  endfor
+endfunction
+
+function s:func_equal(one, two)
+  return get(a:one, 'func') == get(a:two, 'func')
+endfunction
+
+function s:tee(name, callable)
+  call add(s:playlist, a:name)
+  let s:tests[a:name] = a:callable
+endfunction
+
 
 " Utils (above) ---------------------------------------------------------------
 
@@ -215,46 +227,59 @@ let v:errors = []
 call s:runfail(function('assert_true', [s:_soon]))
 unlet s:_soon
 
+let s:ifuncs = [
+      \ 'call',
+      \ '_get_pytest_exe',
+      \ '_get_interpreter',
+      \ '_get_node_id_parts',
+      \ '_check_json',
+      \ '_present_loclist'
+      \ ]
+call s:runfail(funcref('s:set_ifuncs', s:ifuncs))
+
 
 " call ------------------------------------------------------------------------
 
 function s:test_call()
-  call assert_true(exists('*'. s:pfx .'call'))
-  let Call = funcref(s:pfx . 'call')
   let overrideables = [
         \ 'extend_python_path', 'get_context', 'get_node_id',
         \ 'init', 'prompt_for_item', 'runner', 'split'
         \ ]
   call assert_equal(overrideables, sort(keys(s:o)))
-  let s:g['get_context'] = {-> a:000}
+  function s:g.get_context(...)
+    return [self, a:000]
+  endfunction
   let args = [1, 2, 3]
-  call assert_equal(args, Call('get_context', args))
-  " Same dict is reused unless reset
+  let [ifaced, rv] = s:i.call('get_context', args)
+  call assert_equal(args, rv)
+  " Same dict is reused when provided
   let s:g['extend_python_path'] = {-> a:000}
   try
     " XXX if this is supposed to propagate, must always use in tandem?
-    call assert_fails(Call('extend_python_path', args))
+    call assert_fails(s:i.call('extend_python_path', args, ifaced))
   catch /.*/
     call assert_exception('E118:') "Too many arguments
   endtry
-  call assert_equal(args, Call('extend_python_path', args, 1)) " reset
+  call assert_equal(args, s:i.call('extend_python_path', args)) " reset
   "
-  let flat = s:g._flattened
-  function s:g.get_node_id()
-    return self
+  function s:g.get_node_id(...)
+    return call(self.get_context, a:000)
   endfunction
-  call assert_notequal(flat, Call('get_node_id', [], 1)) " reset
-  let flat = s:g._flattened
-  call assert_equal(flat, Call('get_node_id', []))
+  let rv = s:i.call('get_node_id', args) " reset
+  call assert_equal(args, rv[1])
+  let ifaced = rv[0]
+  call assert_true(s:func_equal(s:o.runner, ifaced.runner))
+  call assert_false(s:func_equal(s:o.get_context, ifaced.get_context))
+  call assert_equal(ifaced, s:i.call('get_node_id', args, ifaced)[0])
   "
   function! g:pytest_pdb_break_overrides.runner(...) closure
     call assert_equal(overrideables, sort(keys(self)))
     return args == a:000
   endfunction
-  call assert_true(Call('runner', args, 1))
+  call assert_true(s:i.call('runner', args))
 endfunction
 
-call s:runfail(funcref('s:test_call'))
+call s:tee('call', funcref('s:runfail', [funcref('s:test_call')]))
 
 
 " _get_pytest_exe and _get_exe ------------------------------------------------
@@ -316,7 +341,7 @@ function s:test_get_executables()
   endtry
 endfunction
 
-call s:pybuf('test_get_executables')
+call s:tee('get_executables', funcref('s:pybuf', ['test_get_executables']))
 
 
 " init ------------------------------------------------------------------------
@@ -372,12 +397,13 @@ function s:test_init()
   call assert_equal(fnamemodify(s:s.get('file'), ':h:h:h'), s:s.get('home'))
 endfunction
 
-call s:pybuf('test_init')
+call s:tee('init', funcref('s:pybuf', ['test_init']))
 
 
 " get_context -----------------------------------------------------------------
 
 function s:test_get_context()
+  " XXX depends on successful test_init
   call assert_false(exists('b:pytest_pdb_break_context'))
   call mkdir('fake')
   call writefile(['#!/fakebin/fakepython'], 'fake/pytest')
@@ -408,7 +434,7 @@ function s:test_get_context()
   endtry
 endfunction
 
-call s:pybuf('test_get_context')
+call s:tee('get_context', funcref('s:pybuf', ['test_get_context']))
 
 
 " get_node_id_parts -----------------------------------------------------------
@@ -527,13 +553,16 @@ function s:test_get_node_id_one_class()
   call assert_equal(buf .'::test_arg', rv)
 endfunction
 
-call s:pybuf('test_get_node_id_two_funcs')
-call s:pybuf('test_get_node_id_one_class')
+call s:tee('get_node_id_two_funcs',
+      \ funcref('s:pybuf', ['test_get_node_id_two_funcs']))
+call s:tee('get_node_id_one_class',
+      \ funcref('s:pybuf', ['test_get_node_id_one_class']))
 
 
 " check_json ------------------------------------------------------------------
 
 function s:test_check_json()
+  " XXX depends on test_init
   let vbin = s:venvdir .'/base/bin'
   let vers = fnamemodify(s:venvdir, ':t')
   let vpy = vbin .'/python'. vers
@@ -561,12 +590,13 @@ function s:test_check_json()
   call writefile([json_encode(rv)], 'rv.json')
 endfunction
 
-call s:pybuf('test_check_json')
+call s:tee('check_json', funcref('s:pybuf', ['test_check_json']))
 
 
 " present_loclist -------------------------------------------------------------
 
 function! s:test_present_loclist()
+  " XXX depends on test_check_json, test_init
   let curwin = winnr()
   call assert_equal(0, getloclist(curwin, {'nr': '$'}).nr)
   let vbin = s:venvdir .'/base/bin'
@@ -606,12 +636,13 @@ function! s:test_present_loclist()
   call assert_equal('Foo', title)
 endfunction
 
-call s:pybuf('test_present_loclist')
+call s:tee('present_loclist', funcref('s:pybuf', ['test_present_loclist']))
 
 
 " extend_python_path ----------------------------------------------------------
 
 function s:test_extend_python_path()
+  " Depends on test_init
   try
     unlet $PYTHONPATH
   catch /^Vim\%((\a\+)\)\=:E488/
@@ -620,25 +651,31 @@ function s:test_extend_python_path()
   call assert_true(empty($PYTHONPATH))
   "
   let ctx = {'PP': '/tmp/fake'}
-  call assert_equal(ctx.PP, s:o.extend_python_path(ctx))
+  let calldict = {'session': ctx}
+  "
+  let rv = call(s:o.extend_python_path, [], calldict)
+  call assert_equal(ctx.PP, rv)
   unlet ctx.PP
   let isolib = s:s.get('isolib')
   call assert_true(filereadable(isolib . '/pytest_pdb_break.py'))
   call assert_false(filereadable(isolib . '/tox.ini'))
-  call assert_equal(isolib, s:o.extend_python_path(ctx))
+  let rv = call(s:o.extend_python_path, [], calldict)
+  call assert_equal(isolib, rv)
   call assert_equal(ctx.PP, isolib)
   unlet ctx.PP
   "
   let first = s:temphome . '/first'
   let $PYTHONPATH = first
-  call assert_equal(isolib .':'. first, s:o.extend_python_path(ctx))
+  let rv = call(s:o.extend_python_path, [], calldict)
+  call assert_equal(isolib .':'. first, rv)
   call assert_equal(isolib .':'. first, ctx.PP)
   call assert_equal($PYTHONPATH, first)
   " Returned path is filtered filtering
   let $PYTHONPATH = join([isolib, ctx.PP, isolib, isolib], ':')
   unlet ctx.PP
   let expected = join([isolib, first], ':')
-  call assert_equal(expected, s:o.extend_python_path(ctx))
+  let rv = call(s:o.extend_python_path, [], calldict)
+  call assert_equal(expected, rv)
   call assert_equal(expected, ctx.PP)
   try
     unlet $PYTHONPATH
@@ -647,13 +684,15 @@ function s:test_extend_python_path()
   endtry
 endfunction
 
-call s:runfail(funcref('s:test_extend_python_path'))
+call s:tee('extend_python_path',
+      \ funcref('s:runfail', [funcref('s:test_extend_python_path')]))
 
 
 " runner ----------------------------------------------------------------------
 
 function s:test_runner()
-  " Mock split, get_node_id
+  " Depends on test_init
+  " Mocks split, get_node_id
   let thisbuf = bufname('%')
   let dirname = fnamemodify(bufname('%'), ':h')
   let isolib = s:s.get('isolib')
@@ -663,7 +702,7 @@ function s:test_runner()
   let ctx = s:o.get_context()
   call assert_false(exists('ctx.PP'))
   "
-  let rv = s:o.runner('⁉')
+  let rv = s:i.call('runner', ['⁉'])
   call assert_true(exists('ctx.PP'))
   if has('nvim')
     call assert_equal(
@@ -687,14 +726,14 @@ function s:test_runner()
         \ + [thisbuf .'::test_first'],
         \ expect_jobd
         \ ], rv)
-  let rv = s:o.runner()
+  let rv = s:i.call('runner', [])
   call assert_equal([
         \ ctx.last.cmd + ctx.last.opts + [thisbuf .'::test_first'],
         \ expect_jobd
         \ ], rv)
 endfunction
 
-call s:pybuf('test_runner')
+call s:tee('runner', funcref('s:pybuf', ['test_runner']))
 
 
 " split -----------------------------------------------------------------------
@@ -764,7 +803,18 @@ function s:test_split()
   call writefile(outlines, 'term.log')
 endfunction
 
-call s:pybuf('test_split')
+call s:tee('split', funcref('s:pybuf', ['test_split']))
 
 " -----------------------------------------------------------------------------
+
+if exists('$PYTEST_PDB_BREAK_TEST_SELECTION')
+  let s:wanted = split($PYTEST_PDB_BREAK_TEST_SELECTION, ',')
+else
+  let s:wanted = s:playlist
+endif
+
+for wanted in s:wanted
+  call call(s:tests[wanted], [])
+endfor
+
 quitall!

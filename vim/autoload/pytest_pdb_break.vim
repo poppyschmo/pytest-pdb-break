@@ -4,19 +4,21 @@ let s:file = expand('<sfile>')
 let s:initialized = v:false
 
 function! pytest_pdb_break#run(...) abort
-  return s:call('runner', a:000, 1)
+  return s:call('runner', a:000)
 endfunction
 
 function! s:call(name, args, ...) abort
-  " ... => [clear]
-  let d = a:0 && a:1 ?
-        \ {} : get(g:pytest_pdb_break_overrides, '_flattened', {})
-  if empty(d)
+  " ... => dict
+  if a:0
+    if type(a:1) != v:t_dict
+      throw 'Wrong type for a:1'
+    endif
+    let d = a:1
+  else
     let d = filter(copy(g:pytest_pdb_break_overrides), 'v:key !~# "^_"')
     call extend(d, s:defuncs, 'keep')
-    let g:pytest_pdb_break_overrides._flattened = d
   endif
-  return call(d[a:name], a:args, d)
+  return call(d[a:name], a:args)
 endfunction
 
 function! s:_get_pytest_exe() abort
@@ -94,14 +96,11 @@ function! s:init(vars) abort
   let s:initialized = v:true
 endfunction
 
-function! s:get_context() abort
+function! s:get_context() dict abort
   " Save session/env info in buffer-local dict, keyed by pytest exe
-  " XXX the context-dict thing may have made sense under the old 'rootdir'
-  " setup but now seems needlessly complicated; consider ditching; or at least
-  " rename vars to something like 'session'.
   let vars = {}
   if !s:initialized
-    call s:call('init', [vars])
+    call self.init(vars)
   endif
   if !exists('b:pytest_pdb_break_context')
     let b:pytest_pdb_break_context = {}
@@ -262,44 +261,49 @@ function! s:_defer_to_denite(context, locs) abort
   call denite#start([{'name': 'pytest_items', 'args': []}], d)
 endfunction
 
-function! s:prompt_for_item(ctx, ...) abort
-  let locs = call('s:_check_json', [a:ctx, 'get_collected'] + a:000)
-  function! a:ctx.ll_callback(obj) abort closure
+function! s:prompt_for_item() dict abort
+  let ctx = self.session
+  let locs = call('s:_check_json', [ctx, 'get_collected'] + ctx.args)
+  let _s = self
+  "
+  function! ctx.ll_callback(obj) closure abort
     let self.new_item = [a:obj.file] + split(a:obj.nodeid, '::')[1:]
-    return s:call('runner', a:000)
+    return call(_s.runner, ctx.args)
   endfunction
+  "
   if exists('g:loaded_denite')
-    call s:_defer_to_denite(a:ctx, locs)
+    call s:_defer_to_denite(ctx, locs)
   else
-    call s:_present_loclist(a:ctx, locs)
+    call s:_present_loclist(ctx, locs)
   endif
   throw 'Awaitathon'
 endfunction
 
-function! s:get_node_id(ctx, ...) abort
-  let nid = get(a:ctx, 'new_item', [])
+function! s:get_node_id() dict abort
+  let ctx = self.session
+  let nid = get(ctx, 'new_item', [])
   if empty(nid)
     try
       silent let nid = s:_get_node_id_parts(1)
     catch /^Search failed/
       try
-        let nid = s:call('prompt_for_item', [a:ctx] + a:000)
+        let nid = self.prompt_for_item()
       catch /^Awaitathon/
-        return []
+        return ''
       catch /.*/
-        silent! unlet! a:ctx.new_item " docs say unlet! form suppresses, but?
+        silent! unlet! ctx.new_item " docs say unlet! form suppresses, but?
         throw substitute(v:exception,'^Vim\(.\+\)$', '\1', '')
       endtry
     endtry
   else
-    unlet a:ctx.new_item
+    unlet ctx.new_item
   endif
   return join(nid, '::')
 endfunction
 
-function! s:extend_python_path(ctx) abort
+function! s:extend_python_path() dict abort
   " Stash modified copy of PYTHONPATH, should be unset if unneeded
-  let ctx = a:ctx
+  let ctx = self.session
   if has_key(ctx, 'PP')
     return ctx.PP
   endif
@@ -310,16 +314,20 @@ function! s:extend_python_path(ctx) abort
   return ctx.PP
 endfunction
 
-function! s:runner(...) abort
-  let ctx = s:call('get_context', [])
-  let nid = s:call('get_node_id', [ctx] + a:000)
+function! s:runner(...) dict abort
+  if !exists('self.session')
+    let self.session = self.get_context()
+  endif
+  let ctx = self.session
+  let ctx.args = a:000
+  let nid = self.get_node_id()
   if empty(nid)
     return 0
   endif
   let cmd = [ctx.pytest_exe]
   let opts = []
   let jd = {}
-  let preenv = s:call('extend_python_path', [ctx])
+  let preenv = self.extend_python_path()
   if has('nvim')
     let cmd = ['env', printf('PYTHONPATH=%s', preenv)] + cmd
   else
@@ -327,13 +335,13 @@ function! s:runner(...) abort
   endif
   call add(opts,  printf('--break=%s:%s', expand('%:p'), line('.')))
   let ctx.last = {
-        \ 'cmd': cmd, 'uopts': a:000, 'opts': opts,
+        \ 'cmd': cmd, 'uopts': ctx.args, 'opts': opts,
         \ 'node_id': nid, 'jd': jd
         \ }
-  return s:call('split', [cmd + a:000 + opts + [nid], jd])
+  return self.split(cmd + ctx.args + opts + [nid], jd)
 endfunction
 
-function! s:split(cmdl, jobd) abort
+function! s:split(cmdline, jobd) abort
   if !has_key(a:jobd, 'vertical')
     if exists('b:pytest_pdb_break_vertical')
       let a:jobd.vertical = b:pytest_pdb_break_vertical
@@ -344,17 +352,17 @@ function! s:split(cmdl, jobd) abort
   endif
   if has('nvim')
     execute a:jobd.vertical ? 'vnew' : 'new'
-    let a:jobd.job = termopen(a:cmdl, a:jobd)
+    let a:jobd.job = termopen(a:cmdline, a:jobd)
     startinsert
   else
-    let a:jobd.job = term_getjob(term_start(a:cmdl, a:jobd))
+    let a:jobd.job = term_getjob(term_start(a:cmdline, a:jobd))
   endif
 endfunction
 
 
 let s:defuncs = {
-      \ 'get_context': funcref('s:get_context'),
       \ 'init': funcref('s:init'),
+      \ 'get_context': funcref('s:get_context'),
       \ 'extend_python_path': funcref('s:extend_python_path'),
       \ 'prompt_for_item': funcref('s:prompt_for_item'),
       \ 'get_node_id': funcref('s:get_node_id'),
@@ -363,13 +371,6 @@ let s:defuncs = {
       \ }
 
 if exists('g:pytest_pdb_break_testing')
-  let g:pytest_pdb_break_testing.i = {
-        \ '_get_pytest_exe': funcref('s:_get_pytest_exe'),
-        \ '_get_interpreter': funcref('s:_get_interpreter'),
-        \ '_get_node_id_parts': funcref('s:_get_node_id_parts'),
-        \ '_check_json': funcref('s:_check_json'),
-        \ '_present_loclist': funcref('s:_present_loclist')
-        \ }
   let g:pytest_pdb_break_testing.s = {
         \ 'exists': {n -> exists('s:'. n)},
         \ 'get': {n -> eval('s:'. n)},

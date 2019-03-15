@@ -10,6 +10,11 @@ VENVBASE ?= $(VENVDIR)/base
 export PYTEST_PDB_BREAK_TEST_VENVDIR = $(VENVDIR)
 export PYTEST_PDB_BREAK_TEST_TEMPDIR
 
+ifdef TONLY
+	PYTEST_PDB_BREAK_TEST_SELECTION = $(TONLY)
+	export PYTEST_PDB_BREAK_TEST_SELECTION
+endif
+
 ifdef VIRTUAL_ENV
 ifeq (x$(VIRTUAL_ENV),$(findstring x$(VIRTUAL_ENV),x$(PATH)))
 	VENV_BINDIR = $(shell printf %s $$PATH | cut -d ":" -f 1)
