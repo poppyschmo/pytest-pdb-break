@@ -4,10 +4,10 @@ let s:file = expand('<sfile>')
 let s:initialized = v:false
 
 function! pytest_pdb_break#run(...) abort
-  return s:call('runner', a:000)
+  return s:_new('runner', a:000)
 endfunction
 
-function! s:call(name, args, ...) abort
+function! s:_new(name, args, ...) abort
   " ... => dict
   if a:0
     if type(a:1) != v:t_dict
@@ -16,7 +16,8 @@ function! s:call(name, args, ...) abort
     let d = a:1
   else
     let d = filter(copy(g:pytest_pdb_break_overrides), 'v:key !~# "^_"')
-    call extend(d, s:defuncs, 'keep')
+    call extend(d, s:dfuncs, 'keep')
+    let d.session = call(d.get_context, [])
   endif
   return call(d[a:name], a:args)
 endfunction
@@ -57,7 +58,7 @@ function! s:_get_interpreter(vars) abort
   throw 'Could not find a python executable'
 endfunction
 
-function! s:init(vars) abort
+function! s:_init(vars) abort
   " vars => dict with optional items:
   "   'interpreter': path to python interpreter
   "   'pytest_exe': path to pytest exe
@@ -100,7 +101,7 @@ function! s:get_context() dict abort
   " Save session/env info in buffer-local dict, keyed by pytest exe
   let vars = {}
   if !s:initialized
-    call self.init(vars)
+    call self._init(vars)
   endif
   if !exists('b:pytest_pdb_break_context')
     let b:pytest_pdb_break_context = {}
@@ -315,9 +316,6 @@ function! s:extend_python_path() dict abort
 endfunction
 
 function! s:runner(...) dict abort
-  if !exists('self.session')
-    let self.session = self.get_context()
-  endif
   let ctx = self.session
   let ctx.args = a:000
   let nid = self.get_node_id()
@@ -360,8 +358,7 @@ function! s:split(cmdline, jobd) abort
 endfunction
 
 
-let s:defuncs = {
-      \ 'init': funcref('s:init'),
+let s:dfuncs = {
       \ 'get_context': funcref('s:get_context'),
       \ 'extend_python_path': funcref('s:extend_python_path'),
       \ 'prompt_for_item': funcref('s:prompt_for_item'),
@@ -377,5 +374,5 @@ if exists('g:pytest_pdb_break_testing')
         \ 'assign': {n, v -> execute('let s:'. n .' = '. v)},
         \ 'forget': {n -> execute('unlet s:'. n)}
         \ }
-  let g:pytest_pdb_break_testing.o = copy(s:defuncs)
+  let g:pytest_pdb_break_testing.o = copy(s:dfuncs)
 endif

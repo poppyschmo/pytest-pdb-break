@@ -24,7 +24,8 @@ call mkdir(s:temphome, 'p')
 
 let g:pytest_pdb_break_testing = {}
 let s:g = g:pytest_pdb_break_overrides
-let s:g.runner = {-> matchstr(expand('<sfile>'), '<SNR>\zs\d\+\ze_call.*$')}
+let s:g.runner = {-> matchstr(expand('<sfile>'), '<SNR>\zs\d\+\ze__new.*$')}
+let s:g.get_context = {-> {}}
 let s:pfx = printf('<SNR>%s_', pytest_pdb_break#run())
 let s:this_buffer = bufname('%')
 let s:s = g:pytest_pdb_break_testing.s
@@ -189,8 +190,9 @@ endfunction
 
 " Utils (above) ---------------------------------------------------------------
 
-call assert_notequal(s:g.runner, s:o.runner)
-call assert_equal(1, s:has_overrides())
+call assert_false(s:func_equal(s:g.runner, s:o.runner))
+call assert_false(s:func_equal(s:g.get_context, s:o.get_context))
+call assert_equal(2, s:has_overrides())
 call s:clear_overrides()
 call assert_false(s:has_overrides())
 call s:runfail(function('assert_true', [v:true])) " No file-scope v:errors yet
@@ -228,7 +230,8 @@ call s:runfail(function('assert_true', [s:_soon]))
 unlet s:_soon
 
 let s:ifuncs = [
-      \ 'call',
+      \ '_new',
+      \ '_init',
       \ '_get_pytest_exe',
       \ '_get_interpreter',
       \ '_get_node_id_parts',
@@ -238,48 +241,54 @@ let s:ifuncs = [
 call s:runfail(funcref('s:set_ifuncs', s:ifuncs))
 
 
-" call ------------------------------------------------------------------------
+" new -------------------------------------------------------------------------
 
-function s:test_call()
+function s:test_new()
   let overrideables = [
         \ 'extend_python_path', 'get_context', 'get_node_id',
-        \ 'init', 'prompt_for_item', 'runner', 'split'
+        \ 'prompt_for_item', 'runner', 'split'
         \ ]
   call assert_equal(overrideables, sort(keys(s:o)))
-  function s:g.get_context(...)
+  function s:g.get_context()
+    return {'fake': 1}
+  endfunction
+  function s:g.get_node_id(...)
     return [self, a:000]
   endfunction
   let args = [1, 2, 3]
-  let [ifaced, rv] = s:i.call('get_context', args)
+  let [ifaced, rv] = s:i._new('get_node_id', args)
+  call assert_true(has_key(ifaced, 'session'))
+  call assert_equal(1, ifaced.session.fake)
   call assert_equal(args, rv)
   " Same dict is reused when provided
   let s:g['extend_python_path'] = {-> a:000}
   try
     " XXX if this is supposed to propagate, must always use in tandem?
-    call assert_fails(s:i.call('extend_python_path', args, ifaced))
+    call assert_fails(s:i._new('extend_python_path', args, ifaced))
   catch /.*/
     call assert_exception('E118:') "Too many arguments
   endtry
-  call assert_equal(args, s:i.call('extend_python_path', args)) " reset
+  call assert_equal(args, s:i._new('extend_python_path', args)) " reset
   "
-  function s:g.get_node_id(...)
-    return call(self.get_context, a:000)
+  function s:g.split(...)
+    return call(self.get_node_id, a:000)
   endfunction
-  let rv = s:i.call('get_node_id', args) " reset
+  let rv = s:i._new('split', args) " reset
   call assert_equal(args, rv[1])
   let ifaced = rv[0]
   call assert_true(s:func_equal(s:o.runner, ifaced.runner))
   call assert_false(s:func_equal(s:o.get_context, ifaced.get_context))
-  call assert_equal(ifaced, s:i.call('get_node_id', args, ifaced)[0])
+  call assert_equal(ifaced, s:i._new('get_node_id', args, ifaced)[0])
   "
   function! g:pytest_pdb_break_overrides.runner(...) closure
+    call remove(self, 'session')
     call assert_equal(overrideables, sort(keys(self)))
     return args == a:000
   endfunction
-  call assert_true(s:i.call('runner', args))
+  call assert_true(s:i._new('runner', args))
 endfunction
 
-call s:tee('call', funcref('s:runfail', [funcref('s:test_call')]))
+call s:tee('new', funcref('s:runfail', [funcref('s:test_new')]))
 
 
 " _get_pytest_exe and _get_exe ------------------------------------------------
@@ -362,7 +371,7 @@ function s:test_init()
   call mkdir(fake_lib)
   let g:pytest_pdb_break_alt_lib = fake_lib
   try
-    call s:o.init({})
+    call s:i._init({})
   catch /.*/
     call assert_exception('Invalid alt lib:')
   endtry
@@ -377,7 +386,7 @@ function s:test_init()
   if isdirectory(fake_lib)  " os should throw permissions error anyway
     call mkdir(fake_lib . '/pytest_pdb_break-x.x.x.dist-info')
   endif
-  call s:o.init({})
+  call s:i._init({})
   call s:s.assign('initialized', 'v:false')
   call s:s.forget('plugin')
   call s:s.forget('home')
@@ -387,7 +396,7 @@ function s:test_init()
   "
   " Normal run
   call s:_assert_clean_slate()
-  call s:o.init({})
+  call s:i._init({})
   "
   call assert_true(s:s.get('initialized'))
   call assert_true(s:s.exists('plugin'))
@@ -702,7 +711,7 @@ function s:test_runner()
   let ctx = s:o.get_context()
   call assert_false(exists('ctx.PP'))
   "
-  let rv = s:i.call('runner', ['⁉'])
+  let rv = s:i._new('runner', ['⁉'])
   call assert_true(exists('ctx.PP'))
   if has('nvim')
     call assert_equal(
@@ -726,7 +735,7 @@ function s:test_runner()
         \ + [thisbuf .'::test_first'],
         \ expect_jobd
         \ ], rv)
-  let rv = s:i.call('runner', [])
+  let rv = s:i._new('runner', [])
   call assert_equal([
         \ ctx.last.cmd + ctx.last.opts + [thisbuf .'::test_first'],
         \ expect_jobd
