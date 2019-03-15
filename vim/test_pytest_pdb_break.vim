@@ -542,15 +542,15 @@ function s:test_check_json()
   call writefile(s:src_one_class, 'test_one_class.py')
   " No such method
   let args = [context, 'fake', 'foo', 'bar']
-  let [__, out] = s:capture(funcref(s:pfx . '_check_json', args))
+  let [__, out] = s:capture(funcref(s:i._check_json, args))
   call assert_match('usage.*cmdline', out)
   " Subproc error
   let args = [context, 'get_collected', '--fakeopt']
-  let [__, out] = s:capture(funcref(s:pfx . '_check_json', args))
+  let [__, out] = s:capture(funcref(s:i._check_json, args))
   call assert_match('Traceback.*UsageError', out)
   " OK
   let args = [context, 'get_collected']
-  let rv = call(s:pfx . '_check_json', args)
+  let rv = call(s:i._check_json, args)
   call assert_equal(v:t_list, type(rv))
   for loc in rv
     call assert_true(has_key(loc, 'file'))
@@ -564,9 +564,9 @@ endfunction
 call s:pybuf('test_check_json')
 
 
-" populate_loclist ------------------------------------------------------------
+" present_loclist -------------------------------------------------------------
 
-function! s:test_populate_loclist()
+function! s:test_present_loclist()
   let curwin = winnr()
   call assert_equal(0, getloclist(curwin, {'nr': '$'}).nr)
   let vbin = s:venvdir .'/base/bin'
@@ -583,7 +583,7 @@ function! s:test_populate_loclist()
   let ctx = {}
   let ctx.ll_callback = {ti -> add(seen, ti)}
   function s:_await_poploc() closure
-    call call(s:pfx . '_populate_loclist', [ctx, locs])
+    call call(s:i._present_loclist, [ctx, locs])
     let T = {-> (exists('ctx.ll_timer') && empty(timer_info(ctx.ll_timer)))}
     call s:wait_for(T, 1000)
   endfunction
@@ -606,7 +606,7 @@ function! s:test_populate_loclist()
   call assert_equal('Foo', title)
 endfunction
 
-call s:pybuf('test_populate_loclist')
+call s:pybuf('test_present_loclist')
 
 
 " extend_python_path ----------------------------------------------------------

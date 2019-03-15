@@ -10,10 +10,8 @@ class Source(Base):
         self.kind = Kind(vim)
 
     def gather_candidates(self, context):
-        locs = context.get("_pytest_pdb_break", {}).get("locs", [])
-        return [
-            {"word": l["nodeid"], "action__command": l} for l in locs
-        ] if locs else []
+        locs = context.get("_pytest_item_locations", [])
+        return [{"word": l["nodeid"], "action__command": l} for l in locs]
 
 
 class Kind(Command):

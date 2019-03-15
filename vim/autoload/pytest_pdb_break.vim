@@ -97,7 +97,8 @@ endfunction
 function! s:get_context() abort
   " Save session/env info in buffer-local dict, keyed by pytest exe
   " XXX the context-dict thing may have made sense under the old 'rootdir'
-  " setup but now seems needlessly complicated; consider ditching
+  " setup but now seems needlessly complicated; consider ditching; or at least
+  " rename vars to something like 'session'.
   let vars = {}
   if !s:initialized
     call s:call('init', [vars])
@@ -206,7 +207,7 @@ function! s:_check_json(ctx, cmd, ...) abort
   return decoded
 endfunction
 
-function! s:_populate_loclist(context, locs) abort
+function! s:_present_loclist(context, locs) abort
   let ctx = a:context
   let curwin = winnr()
   let curview = winsaveview()
@@ -252,10 +253,10 @@ function! s:_populate_loclist(context, locs) abort
   endtry
 endfunction
 
-function! s:_call_denite(context, locs, args) abort
-  let d = {'_pytest_pdb_break': {'ctx': a:context, 'args': a:args, 'locs': a:locs}}
-  " Would be nice to avoid this workaround and just use some action__* method,
-  " but can't figure out how to access funcrefs from a py module.
+function! s:_defer_to_denite(context, locs) abort
+  let d = {'_pytest_item_locations': a:locs}
+  " Would be nice to use a Kind.action__* method, but can't figure out how to
+  " access funcrefs from a py module.
   call denite#custom#action('pytest_item', 'execute',
         \ {c -> a:context.ll_callback(c['targets'][0]['action__command'])})
   call denite#start([{'name': 'pytest_items', 'args': []}], d)
@@ -268,9 +269,9 @@ function! s:prompt_for_item(ctx, ...) abort
     return s:call('runner', a:000)
   endfunction
   if exists('g:loaded_denite')
-    call s:_call_denite(a:ctx, locs, a:000)
+    call s:_defer_to_denite(a:ctx, locs)
   else
-    call s:_populate_loclist(a:ctx, locs)
+    call s:_present_loclist(a:ctx, locs)
   endif
   throw 'Awaitathon'
 endfunction
@@ -366,6 +367,8 @@ if exists('g:pytest_pdb_break_testing')
         \ '_get_pytest_exe': funcref('s:_get_pytest_exe'),
         \ '_get_interpreter': funcref('s:_get_interpreter'),
         \ '_get_node_id_parts': funcref('s:_get_node_id_parts'),
+        \ '_check_json': funcref('s:_check_json'),
+        \ '_present_loclist': funcref('s:_present_loclist')
         \ }
   let g:pytest_pdb_break_testing.s = {
         \ 'exists': {n -> exists('s:'. n)},
