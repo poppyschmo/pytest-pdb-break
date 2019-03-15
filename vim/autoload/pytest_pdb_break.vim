@@ -4,22 +4,20 @@ let s:file = expand('<sfile>')
 let s:initialized = v:false
 
 function! pytest_pdb_break#run(...) abort
-  return s:_new('runner', a:000)
+  return call(pytest_pdb_break#new().runner, a:000)
 endfunction
 
-function! s:_new(name, args, ...) abort
-  " ... => dict
+function! pytest_pdb_break#new(...) abort
+  " Return a new call space with .session data member
+  " ... => optional dict containing one-off overrides
+  let d = extend(copy(g:pytest_pdb_break_overrides), s:dfuncs, 'keep')
   if a:0
-    if type(a:1) != v:t_dict
-      throw 'Wrong type for a:1'
-    endif
-    let d = a:1
-  else
-    let d = filter(copy(g:pytest_pdb_break_overrides), 'v:key !~# "^_"')
-    call extend(d, s:dfuncs, 'keep')
+    call extend(d, a:1)
+  endif
+  if !exists('d.session')
     let d.session = call(d.get_context, [])
   endif
-  return call(d[a:name], a:args)
+  return d
 endfunction
 
 function! s:_get_pytest_exe() abort
@@ -101,7 +99,7 @@ function! s:get_context() dict abort
   " Save session/env info in buffer-local dict, keyed by pytest exe
   let vars = {}
   if !s:initialized
-    call self._init(vars)
+    call s:_init(vars)
   endif
   if !exists('b:pytest_pdb_break_context')
     let b:pytest_pdb_break_context = {}
@@ -368,7 +366,12 @@ let s:dfuncs = {
       \ }
 
 if exists('g:pytest_pdb_break_testing')
+  function! s:_gen_prefix() abort
+    " Can also use get() on func with 'name'
+    return matchstr(expand('<sfile>'), '\zs<SNR>\d\+_\ze')
+  endfunction
   let g:pytest_pdb_break_testing.s = {
+        \ 'prefix': {-> s:_gen_prefix()},
         \ 'exists': {n -> exists('s:'. n)},
         \ 'get': {n -> eval('s:'. n)},
         \ 'assign': {n, v -> execute('let s:'. n .' = '. v)},

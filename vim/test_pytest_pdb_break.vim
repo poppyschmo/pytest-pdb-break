@@ -24,12 +24,11 @@ call mkdir(s:temphome, 'p')
 
 let g:pytest_pdb_break_testing = {}
 let s:g = g:pytest_pdb_break_overrides
-let s:g.runner = {-> matchstr(expand('<sfile>'), '<SNR>\zs\d\+\ze__new.*$')}
-let s:g.get_context = {-> {}}
-let s:pfx = printf('<SNR>%s_', pytest_pdb_break#run())
+call pytest_pdb_break#new({'session': 'fake'})
 let s:this_buffer = bufname('%')
 let s:s = g:pytest_pdb_break_testing.s
 let s:o = g:pytest_pdb_break_testing.o
+let s:pfx = s:s.prefix()
 let s:i = {}
 let s:playlist = []
 let s:tests = {}
@@ -190,9 +189,9 @@ endfunction
 
 " Utils (above) ---------------------------------------------------------------
 
+let s:g.runner = {-> 'fake'}
 call assert_false(s:func_equal(s:g.runner, s:o.runner))
-call assert_false(s:func_equal(s:g.get_context, s:o.get_context))
-call assert_equal(2, s:has_overrides())
+call assert_equal(1, s:has_overrides())
 call s:clear_overrides()
 call assert_false(s:has_overrides())
 call s:runfail(function('assert_true', [v:true])) " No file-scope v:errors yet
@@ -230,7 +229,6 @@ call s:runfail(function('assert_true', [s:_soon]))
 unlet s:_soon
 
 let s:ifuncs = [
-      \ '_new',
       \ '_init',
       \ '_get_pytest_exe',
       \ '_get_interpreter',
@@ -256,36 +254,44 @@ function s:test_new()
     return [self, a:000]
   endfunction
   let args = [1, 2, 3]
-  let [ifaced, rv] = s:i._new('get_node_id', args)
+  let d = pytest_pdb_break#new()
+  let [ifaced, rv] = call(d.get_node_id, args)
+  call assert_equal(d, ifaced)
+  call assert_true(s:func_equal(s:g.get_node_id, d.get_node_id))
   call assert_true(has_key(ifaced, 'session'))
   call assert_equal(1, ifaced.session.fake)
   call assert_equal(args, rv)
-  " Same dict is reused when provided
-  let s:g['extend_python_path'] = {-> a:000}
+  " Explicitly passed dict wins
+  let s:g.extend_python_path = {-> a:000}  " ignored
+  let d = pytest_pdb_break#new(ifaced)
   try
     " XXX if this is supposed to propagate, must always use in tandem?
-    call assert_fails(s:i._new('extend_python_path', args, ifaced))
+    call assert_fails(call(d.extend_python_path, args))
   catch /.*/
     call assert_exception('E118:') "Too many arguments
   endtry
-  call assert_equal(args, s:i._new('extend_python_path', args)) " reset
+  let d = pytest_pdb_break#new()  " not ignored
+  call assert_equal(args, call(d.extend_python_path, args))
   "
-  function s:g.split(...)
+  let oneoff = {}
+  function oneoff.split(...)
     return call(self.get_node_id, a:000)
   endfunction
-  let rv = s:i._new('split', args) " reset
+  let rv = call(pytest_pdb_break#new(oneoff).split, args)
   call assert_equal(args, rv[1])
   let ifaced = rv[0]
   call assert_true(s:func_equal(s:o.runner, ifaced.runner))
   call assert_false(s:func_equal(s:o.get_context, ifaced.get_context))
-  call assert_equal(ifaced, s:i._new('get_node_id', args, ifaced)[0])
+  call assert_equal(ifaced,
+        \ call(pytest_pdb_break#new(ifaced).get_node_id, args)[0])
   "
   function! g:pytest_pdb_break_overrides.runner(...) closure
     call remove(self, 'session')
     call assert_equal(overrideables, sort(keys(self)))
     return args == a:000
   endfunction
-  call assert_true(s:i._new('runner', args))
+  "
+  call assert_true(call(pytest_pdb_break#new().runner, args))
 endfunction
 
 call s:tee('new', funcref('s:runfail', [funcref('s:test_new')]))
@@ -412,7 +418,7 @@ call s:tee('init', funcref('s:pybuf', ['test_init']))
 " get_context -----------------------------------------------------------------
 
 function s:test_get_context()
-  " XXX depends on successful test_init
+  " FIXME run against uninitialized state
   call assert_false(exists('b:pytest_pdb_break_context'))
   call mkdir('fake')
   call writefile(['#!/fakebin/fakepython'], 'fake/pytest')
@@ -711,7 +717,7 @@ function s:test_runner()
   let ctx = s:o.get_context()
   call assert_false(exists('ctx.PP'))
   "
-  let rv = s:i._new('runner', ['⁉'])
+  let rv = pytest_pdb_break#new().runner('⁉')
   call assert_true(exists('ctx.PP'))
   if has('nvim')
     call assert_equal(
@@ -735,7 +741,7 @@ function s:test_runner()
         \ + [thisbuf .'::test_first'],
         \ expect_jobd
         \ ], rv)
-  let rv = s:i._new('runner', [])
+  let rv = pytest_pdb_break#new().runner()
   call assert_equal([
         \ ctx.last.cmd + ctx.last.opts + [thisbuf .'::test_first'],
         \ expect_jobd
