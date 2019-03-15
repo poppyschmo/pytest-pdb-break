@@ -132,11 +132,11 @@ function! s:_search_back(pat, test) abort
 endfunction
 
 function! s:_get_node_id_parts(...) abort
-  " ... => [want list][start pos]
+  " ... => [start pos]
   let spos = getcurpos()
   try
-    if a:0 == 2
-      call setpos('.', a:2)
+    if a:0
+      call setpos('.', a:1)
     endif
     normal! $
     let gr = []
@@ -162,7 +162,7 @@ function! s:_get_node_id_parts(...) abort
     call setpos('.', spos)
   endtry
   call add(nodeid, expand('%:p'))
-  return a:0 && a:1 ? reverse(nodeid) : join(reverse(nodeid), '::')
+  return reverse(nodeid)
 endfunction
 
 function! s:_print_error(msg, kwargs) abort
@@ -285,7 +285,7 @@ function! s:get_node_id() dict abort
   let nid = get(ctx, 'new_item', [])
   if empty(nid)
     try
-      silent let nid = s:_get_node_id_parts(1)
+      silent let nid = s:_get_node_id_parts()
     catch /^Search failed/
       try
         let nid = self.prompt_for_item()

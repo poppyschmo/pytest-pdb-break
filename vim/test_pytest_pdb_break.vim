@@ -490,35 +490,35 @@ function s:test_get_node_id_two_funcs()
   " vint: -ProhibitCommandRelyOnUser
   normal [m
   call assert_true(getline('.') =~# 'def test_first')
-  " String
+  " Returns list
   call cursor(pos)
   let rv = s:i._get_node_id_parts()
-  call assert_equal(join([buf, 'test_first'], '::'), rv)
+  call assert_equal([buf, 'test_first'], rv)
   " External
   let ext_pos = searchpos('# a comment')
   call assert_notequal([0, 0], ext_pos)
   let [line_num, column] = pos
-  let rv = s:i._get_node_id_parts(1, [0, line_num, column, 0])
+  let rv = s:i._get_node_id_parts([0, line_num, column, 0])
   call assert_equal([buf, 'test_first'], rv)
   call assert_equal(ext_pos, getpos('.')[1:2])
   " List
   call cursor(pos)
-  let rv = s:i._get_node_id_parts(1)
+  let rv = s:i._get_node_id_parts()
   call assert_equal([buf, 'test_first'], rv)
   call assert_equal(pos, getpos('.')[1:2])
   " In def line
   call cursor(1, 1)
   call assert_true(search('test_first') > 0)
-  let rv = s:i._get_node_id_parts(1)
+  let rv = s:i._get_node_id_parts()
   call assert_equal([buf, 'test_first'], rv)
   " Last line
   call cursor(line('$'), 1)
   normal! $
-  let rv = s:i._get_node_id_parts(1)
+  let rv = s:i._get_node_id_parts()
   call assert_equal([buf, 'test_last'], rv)
   " No match
   call cursor(ext_pos)
-  let [__, out] = s:capture(funcref(s:i._get_node_id_parts, [1]))
+  let [__, out] = s:capture(funcref(s:i._get_node_id_parts, []))
   call assert_match('No test found', out, 'Got: '. string(__))
   call assert_equal(ext_pos, getpos('.')[1:2])
 endfunction
@@ -534,15 +534,15 @@ function s:test_get_node_id_one_class()
   " vint: -ProhibitCommandRelyOnUser
   normal [m
   call assert_true(getline('.') =~# 'def test_one')
-  " String
+  " Returns list
   call cursor(pos)
   let rv = s:i._get_node_id_parts()
-  call assert_equal(buf .'::TestClass::test_one', rv)
+  call assert_equal([buf, 'TestClass', 'test_one'], rv)
   " With signature
   call setline(1, 'class TestClass(object):')
   call assert_equal(pos, getpos('.')[1:2])
   let rv = s:i._get_node_id_parts()
-  call assert_equal(buf .'::TestClass::test_one', rv)
+  call assert_equal([buf, 'TestClass', 'test_one'], rv)
   " Between
   call cursor(1, 1)
   let pos = searchpos('^$')
@@ -552,14 +552,14 @@ function s:test_get_node_id_one_class()
   " Last line
   call cursor(line('$'), 1)
   let rv = s:i._get_node_id_parts()
-  call assert_equal(buf .'::TestClass::test_two', rv)
+  call assert_equal([buf, 'TestClass', 'test_two'], rv)
   " Indentation level
   " FIXME bad example (implies there's some fixture named 'self')
   let unlikely = ['', 'def test_arg(self):', '    return self']
   call s:write_src(s:src_one_class + unlikely)
   call cursor(line('$'), 1)
   let rv = s:i._get_node_id_parts()
-  call assert_equal(buf .'::test_arg', rv)
+  call assert_equal([buf, 'test_arg'], rv)
 endfunction
 
 call s:tee('get_node_id_two_funcs',
