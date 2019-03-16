@@ -327,11 +327,12 @@ function! s:runner(...) dict abort
   if has('nvim')
     let cmd = ['env', printf('PYTHONPATH=%s', preenv)] + cmd
   else
-    " TODO verify that these are EXTRA envvars and not a replacement
+    " TODO verify that these are EXTRA envvars and not replacements
     let jd.env = {'PYTHONPATH': preenv}
   endif
-  let plugopt = printf('--break=%s:%s', expand('%:p'), line('.'))
-  let cmdline = cmd + ctx.opts + [plugopt] + ctx.session_opts + [nid]
+  let plugopts = g:pytest_pdb_break_defaults +
+        \ [printf('--break=%s:%s', expand('%:p'), line('.'))]
+  let cmdline = cmd + ctx.opts + plugopts + ctx.session_opts + [nid]
   return self.split(cmdline, jd)
 endfunction
 

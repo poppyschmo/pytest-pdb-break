@@ -1,6 +1,6 @@
 
 
-*pytest_pdb_break.txt*            For Nvim and Vim 8         Updated: 2018 Dec
+*pytest_pdb_break.txt*            For Nvim and Vim 8        Updated: 2019 March
 
 A launcher for pytest's built-in debugger.
 
@@ -12,6 +12,37 @@ Commands~
     Run the test containing the cursor (in pytest PDB mode) and break at the
     current line. Any {args} are passed on to pytest. For example, this will
     cancel out addopts in your pytest ini: `:PytestBreakHere -o addopts=`
+
+
+Options~
+
+b:pytest_pdb_break_pytest_exe
+
+    Use this pytest executable instead of looking in PATH.
+
+g:pytest_pdb_break_alt_lib
+
+    File-system path to an alternate installation location. Set this when
+    using "editable" installations installed via `pip install -e $repo` or
+    `setup.py develop` . Otherwise, changes to Python source files won't be
+    reflected when (re)running the main command.
+
+g:pytest_pdb_break_overrides
+
+    Dictionary containing permanent overrides. Keys must match those in
+    `dfuncs`, a dict at the bottom of the autoload script.
+
+g:pytest_pdb_break_extra_opts
+b:pytest_pdb_break_extra_opts
+
+    Global and buffer-local pytest options lists, which are combined, and
+    inserted before this plugin's options in the command line.
+
+g:pytest_pdb_break_defaults
+
+    List of (non-break-related) options provided by this plugin. These are
+    inserted after the pytest options above and before any session opts passed
+    to the main command. Defaults to `--complete`.
 
 
 Functions~
@@ -31,23 +62,5 @@ pytest_pdb_break#new([{dict}])
     autocmd FileType python
         \ nnoremap <buffer> <F5> :call <SID>PytestRunner('-x', '-v')<cr>
 <
-
-Options~
-
-b:pytest_pdb_break_pytest_exe
-
-    Use this pytest executable instead of looking in PATH.
-
-g:pytest_pdb_break_alt_lib
-
-    File-system path to an alternate installation location. Set this when
-    using "editable" installations installed via `pip install -e $repo` or
-    `setup.py develop` . Otherwise, changes to Python source files won't be
-    reflected when (re)running the main command.
-
-g:pytest_pdb_break_overrides
-
-    Dictionary containing permanent overrides. Keys must match those in
-    `dfuncs`, a dict at the bottom of the autoload script.
 
  vim:ft=help

@@ -712,9 +712,10 @@ function s:test_runner()
   "
   let [rvcl, rvjd] = pytest_pdb_break#new().runner('⁉')
   call assert_true(exists('ctx.PP'))
-  call assert_equal(g:pytest_pdb_break_extra_opts, ['--complete'])
+  call assert_equal(g:pytest_pdb_break_extra_opts, [])
+  call assert_equal(['--complete'], g:pytest_pdb_break_defaults)
   call assert_false(exists('b:pytest_pdb_break_extra_opts'))
-  call assert_equal(ctx.opts, ['--complete'])
+  call assert_equal([], ctx.opts)
   call assert_equal(ctx.session_opts, ['⁉'])
   let common = [
         \ '--complete', '--break='. thisbuf .':1', '⁉',
@@ -730,15 +731,16 @@ function s:test_runner()
     call assert_equal(['/bin/true'] + common, rvcl)
     call assert_equal({'env': {'PYTHONPATH': isolib}}, rvjd)
   endif
-  let b:pytest_pdb_break_extra_opts = ['--foo']
+  let g:pytest_pdb_break_extra_opts = ['--foo']
+  let b:pytest_pdb_break_extra_opts = ['--bar']
   let [rvcl, rvjd] = pytest_pdb_break#new().runner()
-  call assert_equal(ctx.opts, ['--complete', '--foo'])
-  call assert_equal(ctx.session_opts, [])
+  call assert_equal(['--foo', '--bar'], ctx.opts)
+  call assert_equal([], ctx.session_opts)
   let common = [
-        \ '--complete', '--foo', '--break='. thisbuf .':1',
+        \ '--foo', '--bar', '--complete', '--break='. thisbuf .':1',
         \ thisbuf .'::test_first'
         \ ]
-  call assert_equal(common, rvcl[-4:])
+  call assert_equal(common, rvcl[-5:])
   unlet b:pytest_pdb_break_extra_opts
 endfunction
 
