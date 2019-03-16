@@ -4,7 +4,11 @@ let s:file = expand('<sfile>')
 let s:initialized = v:false
 
 function! pytest_pdb_break#run(...) abort
-  return call(pytest_pdb_break#new().runner, a:000)
+  try
+    return call(pytest_pdb_break#new().runner, a:000)
+  catch /^Vim\%((\a\+)\)\=:E171/
+    " Normally redundant; topmost msg shows callers for whole stack
+  endtry
 endfunction
 
 function! pytest_pdb_break#new(...) abort
@@ -246,7 +250,7 @@ function! s:_present_loclist(context, locs) abort
       silent! nunmap <buffer> q
       silent! lclose
     endif
-    throw v:exception
+    echoerr v:exception
   endtry
 endfunction
 
@@ -290,7 +294,7 @@ function! s:get_node_id() dict abort
         return ''
       catch /.*/
         silent! unlet! ctx.new_item " docs say unlet! form suppresses, but?
-        throw substitute(v:exception,'^Vim\(.\+\)$', '\1', '')
+        echoerr v:exception
       endtry
     endtry
   else
