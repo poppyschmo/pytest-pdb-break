@@ -717,35 +717,36 @@ function s:test_runner()
   let ctx = s:o.get_context()
   call assert_false(exists('ctx.PP'))
   "
-  let rv = pytest_pdb_break#new().runner('⁉')
+  let [rvcl, rvjd] = pytest_pdb_break#new().runner('⁉')
   call assert_true(exists('ctx.PP'))
+  call assert_equal(g:pytest_pdb_break_extra_opts, ['--complete'])
+  call assert_false(exists('b:pytest_pdb_break_extra_opts'))
+  call assert_equal(ctx.opts, ['--complete'])
+  call assert_equal(ctx.session_opts, ['⁉'])
+  let common = [
+        \ '--complete', '--break='. thisbuf .':1', '⁉',
+        \ thisbuf .'::test_first'
+        \ ]
   if has('nvim')
     call assert_equal(
-          \ ['env', 'PYTHONPATH='. isolib, '/bin/true'],
-          \ ctx.last.cmd
+          \ ['env', 'PYTHONPATH='. isolib, '/bin/true'] + common,
+          \ rvcl
           \ )
+    call assert_equal({}, rvjd)
   else
-    call assert_equal(['/bin/true'], ctx.last.cmd)
+    call assert_equal(['/bin/true'] + common, rvcl)
+    call assert_equal({'env': {'PYTHONPATH': isolib}}, rvjd)
   endif
-  call assert_equal(['⁉'], ctx.last.uopts)
-  call assert_equal(['--break='. thisbuf .':1'], ctx.last.opts)
-  call assert_equal(thisbuf .'::test_first', ctx.last.node_id)
-  let expect_jobd = {}
-  if !has('nvim')
-    let expect_jobd.env = {'PYTHONPATH': isolib}
-  endif
-  call assert_equal([
-        \ ctx.last.cmd
-        \ + ctx.last.uopts
-        \ + ctx.last.opts
-        \ + [thisbuf .'::test_first'],
-        \ expect_jobd
-        \ ], rv)
-  let rv = pytest_pdb_break#new().runner()
-  call assert_equal([
-        \ ctx.last.cmd + ctx.last.opts + [thisbuf .'::test_first'],
-        \ expect_jobd
-        \ ], rv)
+  let b:pytest_pdb_break_extra_opts = ['--foo']
+  let [rvcl, rvjd] = pytest_pdb_break#new().runner()
+  call assert_equal(ctx.opts, ['--complete', '--foo'])
+  call assert_equal(ctx.session_opts, [])
+  let common = [
+        \ '--complete', '--foo', '--break='. thisbuf .':1',
+        \ thisbuf .'::test_first'
+        \ ]
+  call assert_equal(common, rvcl[-4:])
+  unlet b:pytest_pdb_break_extra_opts
 endfunction
 
 call s:tee('runner', funcref('s:pybuf', ['test_runner']))

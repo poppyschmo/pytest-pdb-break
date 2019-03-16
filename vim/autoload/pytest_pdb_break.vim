@@ -262,12 +262,12 @@ endfunction
 
 function! s:prompt_for_item() dict abort
   let ctx = self.session
-  let locs = call('s:_check_json', [ctx, 'get_collected'] + ctx.args)
+  let locs = call('s:_check_json', [ctx, 'get_collected'] + ctx.opts)
   let _s = self
   "
   function! ctx.ll_callback(obj) closure abort
     let self.new_item = [a:obj.file] + split(a:obj.nodeid, '::')[1:]
-    return call(_s.runner, ctx.args)
+    return call(_s.runner, ctx.session_opts)
   endfunction
   "
   if exists('g:loaded_denite')
@@ -315,26 +315,25 @@ endfunction
 
 function! s:runner(...) dict abort
   let ctx = self.session
-  let ctx.args = a:000
+  let ctx.opts = g:pytest_pdb_break_extra_opts +
+        \ get(b:, 'pytest_pdb_break_extra_opts', [])
+  let ctx.session_opts = a:000  " needed by query helper
   let nid = self.get_node_id()
   if empty(nid)
     return 0
   endif
   let cmd = [ctx.pytest_exe]
-  let opts = []
   let jd = {}
   let preenv = self.extend_python_path()
   if has('nvim')
     let cmd = ['env', printf('PYTHONPATH=%s', preenv)] + cmd
   else
+    " TODO verify that these are EXTRA envvars and not a replacement
     let jd.env = {'PYTHONPATH': preenv}
   endif
-  call add(opts,  printf('--break=%s:%s', expand('%:p'), line('.')))
-  let ctx.last = {
-        \ 'cmd': cmd, 'uopts': ctx.args, 'opts': opts,
-        \ 'node_id': nid, 'jd': jd
-        \ }
-  return self.split(cmd + ctx.args + opts + [nid], jd)
+  let plugopt = printf('--break=%s:%s', expand('%:p'), line('.'))
+  let cmdline = cmd + ctx.opts + [plugopt] + ctx.session_opts + [nid]
+  return self.split(cmdline, jd)
 endfunction
 
 function! s:split(cmdline, jobd) abort
