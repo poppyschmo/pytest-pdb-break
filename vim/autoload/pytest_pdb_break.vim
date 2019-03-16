@@ -27,39 +27,41 @@ function! s:_get_pytest_exe() abort
     let exe = exepath('pytest')
   endif
   if !executable(exe)
-    throw 'Cannot find pytest'
+    throw 'Could not find pytest'
   endif
   return exe
 endfunction
 
-function! s:_get_interpreter(vars) abort
+function! s:_get_interpreter(pytest_exe) abort
+  let lines = []
   try
-    if !has_key(a:vars, 'pytest_exe')
-      let a:vars['pytest_exe'] =  s:_get_pytest_exe()
-    endif
-    let shebang = readfile(a:vars.pytest_exe, '', 1)[0]
-    let exe = substitute(shebang, '^#!', '', '')
+    let lines = readfile(a:pytest_exe)
+    let exe = substitute(lines[0], '^#!', '', '')
   catch /.*/
     let exe = ''
   endtry
   if executable(exe)
     return exe
   endif
-  " Plain python will fail if not python3
-  let backups = exists('g:python3_host_prog') ? [g:python3_host_prog] : []
-  let backups += ['python3', 'python']
-  for exe in backups
-    if executable(exe)
-      return exepath(exe)
+  if !empty(lines) && join(lines) =~# 'PYENV'
+    let cmdline = ['pyenv', 'which', 'pytest']
+    if !has('nvim')
+      let cmdline = join(cmdline)
     endif
-  endfor
+    let pytest_exe = matchstr(system(cmdline), '.\+\w\ze[[:space:]]*$')
+    if pytest_exe != a:pytest_exe && executable(pytest_exe)
+      return s:_get_interpreter(pytest_exe)
+    endif
+  endif
+  " Don't bother trying other pythons in PATH, even host_prog
   throw 'Could not find a python executable'
 endfunction
 
 function! s:_init(vars) abort
-  " vars => dict with optional items:
-  "   'interpreter': path to python interpreter
+  " Without g:pytest_pdb_break_alt_lib, vars dict must contain:
   "   'pytest_exe': path to pytest exe
+  " And will set:
+  "   'interpreter': path to python interpreter
   "
   call assert_equal(&filetype, 'python')
   let path = fnamemodify(s:file, ':h:p') . ';'
@@ -79,10 +81,8 @@ function! s:_init(vars) abort
     endif
     let s:isolib = alt_lib
   else
+    let a:vars.interpreter = s:_get_interpreter(a:vars.pytest_exe)
     let s:isolib = tempname()
-    if !has_key(a:vars, 'interpreter')
-      let a:vars['interpreter'] = s:_get_interpreter(a:vars)
-    endif
     let cmdline = [a:vars.interpreter, s:helper, 'install_plugin', s:isolib]
     if !has('nvim')
       let cmdline = join(cmdline)
@@ -97,21 +97,18 @@ endfunction
 
 function! s:get_context() dict abort
   " Save session/env info in buffer-local dict, keyed by pytest exe
-  let vars = {}
+  let pytest_exe = s:_get_pytest_exe()
+  let vars = {'pytest_exe': pytest_exe}
   if !s:initialized
     call s:_init(vars)
   endif
   if !exists('b:pytest_pdb_break_context')
     let b:pytest_pdb_break_context = {}
   endif
-  if !exists('vars.interpreter') " implies no pytest_exe
-    let vars.interpreter = s:_get_interpreter(vars)
+  if !has_key(b:pytest_pdb_break_context, pytest_exe)
+    let b:pytest_pdb_break_context[pytest_exe] = vars
   endif
-  let exe = vars.pytest_exe
-  if !has_key(b:pytest_pdb_break_context, exe)
-    let b:pytest_pdb_break_context[exe] = vars
-  endif
-  return b:pytest_pdb_break_context[exe]
+  return b:pytest_pdb_break_context[pytest_exe]
 endfunction
 
 function! s:_search_back(pat, test) abort
@@ -171,8 +168,10 @@ function! s:_print_error(msg, kwargs) abort
 endfunction
 
 function! s:_check_json(ctx, cmd, ...) abort
-  let context = a:ctx
-  let cmdline = [context.interpreter, s:helper, '--json', a:cmd, '--'] + a:000
+  if !exists('a:ctx.interpreter')
+    let a:ctx.interpreter = s:_get_interpreter(a:ctx.pytest_exe)
+  endif
+  let cmdline = [a:ctx.interpreter, s:helper, '--json', a:cmd, '--'] + a:000
   if !has('nvim')
     let cmdline = join(cmdline)
   endif

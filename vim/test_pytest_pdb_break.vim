@@ -302,54 +302,47 @@ call s:tee('new', funcref('s:runfail', [funcref('s:test_new')]))
 function s:test_get_executables()
   "
   let bin_path = fnamemodify('fake', ':p')
+  let pyvbin_path = fnamemodify('pv_exec', ':p')
   let pytest_path = bin_path . '/pytest'
+  let pyv_pt_path = pyvbin_path . '/pytest'
   let interp_path = bin_path . '/python'
   call mkdir(bin_path)
+  call mkdir(pyvbin_path)
   call writefile(['#!' . interp_path], pytest_path)
+  call writefile(['#!' . interp_path], pyv_pt_path)
   call writefile([], interp_path)
   call setfperm(pytest_path, 'rwx------')
+  call setfperm(pyv_pt_path, 'rwx------')
   call setfperm(interp_path, 'rwx------')
   "
-  let vars = {}
   " Explicit b: option
   let b:pytest_pdb_break_pytest_exe = pytest_path
   call assert_equal(pytest_path, s:i._get_pytest_exe())
-  call assert_equal(interp_path, s:i._get_interpreter(vars))
-  call assert_false(has_key(vars, 'interpreter'))
-  call assert_equal(pytest_path, vars.pytest_exe)
+  call assert_equal(interp_path, s:i._get_interpreter(pytest_path))
   unlet b:pytest_pdb_break_pytest_exe
   "
   " Fake PATH
   let origpath = $PATH
-  let vars = {}
   try
     let $PATH = bin_path .':'. $PATH
     call assert_equal(pytest_path, exepath('pytest'))
     call assert_equal(interp_path, exepath('python'))
     call assert_equal(pytest_path, s:i._get_pytest_exe())
-    call assert_equal(interp_path, s:i._get_interpreter(vars))
-    call assert_equal(pytest_path, vars.pytest_exe)
-    call assert_false(has_key(vars, 'interpreter'))
+    call assert_equal(interp_path, s:i._get_interpreter(pytest_path))
     "
-    " Fallbacks
-    call assert_false(exists('g:python3_host_prog'))  " skip
+    " Pyenv
+    let pyenv_path = bin_path . '/pyenv'
+    let shimlines = ['#!/usr/bin/env bash', 'set -e', 'export PYENV_ROOT']
+    call writefile(shimlines, pytest_path)
+    call writefile(['#!/bin/sh', 'echo '. pyv_pt_path], pyenv_path)
+    call setfperm(pyenv_path, 'rwx------')
+    call assert_equal(interp_path, s:i._get_interpreter(pytest_path))
     "
-    call writefile(['#!' . bin_path . '/fake_python'], 'fake/pytest')
-    let interp_path = bin_path . '/python3'
-    call writefile([], interp_path)
-    call setfperm(interp_path, 'rwx------')
-    call assert_equal(interp_path, s:i._get_interpreter({}))
-    "
-    let $PATH = bin_path . ':' " otherwise, /usr/bin/python3 wins
-    call delete(interp_path)
-    let interp_path = bin_path . '/python'
-    call assert_equal(interp_path, s:i._get_interpreter({}))
-    "
-    call delete(interp_path)
+    let $PATH = pyvbin_path .':'. origpath
     try
-      call s:i._get_interpreter({})
+      call s:i._get_interpreter(pyv_pt_path)
     catch /.*/
-      call assert_exception('Could not find')
+      call assert_exception('Could not find a python executable')
     endtry
   finally
     let $PATH = origpath
@@ -402,7 +395,7 @@ function s:test_init()
   "
   " Normal run
   call s:_assert_clean_slate()
-  call s:i._init({})
+  call s:i._init({'pytest_exe': s:venvdir .'/base/bin/pytest'})
   "
   call assert_true(s:s.get('initialized'))
   call assert_true(s:s.exists('plugin'))
