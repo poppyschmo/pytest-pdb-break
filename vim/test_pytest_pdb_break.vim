@@ -72,6 +72,8 @@ function s:runfail(test_func, ...)
   let ec = 1000
   let Handler = a:0 ? a:1 : v:null
   let defer = a:0 == 2 ? a:2 : v:false
+  let orig_defaults = copy(g:pytest_pdb_break_defaults)
+  let orig_xtraopts = copy(g:pytest_pdb_break_extra_opts)
   try
     call a:test_func()
     let ec = 0
@@ -101,6 +103,8 @@ function s:runfail(test_func, ...)
       cquit!
     endif
     call s:clear_overrides()
+    let g:pytest_pdb_break_extra_opts = orig_xtraopts
+    let g:pytest_pdb_break_defaults = orig_defaults
   endtry
   return ec
 endfunction
@@ -125,6 +129,17 @@ function s:pybuf(name)
     call assert_equal(s:this_buffer, bufname('%'))
   endfunction
   call s:runfail(Func, funcref('s:_pybuf_handler'))
+endfunction
+
+function s:pypath(name)
+  let origpath = $PATH
+  try
+    let path = s:venvdir . '/base/bin'
+    let $PATH = path .':'. $PATH
+    return call('s:pybuf', [a:name])
+  finally
+    let $PATH = origpath
+  endtry
 endfunction
 
 function s:capture(func, ...)
@@ -749,54 +764,38 @@ call s:tee('runner', funcref('s:pybuf', ['test_runner']))
 
 " split -----------------------------------------------------------------------
 
-function s:test_split()
-  let exe = s:venvdir . '/base/bin/python'
-  let buf = bufname('%')
-  let jobd = {'commands': ['import sys', 'sys.path[1]'], 'output': []}
-  if has('nvim')
-    let cmdl = ['env', 'PYTHONPATH=/tmp/fake', exe, '-i']
-    function! s:on_stdout(id, data, event) dict
-      let str = join(a:data, '')
-      call add(self.output, str)
-      let comms = self.commands
-      if str =~# '>>> $'
-        if !empty(comms)
-          call chansend(a:id, [comms[0], ''])
-          call remove(comms, 0)
-        else
-          call chansend(a:id, ['', ''])
-        endif
-      endif
-    endfunction
-    let jobd.on_stdout = function('s:on_stdout')
-  else
-    let cmdl = [exe, '-i']
-    function! s:on_out(chan, msg) dict
-      call add(self.output, a:msg)
-      if a:msg =~# '>>> $'
-        if !empty(self.commands)
-          call ch_sendraw(a:chan, self.commands[0] . "\n")
-          call remove(self.commands, 0)
-        else
-          call ch_sendraw(a:chan, "\x4")
-        endif
-      endif
-    endfunction
-    let _jobd = jobd
-    let jobd = {}
-    let jobd.env = {'PYTHONPATH': '/tmp/fake'}
-    let jobd.out_cb = funcref('s:on_out', _jobd)
-    call ch_logfile(expand('%:p:h') .'/vim8-channel.log', 'a')
+function s:on_stdout(id, data, event) dict
+  let str = join(a:data, '')
+  call add(self.output, str)
+  let comms = self.commands
+  if str =~# self.prompt
+    if !empty(comms)
+      call chansend(a:id, [comms[0], ''])
+      call remove(comms, 0)
+    else
+      call chansend(a:id, ['', ''])
+    endif
   endif
-  call s:o.split(cmdl, jobd)
-  call assert_true(has_key(jobd, 'vertical'))
-  call assert_true(has_key(jobd, 'job'))
-  call assert_notequal(buf, bufname('%'))
+endfunction
+
+function s:out_cb(chan, msg) dict
+  call add(self.output, a:msg)
+  if a:msg =~# self.prompt
+    if !empty(self.commands)
+      call ch_sendraw(a:chan, self.commands[0] . "\n")
+      call remove(self.commands, 0)
+    else
+      call ch_sendraw(a:chan, "\x4")
+    endif
+  endif
+endfunction
+
+function s:await_split(jd)
+  let jobd = a:jd
   if has('nvim')
     call assert_equal([0], jobwait([jobd.job], 5000))
     execute 'bdelete! term'
     let outlines = split(join(jobd.output, ''), "\r\\|\n")
-    call assert_match('/tmp/fake', join(jobd.output, ''))
   else
     let bn = ch_getbufnr(jobd.job, 'out')
     let waited = 0
@@ -808,13 +807,81 @@ function s:test_split()
     endwhile
     call ch_log('waited: '. waited .'ms')
     bdelete!
-    let outlines = split(join(_jobd.output, ''), "\r\n")
-    call assert_match('/tmp/fake', join(_jobd.output, ''))
+    let _jd = get(jobd.out_cb, 'dict')
+    let outlines = split(join(_jd.output, ''), "\r\n")
   endif
   call writefile(outlines, 'term.log')
+  return outlines
+endfunction
+
+function s:test_split()
+  let exe = s:venvdir . '/base/bin/python'
+  let buf = bufname('%')
+  let jobd = {'commands': ['import sys', 'sys.path[1]'], 'output': []}
+  let jobd.prompt = '>>> $'
+  if has('nvim')
+    let cmdl = ['env', 'PYTHONPATH=/tmp/fake', exe, '-i']
+    let jobd.on_stdout = funcref('s:on_stdout')
+  else
+    let cmdl = [exe, '-i']
+    let _jobd = jobd
+    let jobd = {}
+    let jobd.env = {'PYTHONPATH': '/tmp/fake'}
+    let jobd.out_cb = funcref('s:out_cb', _jobd)
+    call ch_logfile(expand('%:p:h') .'/vim8-channel.log', 'a')
+  endif
+  call s:o.split(cmdl, jobd)
+  call assert_true(has_key(jobd, 'vertical'))
+  call assert_true(has_key(jobd, 'job'))
+  call assert_notequal(buf, bufname('%'))
+  let outlines = s:await_split(jobd)
+  call assert_match('/tmp/fake', join(outlines, ''))
 endfunction
 
 call s:tee('split', funcref('s:pybuf', ['test_split']))
+
+
+" functional ------------------------------------------------------------------
+
+function s:sub_split(cmdline, jd) dict
+  call assert_equal(self.session.jobd, a:jd)
+  let expectd = {}
+  let expectd.commands = ['import sys', 'sys.path[1]', 'q']
+  let expectd.output = []
+  let expectd.prompt = '(Pdb) $'
+  if has('nvim')
+    let jobd = extend(a:jd, expectd)
+    let jobd.on_stdout = funcref('s:on_stdout')
+  else
+    let jobd = a:jd
+    let jobd.out_cb = funcref('s:out_cb', expectd)
+    call ch_logfile(expand('%:p:h') .'/vim8-channel.log', 'a')
+  endif
+  return self.super.split(a:cmdline, jobd)
+endfunction
+
+function s:test_live()
+  let buf = bufname('%')
+  let s:g.split = funcref('s:sub_split')
+  let inst = pytest_pdb_break#new()
+  let inst.super = {}
+  let inst.super.split = s:o.split
+  let ctx = inst.session
+  call s:write_src(s:src_one_class)
+  call cursor(1, 1)
+  let pos = searchpos('varone')
+  "
+  call inst.runner()
+  call s:wait_for({-> has_key(ctx.jobd, 'job')}, 2000) " no closure w. exists()
+  "
+  let outlines = s:await_split(ctx.jobd)
+  let joined = join(outlines, '')
+  call assert_match('/base/bin', joined)
+  call assert_match('passed', joined)
+endfunction
+
+call s:tee('live', funcref('s:pypath', ['test_live']))
+
 
 " -----------------------------------------------------------------------------
 

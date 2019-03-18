@@ -67,7 +67,6 @@ function! s:_init(vars) abort
   " And will set:
   "   'interpreter': path to python interpreter
   "
-  call assert_equal(&filetype, 'python')
   let path = fnamemodify(s:file, ':h:p') . ';'
   let plugin = findfile('pytest_pdb_break.py', path)
   if empty(plugin)
@@ -331,12 +330,12 @@ function! s:runner(...) dict abort
   if has('nvim')
     let cmd = ['env', printf('PYTHONPATH=%s', preenv)] + cmd
   else
-    " TODO verify that these are EXTRA envvars and not replacements
-    let jd.env = {'PYTHONPATH': preenv}
+    let jd.env = {'PYTHONPATH': preenv} " uses curent env as base, updates
   endif
   let plugopts = g:pytest_pdb_break_defaults +
         \ [printf('--break=%s:%s', expand('%:p'), line('.'))]
   let cmdline = cmd + ctx.opts + plugopts + ctx.session_opts + [nid]
+  let ctx.jobd = jd
   return self.split(cmdline, jd)
 endfunction
 
