@@ -101,11 +101,17 @@ class TestEnv(unittest.TestCase):
         wd = make_workdir("Env.shave_path")
         #
         self.assertEqual(os.pathsep, ":")
-        self.assertTrue(os.defpath.startswith(":"))
+
+        # https://bugs.python.org/issue35755
+        if sys.version_info < (3, 7, 4):
+            self.assertTrue(os.defpath.startswith(":"))
+            defpath = os.defpath
+        else:
+            defpath = ":" + os.defpath
         expected = os.defpath.lstrip(":")
         with patch("helpers.ensure_venv.is_venv", return_value=True):
             # ~ expanded, passes abspath check
-            PATH = "~/fake/.virtualenvs/v/bin" + os.defpath
+            PATH = "~/fake/.virtualenvs/v/bin" + defpath
             self.assertEqual(shave_path(PATH), expected)
         with patch("helpers.ensure_venv.is_venv", return_value=False) as m_iv:
             # Returns orig when no venv provided and check returns false
@@ -115,7 +121,7 @@ class TestEnv(unittest.TestCase):
         with patch("helpers.ensure_venv.is_venv", return_value=False) as m_iv:
             vbin = wd / "venv" / "bin"
             venv = vbin.parent
-            PATH = str(vbin) + os.defpath
+            PATH = str(vbin) + defpath
             self.assertEqual(shave_path(PATH, venv), expected)
             m_iv.assert_not_called()
 
@@ -216,10 +222,10 @@ class TestEnv(unittest.TestCase):
             self.assertEqual(str(obin / "python3.42"), rv)
         # In virtual env
         m_sys.executable = str(vexe)
-        PATH = ":".join(map(str, (vbin, obin)))
-        PATH += os.defpath
+        PATH = ":".join(map(str, (vbin, obin, os.defpath.lstrip(":"))))
         env = dict(PATH=PATH, VIRTUAL_ENV=str(vbin.parent))
         with patch.dict("os.environ", env):
+            self.assertEqual(os.getenv("PATH"), env["PATH"])
             rv = get_base_pyexe()
             self.assertIsInstance(rv, str)
             self.assertTrue(rv.endswith("python3.42"))
