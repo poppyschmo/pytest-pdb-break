@@ -10,9 +10,12 @@ def _get_items(argv):
     "Return a list of collected items."
     from _pytest.config import get_config
     from _pytest.main import Session
-    cf = get_config()
+    cf = get_config(list(argv))
     try:
         pm = cf.pluginmanager
+        # See pytest 3c7438969a:
+        # Replace internal config._origargs with invocation_params.args
+        assert not hasattr(cf, "args")
         cf = pm.hook.pytest_cmdline_parse(pluginmanager=pm, args=list(argv))
         session = Session(cf)
         cf.hook.pytest_sessionstart(session=session)
