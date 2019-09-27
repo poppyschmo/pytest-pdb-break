@@ -141,13 +141,17 @@ def pytest_configure(config):
     if config.getoption("pdb_break_complete"):
         if pdbcls and config.pluginmanager.is_registered(pdbcls):
             raise RuntimeError("--complete is not compatible with --pdbcls")
-        elif "complete" in pytestPDB._pdb_cls.__dict__:
-            from warnings import warn
-            cls = pytestPDB._pdb_cls
-            warn("Ignoring option --complete because "
-                 f"{cls.__module__}.{cls.__name__}.complete is defined")
         else:
-            add_completion(config)
+            capman = config.pluginmanager.getplugin("capturemanager")
+            wrapped_class = pytestPDB._import_pdb_cls(capman)
+            # Can't use hasattr because all pdb.Pdb inherits from cmd.Cmd
+            if "complete" in wrapped_class.__base__.__dict__:
+                from warnings import warn
+                cls = wrapped_class
+                warn("Ignoring option --complete because "
+                     f"{cls.__module__}.{cls.__name__}.complete is defined")
+            else:
+                add_completion(config)
     config.pluginmanager.register(PdbBreak(wanted, config), "pdb-break")
 
 
@@ -302,7 +306,7 @@ class PdbBreak:
             self._l and self._l.sertall("with_enter_pdb")
             inst = self.last_pdb
         else:
-            inst = self.last_pdb = pytestPDB._init_pdb()
+            inst = self.last_pdb = pytestPDB._init_pdb("runcall_until")
         try:
             capfix = (testargs.keys() & capture_fixtures).pop()
         except KeyError:
@@ -470,13 +474,24 @@ def is_fixture(loc, fixture_names):
 
 
 def add_completion(config):
-    """Replace pytestPDB._pdb_cls with a completion-enabled subclass.
+    """Modify the original wrapped class with completion methods
+
+    ``_pytest.debugging.pytestPDB._import_pdb_cls`` creates the
+    ``pytestPDB._wrapped_pdb_cls`` attr, which holds the cleaned output
+    from ``_validate_usepdb_cls`` (the value passed to the ``--pdbcls``
+    option), as well as the wrapped class, in a tuple that looks like::
+
+        ((modname, classname), <class wrapped>)
+
+    It's only created once (via ``_get_pdb_wrapper_class``), even when
+    the first element ``[0]`` is ``None``, which is case when pytest was
+    not invoked with ``--pdbcls``.
     """
     module_logger and module_logger.sertall(1)
-    orig = pytestPDB._pdb_cls
+    usepdb_cls, wrapped = pytestPDB._wrapped_pdb_cls
 
     def restore():
-        pytestPDB._pdb_cls = orig
+        pytestPDB._wrapped_pdb_cls = usepdb_cls, wrapped
 
     config.add_cleanup(restore)
     # FIXME not idempotent; should bail or raise if already patched
@@ -489,7 +504,7 @@ def add_completion(config):
                  InteractiveInterpreter.runcode.__code__,  # editor hacks
                  cmd.Cmd.onecmd.__code__]  # "not interactive" sentinel
 
-    class PdbComplete(orig):
+    class PdbComplete(wrapped):
         def __init__(self, *args, **kwargs):
             super().__init__(*args, **kwargs)
             self._l = (module_logger and
@@ -529,4 +544,4 @@ def add_completion(config):
                 self._l and self._l.printback()
                 return None
 
-    pytestPDB._pdb_cls = PdbComplete
+    pytestPDB._wrapped_pdb_cls = usepdb_cls, PdbComplete

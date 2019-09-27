@@ -290,10 +290,11 @@ def test_compat_usage(testdir_setup, recwarn, opts):
     assert result.ret == 3
     result.stdout.fnmatch_lines("INTERNALERROR>*RuntimeError*")
 
-    if ("--complete" in opts
-            and "complete" in pytest.set_trace.__self__._pdb_cls.__dict__):
-        w = recwarn.pop(UserWarning)
-        assert "Ignoring" in str(w.message)
+    if "--complete" in opts:
+        base = pytest.set_trace.__self__._wrapped_pdb_cls[1].__base__
+        if "complete" in base.__dict__:
+            w = recwarn.pop(UserWarning)
+            assert "Ignoring" in str(w.message)
 
 
 def test_compat_invoke_same_before(testdir_setup):
@@ -837,7 +838,8 @@ def test_completion_commands_basic(testdir_setup):
     """)
 
     # Complete method already present
-    if "complete" in pytest.set_trace.__self__._pdb_cls.__dict__:
+    from _pytest.debugging import pdb as mod_pdb
+    if "complete" in mod_pdb.Pdb.__dict__:
         result = testdir_setup.runpytest_subprocess("--complete", "--break=1")
         result.stderr.fnmatch_lines("*UserWarning*Ignoring*--complete*")
         return
@@ -909,7 +911,8 @@ def test_completion_commands_interact(testdir_setup):
     """)
 
     # Complete method already present
-    if "complete" in pytest.set_trace.__self__._pdb_cls.__dict__:
+    from _pytest.debugging import pdb as mod_pdb
+    if "complete" in mod_pdb.Pdb.__dict__:
         result = testdir_setup.runpytest_subprocess("--complete", "--break=1")
         result.stderr.fnmatch_lines("*UserWarning*Ignoring*--complete*")
         return
