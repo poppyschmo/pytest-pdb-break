@@ -21,8 +21,8 @@ from pathlib import Path
 from _pytest.runner import runtestprotocol
 
 try:
-    if tuple(int(s) for s in pytest.__version__.split(".")) < (4, 0):
-        raise RuntimeError("Requires at least pytest 4.0")
+    if tuple(int(s) for s in pytest.__version__.split(".")) < (5, 0):
+        raise RuntimeError("Requires at least pytest 5.0")
 except ValueError:
     pass  # assume some git-describe-like string: devNN+gdeadbeef
 
