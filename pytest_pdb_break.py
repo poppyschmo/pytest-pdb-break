@@ -149,7 +149,8 @@ def pytest_configure(config):
                 from warnings import warn
                 cls = wrapped_class
                 warn("Ignoring option --complete because "
-                     f"{cls.__module__}.{cls.__name__}.complete is defined")
+                     "{cls.__module__}.{cls.__name__}.complete is defined"
+                     .format(cls=cls))
             else:
                 add_completion(config)
     config.pluginmanager.register(PdbBreak(wanted, config), "pdb-break")
