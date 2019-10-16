@@ -420,18 +420,19 @@ hard-wired, for now." )
 
 (defun pytest-pdb-break--kill-shell-buffer-name (parent-buffer)
   "Remove or restore `python-shell-buffer-name' in PARENT-BUFFER."
-  (with-current-buffer parent-buffer
-    (when (and (local-variable-p 'python-shell-buffer-name)
-               python-shell-buffer-name
-               (string= python-shell-buffer-name
-                        pytest-pdb-break--proc-base-name))
-      (if pytest-pdb-break--existing-python-shell-buffer-name
-          (progn
-            (setq-local python-shell-buffer-name
-                        pytest-pdb-break--existing-python-shell-buffer-name)
-            (kill-local-variable
-             'pytest-pdb-break--existing-python-shell-buffer-name))
-        (kill-local-variable 'python-shell-buffer-name)))))
+  (when (buffer-live-p parent-buffer)
+    (with-current-buffer parent-buffer
+      (when (and (local-variable-p 'python-shell-buffer-name)
+                 python-shell-buffer-name
+                 (string= python-shell-buffer-name
+                          pytest-pdb-break--proc-base-name))
+        (if pytest-pdb-break--existing-python-shell-buffer-name
+            (progn
+              (setq-local python-shell-buffer-name
+                          pytest-pdb-break--existing-python-shell-buffer-name)
+              (kill-local-variable
+               'pytest-pdb-break--existing-python-shell-buffer-name))
+          (kill-local-variable 'python-shell-buffer-name))))))
 
 (define-minor-mode pytest-pdb-break-mode
   "A minor mode for Python comint buffers running a pytest PDB session."

@@ -1155,7 +1155,7 @@ def test_foo(fixie):
         (pytest-pdb-break--kill-shell-buffer-name (current-buffer))
         (should (string= python-shell-buffer-name "Foo"))
         (should (local-variable-p 'python-shell-buffer-name)))
-      (ert-info ("Killed")
+      (ert-info ("Revert local modifications, restore to default")
         (setq python-shell-buffer-name pytest-pdb-break--proc-base-name)
         (pytest-pdb-break--kill-shell-buffer-name (current-buffer))
         (should-not (local-variable-p 'python-shell-buffer-name))
@@ -1172,7 +1172,11 @@ def test_foo(fixie):
       (should (local-variable-p 'python-shell-buffer-name))
       (should-not pytest-pdb-break--existing-python-shell-buffer-name)
       (should-not (local-variable-p
-                   'pytest-pdb-break--existing-python-shell-buffer-name)))))
+                   'pytest-pdb-break--existing-python-shell-buffer-name))))
+  (ert-info ("Parent buffer already killed")
+    (let (b)
+      (with-temp-buffer (setq b (current-buffer)))
+      (should-not (pytest-pdb-break--kill-shell-buffer-name b)))))
 
 (ert-deftest pytest-pdb-break-test-minor-mode ()
   ;; Eval: (compile "make PAT=minor-mode")
