@@ -39,7 +39,7 @@ except Exception:
     module_logger = None
 
 
-__version__ = "0.0.5"
+__version__ = "0.0.6"
 pytestPDB = pytest.set_trace.__self__
 
 
