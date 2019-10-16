@@ -850,7 +850,8 @@ def test_completion_commands_basic(testdir_setup):
     """)
 
     # Complete method already present
-    from _pytest.debugging import pdb as mod_pdb
+    from conftest import get_mod_pdb
+    mod_pdb = get_mod_pdb()
     if "complete" in mod_pdb.Pdb.__dict__:
         result = testdir_setup.runpytest_subprocess("--complete", "--break=1")
         result.stderr.fnmatch_lines("*UserWarning*Ignoring*--complete*")
@@ -923,7 +924,8 @@ def test_completion_commands_interact(testdir_setup):
     """)
 
     # Complete method already present
-    from _pytest.debugging import pdb as mod_pdb
+    from conftest import get_mod_pdb
+    mod_pdb = get_mod_pdb()
     if "complete" in mod_pdb.Pdb.__dict__:
         result = testdir_setup.runpytest_subprocess("--complete", "--break=1")
         result.stderr.fnmatch_lines("*UserWarning*Ignoring*--complete*")

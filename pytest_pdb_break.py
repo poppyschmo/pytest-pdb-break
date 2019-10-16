@@ -21,10 +21,13 @@ from pathlib import Path
 from _pytest.runner import runtestprotocol
 
 try:
-    if tuple(int(s) for s in pytest.__version__.split(".")) < (5, 0):
+    # May have a short g-sha as 4th component
+    _pytest_version = tuple(int(s) for s in pytest.__version__.split(".")[:3])
+    if _pytest_version < (5, 0):
         raise RuntimeError("Requires at least pytest 5.0")
 except ValueError:
-    pass  # assume some git-describe-like string: devNN+gdeadbeef
+    # Assume something non-standard like devNN+gdeadbeef
+    _pytest_version = None
 
 module_logger = None
 try:

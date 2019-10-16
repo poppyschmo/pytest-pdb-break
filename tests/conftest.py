@@ -199,3 +199,14 @@ def testdir_simple_nested_async(testdir_setup):
             assert res == 1
     """)
     return testdir_setup
+
+
+def get_mod_pdb():
+    try:
+        from _pytest.debugging import pdb as mod_pdb
+    except ImportError:
+        # Upstream: 07f20ccab618fbb3c594601c7135cccaf324f270
+        from pytest_pdb_break import _pytest_version
+        assert _pytest_version >= (5, 2, 1)
+        import pdb as mod_pdb
+    return mod_pdb
