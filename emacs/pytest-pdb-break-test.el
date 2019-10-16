@@ -47,6 +47,7 @@
     pytest-pdb-break-test-default-options-function
     pytest-pdb-break-test-main-command-min-version
     pytest-pdb-break-test-main-command-basic
+    pytest-pdb-break-test-main-command-basic-asyncio
     pytest-pdb-break-test-main-command-outside
     pytest-pdb-break-test-main-command-send-string
     pytest-pdb-break-test-main-command-completion
@@ -803,6 +804,19 @@ def fixie():
 def test_foo(fixie):
     assert fixie == 1
 "
+    "
+from asyncio import get_event_loop
+
+def test_outer():
+    foo = 1
+
+    async def inner():
+        assert foo
+        return True
+
+    loop = get_event_loop()
+    assert loop.run_until_complete(inner())
+"
     )
   "The first line (1) is a single newline char.")
 
@@ -1525,6 +1539,17 @@ SRCFILE is the filename to save the src element as."
    (ert-info ("Break in first method")
      (should (save-excursion  ; already at prompt, so must search back
                (search-backward-regexp ">.*\\.py(4)test_foo()$" nil t))))
+   (comint-send-string pytest-pdb-break--process "c\n")
+   (should (pytest-pdb-break-test--expect-simple "finished\n.*"))))
+
+(ert-deftest pytest-pdb-break-test-main-command-basic-asyncio ()
+  ;; Eval: (compile "make PAT=main-command-basic-asyncio")
+  (skip-unless (null pytest-pdb-break-test-skip-plugin))
+  (pytest-pdb-break--main-command-fixture
+   4 "test_asyncio.py" "assert foo"
+   (ert-info ("Break in nested function")
+     (should (save-excursion  ; already at prompt, so must search back
+               (search-backward-regexp ">.*\\.py(8)inner()$" nil t))))
    (comint-send-string pytest-pdb-break--process "c\n")
    (should (pytest-pdb-break-test--expect-simple "finished\n.*"))))
 
