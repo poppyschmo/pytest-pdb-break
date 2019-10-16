@@ -473,6 +473,7 @@ let s:src_two_funcs = [
       \ '',
       \ 'def test_last(request):',
       \ '    def inner():',
+      \ '        foo = 1',
       \ '        return True',
       \ '    vartwo = True',
       \ '    assert vartwo',
@@ -512,8 +513,9 @@ function s:test_get_node_id_two_funcs()
   let ext_pos = searchpos('# a comment')
   call assert_notequal([0, 0], ext_pos)
   let [line_num, column] = pos
-  let rv = s:i._get_node_id_parts([0, line_num, column, 0])
-  call assert_equal([buf, 'test_first'], rv)
+  let Partial = funcref(s:i._get_node_id_parts, [0, line_num, column, 0])
+  let [__, out] = s:capture(Partial)
+  call assert_match('No test found', out, 'Got: '. string(__))
   call assert_equal(ext_pos, getpos('.')[1:2])
   " List
   call cursor(pos)
@@ -523,11 +525,15 @@ function s:test_get_node_id_two_funcs()
   " In def line
   call cursor(1, 1)
   call assert_true(search('test_first') > 0)
-  let rv = s:i._get_node_id_parts()
-  call assert_equal([buf, 'test_first'], rv)
+  let [__, out] = s:capture(funcref(s:i._get_node_id_parts, []))
+  call assert_match('No test found', out, 'Got: '. string(__))
   " Last line
   call cursor(line('$'), 1)
   normal! $
+  let rv = s:i._get_node_id_parts()
+  call assert_equal([buf, 'test_last'], rv)
+  " Inner
+  call searchpos('foo = 1')
   let rv = s:i._get_node_id_parts()
   call assert_equal([buf, 'test_last'], rv)
   " No match

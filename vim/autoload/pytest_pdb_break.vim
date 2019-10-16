@@ -115,18 +115,27 @@ function! s:get_context() dict abort
 endfunction
 
 function! s:_search_back(pat, test) abort
-  let begd = indent('.')
-  let begl = line('.')
-  while 1
-    if !search(a:pat, 'Wb')
-      return 0
-    endif
+  let lastd = indent('.')
+  let found = []
+  while search(a:pat, 'Wb')
     let sid = synID(line('.'), col('.'), 1)
-    if synIDattr(sid, 'name') !~? 'comment\|string' && a:test(begl, begd)
+    if synIDattr(sid, 'name') =~? 'comment\|string'
+      continue
+    endif
+    if indent('.') >= lastd
+      continue
+    endif
+    let lastd = indent('.')
+    if a:test()
+      let found = getpos('.')
       break
     endif
   endwhile
-  return line('.')
+  if empty(found)
+    return 0
+  endif
+  call setpos('.', found)
+  return 1
 endfunction
 
 function! s:_get_node_id_parts(...) abort
@@ -139,20 +148,21 @@ function! s:_get_node_id_parts(...) abort
     normal! $
     let gr = []
     if s:_search_back('\v^\s*(def|async def)>',
-          \ {l, d -> indent('.') < d || line('.') == l})
-      let pat = '^\s*\(def\|async def\)\s\+\(test_\w\+\)(\(.*\)).*$'
+          \ {-> getline('.') =~ 'def\s\+test_'})
+      let pat = '^\s*def\s\+\(test_\w\+\)(\(.*\)).*$'
       let gr = matchlist(getline('.'), pat)
     endif
-    if empty(gr) || empty(gr[2])
+    if empty(gr) || empty(gr[1])
       echohl WarningMsg | echo 'No test found!' | echohl Normal
       echo printf(' beg(%d): %s', spos[1], shellescape(getline(spos[1])))
       echo printf(' end(%d): %s', line('.'), shellescape(getline('.')))
       echo ' match: ' . string(gr)
       throw 'Search failed'
     endif
-    let nodeid = [gr[2]]
-    if gr[3] =~# '^self.*' &&
-          \ s:_search_back('\_^\s*class\s', {_, d -> indent('.') < d})
+    let nodeid = [gr[1]]
+    " FIXME don't hard-code Test* as name (can be changed in ini file)
+    if gr[2] =~# '^self.*' &&
+          \ s:_search_back('\_^\s*class\s', {-> getline('.') =~ 'class\s\+Test'})
       let cgr = matchlist(getline('.'), '^\s*class\s\(\w\+\).*:.*')
       call add(nodeid, cgr[1])
     endif
