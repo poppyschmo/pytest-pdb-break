@@ -151,3 +151,51 @@ def source_ast():
 def testdir_ast(testdir_setup, source_ast):
     testdir_setup.makepyfile(source_ast)
     return testdir_setup
+
+
+@pytest.fixture
+def source_ast_aio():
+    from textwrap import dedent
+    source = dedent("""
+        async def somefunc():          # <- line 1
+            print("somefunc")
+
+        class TestClass:               # <- line 4
+            def test_foo(self):
+                somevar = False
+
+                async def inner(x):    # <- line 8
+                    return not x
+
+                import asyncio
+                assert asyncio.run(somevar)
+
+    """).strip()
+    return source
+
+
+@pytest.fixture
+def testdir_ast_aio(testdir_setup, source_ast_aio):
+    testdir_setup.makepyfile(source_ast_aio)
+    return testdir_setup
+
+
+@pytest.fixture
+def testdir_simple_nested_async(testdir_setup):
+    # Note: unlike breakpoints, location line numbers are 0 indexed
+    testdir_setup.makepyfile("""
+        def test_foo():
+            import asyncio
+
+            async def inner():
+                somevar = True
+                assert somevar            # <- line 6
+                await asyncio.sleep(0.01)
+                spam = 1
+                return spam
+
+            loop = asyncio.get_event_loop()
+            res = loop.run_until_complete(inner())
+            assert res == 1
+    """)
+    return testdir_setup

@@ -171,6 +171,18 @@ def test_fortify_location(testdir_ast):
     assert type(rv.ast_obj) is FunctionDef
 
 
+def test_fortify_location_aio(testdir_ast_aio):
+    from pytest_pdb_break import fortify_location
+    filename = Path(testdir_ast_aio.tmpdir / "test_fortify_location_aio.py")
+    assert filename.exists()
+    # No top-level, test_* prefixed asyncio functions allowed
+    assert fortify_location(filename, 2) is None
+    rv = fortify_location(filename, 9)
+    assert rv.equals(BreakLoc(filename, 9, None,
+                              class_name="TestClass", func_name="test_foo"))
+    assert rv.inner == "inner"
+
+
 def test_is_fixture(testdir_setup):
     from pytest_pdb_break import fortify_location, is_fixture
     testdir_setup.makepyfile(test_file="""
@@ -962,3 +974,17 @@ def test_completion_commands_interact(testdir_setup):
     pe.expect("[(]42.*sys.*[)]")
 
     pe.sendline("c")
+
+
+def test_simple_nested_async(testdir_simple_nested_async):
+    pe = testdir_simple_nested_async.spawn_pytest(
+        "--break=test_simple_nested_async.py:6"
+    )
+    pe.expect(prompt_re)
+    befs = LineMatcher(unansi(pe.before))
+    befs.fnmatch_lines([
+        "*>*/test_simple_nested_async.py(6)inner()",
+        "->*# <- line 6",
+    ])
+    pe.sendline("c")
+    pe.expect(EOF)

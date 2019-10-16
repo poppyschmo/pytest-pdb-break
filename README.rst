@@ -2,14 +2,12 @@
 pytest-pdb-break
 ================
 
-This is an aid to help **text editors** fire up the debugger and fast-forward
-to the point of interest. If you already have a solid workflow with
-``breakpoint()`` snippets and/or the ``--trace`` and ``--pdb`` options, there's
-nothing to see here.
+This is an aid to help traditional **text editors** fire up the debugger and
+fast-forward to the point of interest. If you already have a solid workflow
+with ``breakpoint()`` snippets and/or the ``--trace`` and ``--pdb`` options,
+there's nothing to see here.
 
-    .. _actually:
-
-    This basically_ does ...
+    This basically does ...
 
     .. code:: console
 
@@ -33,8 +31,13 @@ Simpatico check
        debugger
     #. You like the certainty of stopping offered by the second example above
     #. You like tab completion of variables and attributes
-    #. You want inside ``unittest.TestCase`` s and your own fixtures
-       (experimental)
+    #. You want inside ``unittest.TestCase`` s, your own fixtures, and nested
+       async funcs (all experimental)
+
+Before you try
+    Check out the newer ptvsd/DAP/pydevd-based extensions for Vim and Emacs.
+    They definitely have the potential to work seamlessly with pytest, VS-Code
+    style. This plugin only launches PDB, the built-in GDB-style debugger.
 
 Don't install
     Unlike proper pytest plugins, this isn't meant to be installed as a Python
@@ -53,38 +56,6 @@ Notes/caveats
 
     #. It does not support the ``-m pytest`` style of invocation, meaning
        working directories are not implicitly prepended to ``sys.path``
-
-    #.
-       .. _basically:
-
-       Actually_, it's more like ...
-
-       .. code:: console
-
-           $ echo until 42 > .pdbrc
-           $ pytest --trace spam.py::test_foo; rm -f .pdbrc
-           ========================== test session starts ==========================
-           ...
-            > /repo/spam.py(42)test_foo()
-           -> assert True  # line 42
-           (pdb) _
-
-       or ...
-
-       .. code:: console
-
-           $ cp spam.py spam.py~
-           $ sed -i -E \
-           >   '42{h;s/^(\s+)(.*)$/\1import pytest; pytest.set_trace()/p;g}' \
-           >   spam.py
-           $ pytest spam.py::test_foo; mv -f spam.py~ spam.py
-           ========================== test session starts ==========================
-           ...
-            > /repo/spam.py(43)test_foo()
-           -> assert True  # line 42
-           (pdb) _
-
-       (assuming the target line opens with a new statement)
 
     #. When hacking on the main pytest plugin, disregard the imperative above
        and *do install*:
@@ -112,5 +83,6 @@ Notes/caveats
 
 
 TODOs
+    #. Improve ``asyncio`` support
+    #. Support class names with non-``Test`` prefixes.
     #. External helper returning ``--options`` list
-    #. ``asyncio``

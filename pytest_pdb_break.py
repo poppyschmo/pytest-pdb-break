@@ -425,13 +425,13 @@ def fortify_location(filename, line_no):
     leaf = _get_node_at_pos(line_no, root, None)
 
     def find(node, tipo):
-        while node and type(node) is not tipo:
+        while node and type(node) not in tipo:
             if node is root:
                 return None
             node = node.parent
         return node
 
-    func = find(leaf, ast.FunctionDef)
+    func = find(leaf, (ast.FunctionDef, ast.AsyncFunctionDef))
     if func is None:
         return None
 
@@ -439,13 +439,17 @@ def fortify_location(filename, line_no):
     inner = None
     # Fails when inner func is named test_*
     while cand and not cand.name.startswith("test_"):
-        cand = find(cand.parent, ast.FunctionDef)
+        cand = find(cand.parent, (ast.FunctionDef,))
     if cand:
         if cand is not func:
             inner = func.name
         func = cand
+    elif (type(func) is ast.AsyncFunctionDef
+          and not func.name.startswith("test_")):
+        # Pytest can't run top-level async def test_* funcs, right?
+        return None
 
-    cls = find(func, ast.ClassDef)
+    cls = find(func, (ast.ClassDef,))
 
     return BreakLoc(file=filename, lnum=line_no, name=None,
                     class_name=cls.name if cls else None,
