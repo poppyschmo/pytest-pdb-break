@@ -3,12 +3,7 @@ See atop the main file for additional options and info, also =pytest-pdb-break-e
 convenience functions, integration tips (Elpy), and more.
 
 ** Installation
-No MELPA yet, but =straight.el= users can use this:
-   #+BEGIN_SRC emacs-lisp
-     '(:host github :repo "poppyschmo/pytest-pdb-break"
-             :files (:defaults "emacs/*.el" (:exclude "emacs/*-test.el")))
-
-   #+END_SRC
+MELPA: =M-x package-install RET pytest-pdb-break RET=
 
 ** Usage
 With point in the body of some test, run =M-x pytest-pdb-break-here=.
