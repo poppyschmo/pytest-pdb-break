@@ -526,7 +526,7 @@ def test_request_object(testdir_setup):
     befs.fnmatch_lines("*>*/test_file.py(2)test_rq()")
     pe.sendline("c")
     pe.expect(r"\[100%\]")
-    pe.expect(r"\b1 passed")
+    pe.expect(r"1 passed")
 
 
 def test_class_simple(testdir_class):
