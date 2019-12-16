@@ -192,6 +192,7 @@ class PdbBreak:
         self.targets = None
         self.elsewhere = None
         self.last_pdb = None
+        self._l and self._l.pspell("bottom")
 
     def _resolve_wanted(self, wanted):
         """Validate file component of user arg, if supplied."""
@@ -225,19 +226,26 @@ class PdbBreak:
             """Stash pytest-wrapped pdb instance."""
             self.last_pdb = pdb
 
+    def _ensure_wanted(self, locs):
+        if self.wanted.file:
+            return
+        locs_files = {l.file for l in locs}
+        try:
+            self.wanted.file = locs_files.pop()
+            assert not len(locs_files)
+        except Exception:
+            msg = "unable to determine breakpoint file"
+            raise RuntimeError(msg)
+        else:
+            self._l and self._l.pspore("rewrite")
+
     def pytest_runtestloop(self, session):
         """Find a suitable target or raise RuntimeError."""
         locs = [BreakLoc.from_pytest_item(i) for i in session.items]
-        self._l and self._l.pspore("enter")
-        if not self.wanted.file:
-            locs_files = set(l.file for l in locs)
-            if len(locs_files) == 1:
-                inferred = locs_files.pop()
-                self.wanted.file = inferred
-                self._l and self._l.pspore("rewrite")
-            else:
-                msg = "unable to determine breakpoint file"
-                raise RuntimeError(msg)
+        self._l and self._l.pspore("locs")
+
+        self._ensure_wanted(locs)
+
         fortified = fortify_location(self.wanted.file, self.wanted.lnum)
         if not fortified:
             msg = "unable to determine breakpoint location"
