@@ -115,50 +115,6 @@ def testdir_class(testdir_setup):
     return testdir_setup
 
 
-source_ast = """
-def somefunc():                # <- line 1
-    print("somefunc")
-
-class C:                       # <- line 4
-    def f(self):
-        return True
-
-class TestClass:               # <- line 8
-    def test_foo(self):
-        somevar = False
-
-        def inner(x):          # <- line 12
-            return not x
-
-        assert inner(somevar)
-
-SOME_GLOBAL = "test"
-
-@wrapper.attr                  # <- line 19
-def wrapped():
-    print("wrapped")
-
-if __name__ == "__main__":     # <- line 23
-    pass
-""".strip()
-
-
-source_ast_aio = """
-async def somefunc():          # <- line 1
-    print("somefunc")
-
-class TestClass:               # <- line 4
-    def test_foo(self):
-        somevar = False
-
-        async def inner(x):    # <- line 8
-            return not x
-
-        import asyncio
-        assert asyncio.run(somevar)
-""".strip()
-
-
 @pytest.fixture
 def testdir_simple_nested_async(testdir_setup):
     # Note: unlike breakpoints, location line numbers are 0 indexed
