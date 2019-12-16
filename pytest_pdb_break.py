@@ -55,18 +55,22 @@ class BreakLoc:
     lnum = attr.ib(validator=attr.validators.instance_of(int))
     name = attr.ib()
 
+    py_obj_kind = attr.ib(default=None, repr=False, eq=False, kw_only=True)
     class_name = attr.ib(default=None, repr=False, eq=False, kw_only=True)
     func_name = attr.ib(default=None, repr=False, eq=False, kw_only=True)
     param_id = attr.ib(default=None, repr=False, eq=False, kw_only=True)
     ast_obj = attr.ib(default=None, repr=False, eq=False, kw_only=True)
     inner = attr.ib(default=None, repr=False, eq=False, kw_only=True)
+    func = attr.ib(default=None, repr=False, eq=False, kw_only=True)
 
     def equals(self, other):
         """True if class, func, param fields are equal.
         This is the same as comparing ``attr.astuple()`` values but
         leaves room for the likely addition of extraneous attrs.
         """
-        relevant = ("class_name", "func_name", "param_id")
+        relevant = (
+            "py_obj_kind", "class_name", "func_name", "param_id", "func"
+        )
         return self == other and all(
             getattr(self, a) == getattr(other, a) for a in relevant
         )
@@ -471,19 +475,26 @@ def _get_node_at_pos(line_no, node, parent=None):
                 return rv
 
 
-def fortify_location(filename, line_no, async_plugin=False):
-    """Try to flesh out location with more specific info.
+def fortify_location(
+    filename,
+    line_no,
+    func_names,  # dict mapping func names to items
+    fixtures_finder,  # callable returning map of func names to FixtureDefs
+):
+    """Resolve args into a canonical BreakLoc object and return it
 
-    On success, return new BreakLoc object. Otherwise, return None.
-    The returned object's func_name must refer to a collected
-    item or fixture. The ``inner`` field must be the innermost
-    enclosing function (of line_no) if different from the item.
+    'Canonical' meaning the ``BreakLoc.func`` attribute must be taken
+    from a ``Item.function`` or ``FixtureDef.func``.  On failure, return
+    None.  If relevant, the ``inner`` field must be set to the innermost
+    enclosing function of arg ``line_no``.
     """
     try:
         root = ast.parse(Path(filename).read_text(), filename=filename)
     except Exception:
         return None
     leaf = _get_node_at_pos(line_no, root, None)
+    kind = "item"
+    targets = None
 
     def find(node, tipo):
         while node and type(node) not in tipo:
@@ -492,35 +503,46 @@ def fortify_location(filename, line_no, async_plugin=False):
             node = node.parent
         return node
 
-    func = find(leaf, (ast.FunctionDef, ast.AsyncFunctionDef))
-    if func is None:
+    def resolve(scope, haystack):
+        while True:
+            found = scope and haystack.get(scope.name)
+            if not scope or found:
+                break
+            scope = find(scope.parent, (ast.FunctionDef, ast.AsyncFunctionDef))
+        return scope, found
+
+    inner = find(leaf, (ast.FunctionDef, ast.AsyncFunctionDef))
+    if not inner:
         return None
 
-    outer = func
-    inner = None
-    # Fails when inner func is named test_*
-    while outer and not outer.name.startswith("test_"):
-        outer = find(outer.parent, (ast.FunctionDef, ast.AsyncFunctionDef))
+    outer, targets = resolve(inner, func_names)
     if outer:
-        if outer is not func:
-            inner = func.name
-        func = outer
+        assert targets
+    else:
+        kind = "fixture"
+        outer, targets = resolve(inner, fixtures_finder())
+        if not targets:
+            return None
 
-    if type(func) is ast.AsyncFunctionDef and not async_plugin:
-        # Pytest can't run top-level async def test_* funcs, right?
-        return None
+    if not outer or outer is inner:
+        outer, inner = inner, None
 
-    cls = find(func, (ast.ClassDef,))
+    cls = find(outer, (ast.ClassDef,))
+
+    funcs = {o.function if kind == "item" else o.func for o in targets}
+    assert len(funcs) == 1
 
     return BreakLoc(
         file=filename,
         lnum=line_no,
         name=None,
+        py_obj_kind=kind,
         class_name=cls.name if cls else None,
-        func_name=func.name,
+        func_name=outer.name,
         param_id=None,
-        ast_obj=func,
-        inner=inner,
+        ast_obj=outer,
+        inner=inner.name if inner else None,
+        func=funcs.pop()
     )
 
 

@@ -1,7 +1,7 @@
 import pytest
 
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import patch, Mock
 from _pytest.pytester import LineMatcher
 from pytest_pdb_break import BreakLoc, PdbBreak
 from pexpect import EOF  # No importskip
@@ -147,46 +147,104 @@ def test_get_node_at_pos():
     assert node.parent.parent.name == "C"
 
 
-def test_fortify_location(testdir):
+def test_fortify_location(testdir, fix_defs):
     from pytest_pdb_break import fortify_location
+    from _pytest.python import Function
+    from ast import FunctionDef
+
+    fixes = dict(fix_defs)
+    fixes["baz"] = [fix_defs["monkeypatch"][0]]
+
+    items = {
+        "test_foo": [Mock(Function), Mock(Function)],
+        "test_bar": [Mock(Function)],
+    }
+    fake_func = object()
+    items["test_foo"][0].function = items["test_foo"][1].function = fake_func
 
     filename = testdir.copy_example("fortify/normal.py")
     assert filename.exists()
-    rv = fortify_location(filename, 2)
-    assert rv.equals(BreakLoc(filename, 2, None,
-                              class_name=None,
-                              func_name="somefunc"))
-    rv = fortify_location(filename, 6)
-    assert rv.equals(BreakLoc(filename, 6, None,
-                              class_name="C", func_name="f"))
-    rv = fortify_location(filename, 13)
-    assert rv.equals(BreakLoc(filename, 13, None,
-                              class_name="TestClass", func_name="test_foo"))
-    assert rv.inner is not None
-    rv = fortify_location(filename, 17)
+
+    rv = fortify_location(filename, 2, items, lambda: fixes)
     assert rv is None
-    rv = fortify_location(filename, 21)
-    assert rv.equals(BreakLoc(filename, 21, None,
-                              class_name=None,
-                              func_name="wrapped"))
-    from ast import FunctionDef
+
+    rv = fortify_location(filename, 6, items, lambda: fixes)
+    assert rv is None
+
+    rv = fortify_location(filename, 13, items, lambda: fixes)
+    assert rv.equals(
+        BreakLoc(
+            filename,
+            13,
+            None,
+            py_obj_kind="item",
+            class_name="TestClass",
+            func_name="test_foo",
+            func=fake_func,
+        )
+    )
+    assert rv.inner == "inner"
     assert type(rv.ast_obj) is FunctionDef
 
+    rv = fortify_location(filename, 17, items, lambda: fixes)
+    assert rv is None
 
-def test_fortify_location_aio(testdir):
+    rv = fortify_location(filename, 21, items, lambda: fixes)
+    assert rv is None
+
+    rv = fortify_location(filename, 24, items, lambda: fixes)
+    assert rv.equals(
+        BreakLoc(
+            filename,
+            24,
+            None,
+            py_obj_kind="item",
+            func_name="test_bar",
+            func=items["test_bar"][0].function,
+        )
+    )
+    assert rv.inner is None
+    assert type(rv.ast_obj) is FunctionDef
+
+    rv = fortify_location(filename, 30, items, lambda: fixes)
+    assert rv.equals(
+        BreakLoc(
+            filename,
+            30,
+            None,
+            py_obj_kind="fixture",
+            func_name="baz",
+            func=fixes["baz"][0].func,
+        )
+    )
+
+
+def test_fortify_location_aio(testdir, fix_defs):
     from pytest_pdb_break import fortify_location
+    from _pytest.python import Function
+
+    items = {
+        "test_foo": [Mock(Function)],
+    }
+    fixes = dict(fix_defs)
 
     filename = testdir.copy_example("fortify/async.py")
     assert filename.exists()
 
-    assert fortify_location(filename, 2) is None
-    assert fortify_location(filename, 15) is None
-    assert fortify_location(filename, 21) is None
+    assert fortify_location(filename, 2, items, lambda: fixes) is None
+    assert fortify_location(filename, 15, items, lambda: fixes) is None
+    assert fortify_location(filename, 21, items, lambda: fixes) is None
 
-    rv = fortify_location(filename, 9)
+    rv = fortify_location(filename, 9, items, lambda: fixes)
     assert rv.equals(
         BreakLoc(
-            filename, 9, None, class_name="TestClass", func_name="test_foo"
+            filename,
+            9,
+            None,
+            py_obj_kind="item",
+            class_name="TestClass",
+            func_name="test_foo",
+            func=items["test_foo"][0].function,
         )
     )
     assert rv.inner == "inner"

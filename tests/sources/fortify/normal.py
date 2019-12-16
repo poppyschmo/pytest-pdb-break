@@ -20,5 +20,12 @@ wrapper = lambda x: x
 def wrapped():
     print("wrapped")
 
-if __name__ == "__main__":     # <- line 23
-    pass
+def test_bar():                # <- line 23
+    assert True
+
+import pytest
+
+@pytest.fixture
+def baz():                     # <- line 29
+    spam = 1
+    return spam

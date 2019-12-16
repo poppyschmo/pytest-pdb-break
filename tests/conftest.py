@@ -145,3 +145,15 @@ def get_mod_pdb():
         assert _pytest_version >= (5, 2, 1)
         import pdb as mod_pdb
     return mod_pdb
+
+
+@pytest.fixture
+def fix_defs(request):
+    from unittest.mock import Mock
+    # Mock version of get_fix_names_to_fix_defs()
+    fixes = {}
+    for fix_list in request.session._fixturemanager._arg2fixturedefs.values():
+        for fix in fix_list:
+            fixes.setdefault(fix.func.__name__, []).append(Mock(fix))
+    assert "monkeypatch" in fixes
+    return fixes
