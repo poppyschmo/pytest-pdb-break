@@ -55,11 +55,11 @@ class BreakLoc:
     lnum = attr.ib(validator=attr.validators.instance_of(int))
     name = attr.ib()
 
-    class_name = attr.ib(default=None, repr=False, cmp=False, kw_only=True)
-    func_name = attr.ib(default=None, repr=False, cmp=False, kw_only=True)
-    param_id = attr.ib(default=None, repr=False, cmp=False, kw_only=True)
-    ast_obj = attr.ib(default=None, repr=False, cmp=False, kw_only=True)
-    inner = attr.ib(default=None, repr=False, cmp=False, kw_only=True)
+    class_name = attr.ib(default=None, repr=False, eq=False, kw_only=True)
+    func_name = attr.ib(default=None, repr=False, eq=False, kw_only=True)
+    param_id = attr.ib(default=None, repr=False, eq=False, kw_only=True)
+    ast_obj = attr.ib(default=None, repr=False, eq=False, kw_only=True)
+    inner = attr.ib(default=None, repr=False, eq=False, kw_only=True)
 
     def equals(self, other):
         """True if class, func, param fields are equal.
