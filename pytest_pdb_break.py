@@ -32,6 +32,7 @@ except ValueError:
 module_logger = None
 try:
     from knotty_logger import LoggingHelper
+
     _logging_helper = LoggingHelper.from_logdefs("PDBBRK_LOGYAML")
     if _logging_helper:
         module_logger = _logging_helper.get_logger(__name__)
@@ -47,8 +48,10 @@ pytestPDB = pytest.set_trace.__self__
 class BreakLoc:
     """Data object holding path-like filename, line number, test name.
     """
-    file = attr.ib(converter=attr.converters.optional(lambda v:
-                                                      Path(v) if v else None))
+
+    file = attr.ib(
+        converter=attr.converters.optional(lambda v: Path(v) if v else None)
+    )
     lnum = attr.ib(validator=attr.validators.instance_of(int))
     name = attr.ib()
 
@@ -64,9 +67,9 @@ class BreakLoc:
         leaves room for the likely addition of extraneous attrs.
         """
         relevant = ("class_name", "func_name", "param_id")
-        return (self == other
-                and all(getattr(self, a) == getattr(other, a) for
-                        a in relevant))
+        return self == other and all(
+            getattr(self, a) == getattr(other, a) for a in relevant
+        )
 
     @classmethod
     def from_pytest_item(cls, item):
@@ -113,23 +116,29 @@ def pytest_addoption(parser):
     # initially so invalid args would trigger the usage/help msg.  However,
     # most errors involve file validation, which must happen later, once we
     # have access to the fully initialized config object.
-    group.addoption("--break",
-                    action="store",
-                    metavar="[FILE:]LINE-NO",
-                    dest="pdb_break",
-                    type=BreakLoc.from_arg_spec,
-                    help="run the test enclosing LINE-NO and break there; "
-                    "FILE may be omitted if obvious")
-    group.addoption("--bt-all",
-                    action="store_true",
-                    dest="pdb_break_bt_all",
-                    help="include internal pytest frames in the navigable "
-                    "stack; default: %(default)s")
-    group.addoption("--complete",
-                    action="store_true",
-                    dest="pdb_break_complete",
-                    help="complete object names in additon to commands; "
-                    "default: %(default)s")
+    group.addoption(
+        "--break",
+        action="store",
+        metavar="[FILE:]LINE-NO",
+        dest="pdb_break",
+        type=BreakLoc.from_arg_spec,
+        help="run the test enclosing LINE-NO and break there; "
+        "FILE may be omitted if obvious",
+    )
+    group.addoption(
+        "--bt-all",
+        action="store_true",
+        dest="pdb_break_bt_all",
+        help="include internal pytest frames in the navigable "
+        "stack; default: %(default)s",
+    )
+    group.addoption(
+        "--complete",
+        action="store_true",
+        dest="pdb_break_complete",
+        help="complete object names in additon to commands; "
+        "default: %(default)s",
+    )
 
 
 @pytest.hookimpl(trylast=True)
@@ -150,10 +159,13 @@ def pytest_configure(config):
             # Can't use hasattr because all pdb.Pdb inherits from cmd.Cmd
             if "complete" in wrapped_class.__base__.__dict__:
                 from warnings import warn
+
                 cls = wrapped_class
-                warn("Ignoring option --complete because "
-                     "{cls.__module__}.{cls.__name__}.complete is defined"
-                     .format(cls=cls))
+                msg = (
+                    "Ignoring option --complete because "
+                    "{cls.__module__}.{cls.__name__}.complete is defined"
+                ).format(cls=cls)
+                warn(msg)
             else:
                 add_completion(config)
     config.pluginmanager.register(PdbBreak(wanted, config), "pdb-break")
@@ -203,10 +215,12 @@ class PdbBreak:
         return wanted
 
     if module_logger:
+
         def pytest_internalerror(self, excrepr, excinfo):
             self._l.pspell(1)
 
     if not hasattr(pytestPDB, "_init_pdb"):
+
         def pytest_enter_pdb(self, config, pdb):
             """Stash pytest-wrapped pdb instance."""
             self.last_pdb = pdb
@@ -232,16 +246,22 @@ class PdbBreak:
         self._l and self._l.pspore("fortified")
         # A test item's function name matches that of self.wanted
         if self.wanted.func_name.startswith("test_"):
-            self.targets = [l for l in locs if
-                            l.file == self.wanted.file and
-                            l.func_name == self.wanted.func_name]
+            self.targets = [
+                l
+                for l in locs
+                if l.file == self.wanted.file
+                and l.func_name == self.wanted.func_name
+            ]
             if not self.targets:
                 msg = "unable to determine breakpoint item"
                 raise RuntimeError(msg)
             self._l and self._l.pspore("targets")
         elif is_fixture(self.wanted, session._fixturemanager._arg2fixturedefs):
-            self.elsewhere = [i for i in session.items if
-                              self.wanted.func_name in i.fixturenames]
+            self.elsewhere = [
+                i
+                for i in session.items
+                if self.wanted.func_name in i.fixturenames
+            ]
         else:
             msg = "unable to handle breakpoints outside of test functions"
             raise RuntimeError(msg)
@@ -249,11 +269,13 @@ class PdbBreak:
     def pytest_runtest_protocol(self, item, nextitem):
         if not self.elsewhere or item not in self.elsewhere:
             return None
-        item.ihook.pytest_runtest_logstart(nodeid=item.nodeid,
-                                           location=item.location)
+        item.ihook.pytest_runtest_logstart(
+            nodeid=item.nodeid, location=item.location
+        )
         self.runcall_until(runtestprotocol, item=item, nextitem=nextitem)
-        item.ihook.pytest_runtest_logfinish(nodeid=item.nodeid,
-                                            location=item.location)
+        item.ihook.pytest_runtest_logfinish(
+            nodeid=item.nodeid, location=item.location
+        )
         self.elsewhere.remove(item)
         return True
 
@@ -269,12 +291,17 @@ class PdbBreak:
 
         self._l and self._l.prinspect(event=event, frame=frame)
 
-        if (event != "line"
-                or frame.f_lineno < self.wanted.lnum
-                or (self.wanted.inner
-                    and frame.f_code.co_name != self.wanted.inner)
-                or (not self.wanted.inner
-                    and frame.f_code.co_name != self.wanted.func_name)):
+        if (
+            event != "line"
+            or frame.f_lineno < self.wanted.lnum
+            or (
+                self.wanted.inner and frame.f_code.co_name != self.wanted.inner
+            )
+            or (
+                not self.wanted.inner
+                and frame.f_code.co_name != self.wanted.func_name
+            )
+        ):
             return self.trace_handoff
 
         inst = self.last_pdb
@@ -284,8 +311,10 @@ class PdbBreak:
             while bot.f_back:
                 bot.f_trace = inst.trace_dispatch
                 bot = bot.f_back
-                if (not self.bt_all
-                        and bot.f_code.co_name == self.wanted.func_name):
+                if (
+                    not self.bt_all
+                    and bot.f_code.co_name == self.wanted.func_name
+                ):
                     break
             inst.botframe = bot
         else:
@@ -305,6 +334,7 @@ class PdbBreak:
         rather than stderr (INTERNALERROR).
         """
         from _pytest.capture import capture_fixtures
+
         if hasattr(self, "pytest_enter_pdb"):
             pytestPDB.set_trace(set_break=False)
             self._l and self._l.sertall("with_enter_pdb")
@@ -322,8 +352,10 @@ class PdbBreak:
             self._l and self._l.pspore("cap_top")
             if capfix:
                 if capfix == "capsys" and not capman.is_globally_capturing():
-                    raise RuntimeError("Cannot break inside tests using capsys"
-                                       " while global capturing is disabled")
+                    raise RuntimeError(
+                        "Cannot break inside tests using capsys"
+                        " while global capturing is disabled"
+                    )
                 capfix = testargs[capfix]
 
             def preloop(_inst):
@@ -346,6 +378,7 @@ class PdbBreak:
             capfix and capfix._resume()
             self._l and self._l.pspore("cap_bot")
         from bdb import BdbQuit
+
         inst.reset()
         self._l and self._l.pspell("post_capfix")
         sys.settrace(self.trace_handoff)
@@ -355,6 +388,7 @@ class PdbBreak:
             pass
         except Exception as exc:
             from _pytest.outcomes import Exit
+
             if not isinstance(exc, Exit) or exc.msg != "Quitting debugger":
                 self._l and self._l.printback()
                 raise
@@ -366,9 +400,11 @@ class PdbBreak:
 
     @pytest.hookimpl(tryfirst=True)
     def pytest_runtest_call(self, item):
-        if (hasattr(item, "startTest")
-                and self.targets
-                and BreakLoc.from_pytest_item(item) == self.targets[0]):
+        if (
+            hasattr(item, "startTest")
+            and self.targets
+            and BreakLoc.from_pytest_item(item) == self.targets[0]
+        ):
 
             def _runtest(inst):
                 self.runcall_until(inst._testcase, result=inst)
@@ -381,11 +417,15 @@ class PdbBreak:
         if self._l:
             self._l.sertall(1)
             self._l.pspell(1)
-        if (self.targets
-                and BreakLoc.from_pytest_item(pyfuncitem) == self.targets[0]):
+        if (
+            self.targets
+            and BreakLoc.from_pytest_item(pyfuncitem) == self.targets[0]
+        ):
             # Mimic primary hookimpl in _pytest/python.py
-            testargs = {arg: pyfuncitem.funcargs[arg] for
-                        arg in pyfuncitem._fixtureinfo.argnames}
+            testargs = {
+                arg: pyfuncitem.funcargs[arg]
+                for arg in pyfuncitem._fixtureinfo.argnames
+            }
             self.runcall_until(pyfuncitem.obj, **testargs)
             #
             if self.targets:
@@ -447,19 +487,24 @@ def fortify_location(filename, line_no):
         if cand is not func:
             inner = func.name
         func = cand
-    elif (type(func) is ast.AsyncFunctionDef
-          and not func.name.startswith("test_")):
+    elif type(func) is ast.AsyncFunctionDef and not func.name.startswith(
+        "test_"
+    ):
         # Pytest can't run top-level async def test_* funcs, right?
         return None
 
     cls = find(func, (ast.ClassDef,))
 
-    return BreakLoc(file=filename, lnum=line_no, name=None,
-                    class_name=cls.name if cls else None,
-                    func_name=func.name,
-                    param_id=None,
-                    ast_obj=func,
-                    inner=inner)
+    return BreakLoc(
+        file=filename,
+        lnum=line_no,
+        name=None,
+        class_name=cls.name if cls else None,
+        func_name=func.name,
+        param_id=None,
+        ast_obj=func,
+        inner=inner,
+    )
 
 
 def is_fixture(loc, fixture_names):
@@ -467,9 +512,11 @@ def is_fixture(loc, fixture_names):
     """
     node = loc.ast_obj
     while node.parent:
-        if (type(node) is ast.FunctionDef
-                and node.decorator_list
-                and node.name in fixture_names):
+        if (
+            type(node) is ast.FunctionDef
+            and node.decorator_list
+            and node.name in fixture_names
+        ):
             break
         node = node.parent
     else:
@@ -508,15 +555,19 @@ def add_completion(config):
     import rlcompleter
     from code import InteractiveConsole, InteractiveInterpreter  # lhs=subcls
     from itertools import takewhile, count, filterfalse
-    the_usual = [InteractiveConsole.raw_input.__code__,  # normal stdin
-                 InteractiveInterpreter.runcode.__code__,  # editor hacks
-                 cmd.Cmd.onecmd.__code__]  # "not interactive" sentinel
+
+    the_usual = [
+        InteractiveConsole.raw_input.__code__,  # normal stdin
+        InteractiveInterpreter.runcode.__code__,  # editor hacks
+        cmd.Cmd.onecmd.__code__,
+    ]  # "not interactive" sentinel
 
     class PdbComplete(wrapped):
         def __init__(self, *args, **kwargs):
             super().__init__(*args, **kwargs)
-            self._l = (module_logger and
-                       module_logger.helper.get_logger("PdbComplete"))
+            self._l = module_logger and module_logger.helper.get_logger(
+                "PdbComplete"
+            )
 
         def complete(self, text, state):
             """Dispense object and command matches.
@@ -542,8 +593,9 @@ def add_completion(config):
                         rest = takewhile(bool, (cp(text, m) for m in count()))
                         dif = filterfalse(self._completions.__contains__, rest)
                         self._completions.extend(dif)
-                    self._l and self._l.prinspect(text=text, icon=icon,
-                                                  size=len(self._completions))
+                    self._l and self._l.prinspect(
+                        text=text, icon=icon, size=len(self._completions)
+                    )
                 try:
                     return self._completions[state]
                 except IndexError:
