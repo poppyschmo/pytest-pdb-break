@@ -27,7 +27,7 @@ def test_breakloc(request):
     assert BreakLoc("fake.py", 1, None) \
         == BreakLoc("fake.py", 1, None, func_name="test_fake")
     assert BreakLoc("fake.py", 1, None, func_name="test_fake") \
-        == BreakLoc("fake.py", 1, None, class_name="test_fake")
+        == BreakLoc("fake.py", 1, None, func_name="test_foo")
 
     # Equals method
     loc = BreakLoc("fake.py", 1, None, func_name="test_fake")
@@ -143,6 +143,8 @@ def test_fortify_location(testdir, fix_defs):
         fookey: [Mock(Function)],
     }
 
+    items[cfkey][0].cls.__name__ = "TestClass"
+    items[cfkey][1].cls.__name__ = "TestClass"
     items[cfkey][0].function = exmod.TestClass.test_foo
     items[cfkey][1].function = exmod.TestClass.test_foo
     items[barkey][0].function = exmod.test_bar
@@ -164,7 +166,6 @@ def test_fortify_location(testdir, fix_defs):
             13,
             None,
             py_obj_kind="item",
-            class_name="TestClass",
             func_name="test_foo",
             func_lnum=cfkey[1],
         )
@@ -225,6 +226,7 @@ def test_fortify_location_aio(testdir, fix_defs):
     cfkey = _get_func_key(exmod.TestClass.test_foo)
     items = {cfkey: [Mock(Function)]}
     items[cfkey][0].function = exmod.TestClass.test_foo
+    items[cfkey][0].cls = exmod.TestClass
     fixes = dict(fix_defs)
 
     filename = testdir.copy_example("fortify/asyncio.py")
@@ -241,7 +243,6 @@ def test_fortify_location_aio(testdir, fix_defs):
             9,
             None,
             py_obj_kind="item",
-            class_name="TestClass",
             func_name="test_foo",
             func_lnum=cfkey[1],
         )

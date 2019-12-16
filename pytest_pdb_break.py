@@ -66,33 +66,23 @@ class BreakLoc:
     name = attr.ib()
 
     py_obj_kind = attr.ib(default=None, repr=False, eq=False, kw_only=True)
-    class_name = attr.ib(default=None, repr=False, eq=False, kw_only=True)
     func_name = attr.ib(default=None, repr=False, eq=False, kw_only=True)
     func_lnum = attr.ib(default=None, repr=False, eq=False, kw_only=True)
-    param_id = attr.ib(default=None, repr=False, eq=False, kw_only=True)
     arg_name = attr.ib(default=None, repr=False, eq=False, kw_only=True)
     inner = attr.ib(default=None, repr=False, eq=False, kw_only=True)
 
     def equals(self, other):
-        """True if class, func, param fields are equal.
-        This is the same as comparing ``attr.astuple()`` values but
-        leaves room for the likely addition of extraneous attrs.
-        """
-        relevant = (
-            "py_obj_kind", "class_name",
-            "func_name", "func_lnum",
-            "param_id", "arg_name",
-        )
+        """True if remaining fields are equal"""
+        relevant = "py_obj_kind", "func_name", "func_lnum", "arg_name"
         return self == other and all(
             getattr(self, a) == getattr(other, a) for a in relevant
         )
 
     @classmethod
     def from_arg_spec(cls, string):
-        """Stash components of arg supplied to the --break option."""
+        """Make minimal instance from arg supplied to --break"""
         file, __, lnum = string.rpartition(":")
-        # Pytest may be invoked from an editor via exec(), in which case these
-        # might not get expanded.
+        # These won't get expanded when invoked via exec()
         if file:
             # $TMPHOME/foo may be ~/.local/tmp/foo, so expand envvars first
             file = os.path.expanduser(os.path.expandvars(file))
@@ -561,6 +551,8 @@ def fortify_location(
         outer, inner = inner, None
 
     cls = find(outer, (ast.ClassDef,))
+    if cls:
+        assert targets[0].cls.__name__ == cls.name
 
     funcs = {o.function if kind == "item" else o.func for o in targets}
     assert len(funcs) == 1
@@ -572,10 +564,8 @@ def fortify_location(
         lnum=line_no,
         name=None,
         py_obj_kind=kind,
-        class_name=cls.name if cls else None,
         func_name=func_name,
         func_lnum=func_lnum,
-        param_id=None,
         arg_name=arg_name if kind == "fixture" else None,
         inner=inner.name if inner else None,
     )
