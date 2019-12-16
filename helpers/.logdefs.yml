@@ -62,13 +62,13 @@ _ensure_wanted:
     args:
       - self.wanted
 
-pytest_runtestloop:
-  locs:
+find_targets:
+  top:
     args:
-      - locs
+      - func_names
   fortified:
     args:
-      - self.wanted.func_name
+      - fortified
   targets:
     args:
       - self.targets

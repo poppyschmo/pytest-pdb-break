@@ -230,53 +230,85 @@ class PdbBreak:
             """Stash pytest-wrapped pdb instance."""
             self.last_pdb = pdb
 
-    def _ensure_wanted(self, locs):
+    def _ensure_wanted(self, session):
         if self.wanted.file:
             return
-        locs_files = {l.file for l in locs}
         try:
-            self.wanted.file = locs_files.pop()
-            assert not len(locs_files)
+            assert len(session.items) == 1
+            self.wanted.file = BreakLoc.from_pytest_item(session.items[0]).file
         except Exception:
             msg = "unable to determine breakpoint file"
             raise RuntimeError(msg)
         else:
             self._l and self._l.pspore("rewrite")
 
-    def pytest_runtestloop(self, session):
-        """Find a suitable target or raise RuntimeError."""
-        locs = [BreakLoc.from_pytest_item(i) for i in session.items]
-        self._l and self._l.pspore("locs")
+    def get_fix_names_to_fix_defs(self, session):
+        result = {}
+        thisfile = str(self.wanted.file)
+        for fixes in session._fixturemanager._arg2fixturedefs.values():
+            for fix in fixes:
+                if fix.func.__code__.co_filename != thisfile:
+                    continue
+                if fix.func.__code__.co_firstlineno > self.wanted.lnum:
+                    continue
+                result.setdefault(fix.func.__name__, []).append(fix)
+        return result
 
-        self._ensure_wanted(locs)
+    def get_func_names_to_func_items(self, session):
+        result = {}
+        thisfile = str(self.wanted.file)
+        for item in session.items:
+            if item.function.__code__.co_filename != thisfile:
+                continue
+            if item.function.__code__.co_firstlineno > self.wanted.lnum:
+                continue
+            result.setdefault(item.function.__name__, []).append(item)
+        return result
 
-        fortified = fortify_location(self.wanted.file, self.wanted.lnum)
+    def find_targets(self, session):
+        assert self.wanted.file
+        from functools import partial
+        func_names = self.get_func_names_to_func_items(session)
+        self._l and self._l.pspore("top")
+
+        fortified = fortify_location(
+            self.wanted.file,
+            self.wanted.lnum,
+            func_names=func_names,
+            fixtures_finder=partial(self.get_fix_names_to_fix_defs, session)
+        )
+
+        self._l and self._l.pspore("fortified")
         if not fortified:
             msg = "unable to determine breakpoint location"
             raise RuntimeError(msg)
         self.wanted = fortified
-        self._l and self._l.pspore("fortified")
-        # A test item's function name matches that of self.wanted
-        if self.wanted.func_name.startswith("test_"):
-            self.targets = [
-                l
-                for l in locs
-                if l.file == self.wanted.file
-                and l.func_name == self.wanted.func_name
-            ]
-            if not self.targets:
-                msg = "unable to determine breakpoint item"
-                raise RuntimeError(msg)
+
+        if self.wanted.py_obj_kind == "item":
+            self.targets = func_names[self.wanted.func_name]
             self._l and self._l.pspore("targets")
-        elif is_fixture(self.wanted, session._fixturemanager._arg2fixturedefs):
+        else:
+            # FIXME func name might not match "arg name" for fixture
+            assert self.wanted.py_obj_kind == "fixture"
             self.elsewhere = [
-                i
+                i  # in *any* discovered file
                 for i in session.items
                 if self.wanted.func_name in i.fixturenames
             ]
-        else:
-            msg = "unable to handle breakpoints outside of test functions"
-            raise RuntimeError(msg)
+
+    def pytest_runtestloop(self, session):
+        """Find a suitable target or raise RuntimeError
+
+        See::
+
+            PyCollector.funcnamefilter
+            PyCollector._matches_prefix_or_glob_option
+
+        And config options ``python_functions`` and ``python_classes``.
+
+        """
+        self._ensure_wanted(session)
+        self.find_targets(session)
 
     def pytest_runtest_protocol(self, item, nextitem):
         if not self.elsewhere or item not in self.elsewhere:
@@ -421,7 +453,7 @@ class PdbBreak:
         if (
             hasattr(item, "startTest")
             and self.targets
-            and BreakLoc.from_pytest_item(item) == self.targets[0]
+            and item is self.targets[0]
         ):
 
             def _runtest(inst):
@@ -431,14 +463,12 @@ class PdbBreak:
 
             item.runtest = _runtest.__get__(item)
 
+    # TODO if function is bound, ensure class name is correct
     def pytest_pyfunc_call(self, pyfuncitem):
         if self._l:
             self._l.sertall(1)
             self._l.pspell(1)
-        if (
-            self.targets
-            and BreakLoc.from_pytest_item(pyfuncitem) == self.targets[0]
-        ):
+        if self.targets and pyfuncitem is self.targets[0]:
             # Mimic primary hookimpl in _pytest/python.py
             testargs = {
                 arg: pyfuncitem.funcargs[arg]

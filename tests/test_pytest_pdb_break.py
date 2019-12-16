@@ -250,6 +250,7 @@ def test_fortify_location_aio(testdir, fix_defs):
     assert rv.inner == "inner"
 
 
+@pytest.mark.skip
 def test_is_fixture(testdir_setup):
     from pytest_pdb_break import fortify_location, is_fixture
     testdir_setup.makepyfile(test_file="""
@@ -359,7 +360,7 @@ def test_invalid_arg(testdir_setup):
     result = td.runpytest("--break=5", "test_otherfile.py")
     assert result.ret == 3
     result.stdout.fnmatch_lines("INTERNALERROR>*RuntimeError: "
-                                "*outside of test function*")
+                                "*unable to determine*")
 
 
 @pytest.mark.parametrize("opts", [("--trace",),
@@ -484,12 +485,20 @@ def test_two_funcs_comment(testdir_two_funcs):
 
 
 def test_two_funcs_gap(testdir_two_funcs):
+    # Between two functions fails
     pe = testdir_two_funcs.spawn_pytest("--break=test_two_funcs_gap.py:5")
+    pe.expect(EOF)
+    befs = LineMatcher(unansi(pe.before))
+    befs.fnmatch_lines(["*INTERNALERROR*", "*no tests ran*"])
+
+
+def test_two_funcs_on(testdir_two_funcs):
+    # On first line (declaration line) of function
+    pe = testdir_two_funcs.spawn_pytest("--break=test_two_funcs_on.py:6")
     pe.expect(prompt_re)
     befs = LineMatcher(unansi(pe.before))
-    # Advances to first breakable line in next func
     befs.fnmatch_lines([
-        "*>*/test_two_funcs_gap.py(7)test_false_int()",
+        "*>*/test_two_funcs_on.py(7)test_false_int()",
         "->*isinstance(False, int)"
     ])
     pe.sendline("c")
@@ -622,37 +631,22 @@ def test_class_early(testdir_class):
 
 
 def test_class_gap(testdir_class):
+    # If a requested line precedes the start of the first test item, an error
+    # is raised; same goes for intervals between items, as shown here
     pe = testdir_class.spawn_pytest("--break=test_class_gap.py:10")
-    pe.expect(prompt_re)
-    befs = LineMatcher(unansi(pe.before))
-    befs.fnmatch_lines([
-        "*>*/test_class_gap.py(12)test_two()",
-        "->*# line 12"
-    ])
-    pe.sendline("c")
     pe.expect(EOF)
     befs = LineMatcher(unansi(pe.before))
-    befs.fnmatch_lines("*1 failed*")
+    befs.fnmatch_lines(["*unable to determine*", "*no tests ran*"])
 
 
 def test_class_gap_named(testdir_class):
-    # XXX while it's nice that this passes, it might not be desirable: if a
-    # requested line precedes the start of the first test item, an error is
-    # raised; but this doesn't apply to intervals between items, as shown here
     pe = testdir_class.spawn_pytest(
         "--break=test_class_gap_named.py:10 "
         "test_class_gap_named.py::TestClass::test_two"
     )
-    pe.expect(prompt_re)
-    befs = LineMatcher(unansi(pe.before))
-    befs.fnmatch_lines([
-        "*>*/test_class_gap_named.py(12)test_two()",
-        "->*# line 12"
-    ])
-    pe.sendline("c")
     pe.expect(EOF)
     befs = LineMatcher(unansi(pe.before))
-    befs.fnmatch_lines("*1 failed*")
+    befs.fnmatch_lines(["*unable to determine*", "*no tests ran*"])
 
 
 def test_lower_callee(testdir_setup):
