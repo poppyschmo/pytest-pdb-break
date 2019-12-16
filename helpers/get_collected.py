@@ -17,7 +17,7 @@ def _get_items(argv):
         # Replace internal config._origargs with invocation_params.args
         assert not hasattr(cf, "args")
         cf = pm.hook.pytest_cmdline_parse(pluginmanager=pm, args=list(argv))
-        session = Session(cf)
+        session = getattr(Session, "from_config", Session)(cf)
         cf.hook.pytest_sessionstart(session=session)
         session.perform_collect()
         return session.items
