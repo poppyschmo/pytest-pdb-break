@@ -326,6 +326,46 @@ class PdbBreak:
         sys.settrace(inst.trace_dispatch)  # hand off
         return inst.dispatch_line(frame)
 
+    def _handle_capture(self, func, testargs, inst):
+        # XXX this is currently a mess; assumes a lot, e.g., no rcLines
+        from _pytest.capture import capture_fixtures
+
+        capman = self.config.pluginmanager.getplugin("capturemanager")
+        self._l and self._l.pspore("cap_top")
+
+        common = testargs.keys() & capture_fixtures
+        capfix = common.pop() if common else None
+        if capfix:
+            if capfix == "capsys" and not capman.is_globally_capturing():
+                raise RuntimeError(
+                    "Cannot break inside tests using capsys"
+                    " while global capturing is disabled"
+                )
+            capfix = testargs[capfix]
+        elif func is not runtestprotocol:
+            return
+
+        def preloop(_inst):
+            # TODO figure out why suspend from pytest's pdb.setup() gets
+            # undone. This usually runs soon afterwards.
+            super((type(_inst)), _inst).preloop()
+            capman._global_capturing.pop_outerr_to_orig()
+            capman.suspend_global_capture(in_=True)
+
+        def postloop(_inst):
+            # Runs after do_* cmds that return 1, like next, step,
+            # continue, until (but not jump)
+            super((type(_inst)), _inst).postloop()
+            capfix and capfix._resume()
+
+        inst.__dict__["preloop"] = preloop.__get__(inst)
+        inst.__dict__["postloop"] = postloop.__get__(inst)
+
+        # TODO add test showing that fixture may be suspended; we need it
+        # to continue capturing till handoff
+        capfix and capfix._resume()
+        self._l and self._l.pspore("cap_bot")
+
     def runcall_until(self, func, **testargs):
         """Run test with testargs, stopping at location.
 
@@ -333,50 +373,16 @@ class PdbBreak:
         failures. For testing, this means report output is sent to stdout
         rather than stderr (INTERNALERROR).
         """
-        from _pytest.capture import capture_fixtures
-
         if hasattr(self, "pytest_enter_pdb"):
             pytestPDB.set_trace(set_break=False)
             self._l and self._l.sertall("with_enter_pdb")
             inst = self.last_pdb
         else:
             inst = self.last_pdb = pytestPDB._init_pdb("runcall_until")
-        try:
-            capfix = (testargs.keys() & capture_fixtures).pop()
-        except KeyError:
-            capfix = None
         self._l and self._l.pspore("pre_capfix")
-        if capfix or func is runtestprotocol:
-            # XXX this is currently a mess; assumes a lot, e.g., no rcLines
-            capman = self.config.pluginmanager.getplugin("capturemanager")
-            self._l and self._l.pspore("cap_top")
-            if capfix:
-                if capfix == "capsys" and not capman.is_globally_capturing():
-                    raise RuntimeError(
-                        "Cannot break inside tests using capsys"
-                        " while global capturing is disabled"
-                    )
-                capfix = testargs[capfix]
 
-            def preloop(_inst):
-                # TODO figure out why suspend from pytest's pdb.setup() gets
-                # undone. This usually runs soon afterwards.
-                super((type(_inst)), _inst).preloop()
-                capman._global_capturing.pop_outerr_to_orig()
-                capman.suspend_global_capture(in_=True)
+        self._handle_capture(func, testargs, inst)
 
-            def postloop(_inst):
-                # Runs after do_* cmds that return 1, like next, step,
-                # continue, until (but not jump)
-                super((type(_inst)), _inst).postloop()
-                capfix and capfix._resume()
-
-            inst.__dict__["preloop"] = preloop.__get__(inst)
-            inst.__dict__["postloop"] = postloop.__get__(inst)
-            # TODO add test showing that fixture may be suspended; we need it
-            # to continue capturing till handoff
-            capfix and capfix._resume()
-            self._l and self._l.pspore("cap_bot")
         from bdb import BdbQuit
 
         inst.reset()

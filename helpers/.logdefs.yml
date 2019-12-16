@@ -67,14 +67,7 @@ pytest_runtestloop:
     args:
       - self.targets
 
-runcall_until:
-  with_enter_pdb:
-    assertions:
-      - self.last_pdb
-  pre_capfix:
-    args:
-      - func
-      - testargs
+_handle_capture:
   cap_top:
     kwargs:
       "global_cap": >
@@ -87,6 +80,15 @@ runcall_until:
     kwargs:
       "capfix": capfix and vars(capfix._capture)
       "sys.stdout (after)": type(sys.stdout)
+
+runcall_until:
+  with_enter_pdb:
+    assertions:
+      - self.last_pdb
+  pre_capfix:
+    args:
+      - func
+      - testargs
   post_capfix:
     args:
       - inst.botframe
@@ -94,7 +96,7 @@ runcall_until:
 pytest_pyfunc_call:
   1:
     assertions:
-      - not pyfuncitem._isyieldedfunction()
+      - not hasattr(pyfuncitem, "_isyieldedfunction")
     args:
       - pyfuncitem.name
       - pyfuncitem.location
@@ -115,7 +117,4 @@ find_breakable_line:
 add_completion:
   1:
     assertions:
-      - >
-        pytestPDB._pdb_cls is sys.modules["_pytest.debugging"].pdb.Pdb
-      - >
-        "complete" not in pytestPDB._pdb_cls.__dict__
+      - not hasattr(pytestPDB, "_pdb_cls")
