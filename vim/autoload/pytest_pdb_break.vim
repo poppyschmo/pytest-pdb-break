@@ -149,7 +149,7 @@ function! s:_get_node_id_parts(...) abort
     let gr = []
     if s:_search_back('\v^\s*(def|async def)>',
           \ {-> getline('.') =~ 'def\s\+test_'})
-      let pat = '^\s*def\s\+\(test_\w\+\)(\(.*\)).*$'
+      let pat = '^\s*\%(async\s\)\?def\s\+\(test_\w\+\)(\(.*\)).*$'
       let gr = matchlist(getline('.'), pat)
     endif
     if empty(gr) || empty(gr[1])
