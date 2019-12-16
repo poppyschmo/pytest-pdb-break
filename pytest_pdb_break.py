@@ -44,14 +44,6 @@ __version__ = "0.0.6"
 pytestPDB = pytest.set_trace.__self__
 
 
-def _get_modpath_from_pytest_item(item):
-    file, *_ = item.location
-    assert not Path(file).is_absolute(), file
-    file = item.config.rootdir.join(file)
-    assert item.fspath == file
-    return Path(file)
-
-
 @attr.s
 class BreakLoc:
     """Data object holding path-like filename, line number, test name.
@@ -120,15 +112,46 @@ def pytest_addoption(parser):
     )
 
 
+def _get_modpath_from_pytest_item(item):
+    file, *_ = item.location
+    assert not Path(file).is_absolute(), file
+    file = item.config.rootdir.join(file)
+    assert item.fspath == file
+    return Path(file)
+
+
+def _resolve_wanted_file(config, path):
+    """Return validated path component of user arg."""
+    if path is None or path.is_absolute():
+        return path
+    try:
+        resolved = path.resolve(True)
+    except FileNotFoundError:
+        if path.is_absolute():
+            raise
+        cwd = type(config.rootdir)()
+        for parent in (config.rootdir, config.invocation_dir):
+            if not cwd.samefile(parent):
+                resolved = parent / path
+                if resolved.exists():
+                    break
+        else:
+            raise
+    return Path(resolved)
+
+
 @pytest.hookimpl(trylast=True)
 def pytest_configure(config):
     wanted = config.getoption("pdb_break")
     if not wanted or config.option.collectonly:
         return
+
     pdbtrace = config.pluginmanager.get_plugin("pdbtrace")
     pdbcls = config.pluginmanager.get_plugin("pdbtrace")
+
     if pdbtrace and config.pluginmanager.is_registered(pdbtrace):
         raise RuntimeError("--break is not compatible with --trace")
+
     if config.getoption("pdb_break_complete"):
         if pdbcls and config.pluginmanager.is_registered(pdbcls):
             raise RuntimeError("--complete is not compatible with --pdbcls")
@@ -147,6 +170,8 @@ def pytest_configure(config):
                 warn(msg)
             else:
                 add_completion(config)
+
+    wanted.file = _resolve_wanted_file(config, wanted.file)
     config.pluginmanager.register(PdbBreak(wanted, config), "pdb-break")
 
 
@@ -167,32 +192,11 @@ class PdbBreak:
             self._l = None
         self.bt_all = config.getoption("pdb_break_bt_all")
         self.config = config
-        self.wanted = self._resolve_wanted(wanted)
+        self.wanted = wanted
         self.targets = None
         self.elsewhere = None
         self.last_pdb = None
         self._l and self._l.pspell("bottom")
-
-    def _resolve_wanted(self, wanted):
-        """Validate file component of user arg, if supplied."""
-        if wanted.file is None or wanted.file.is_absolute():
-            return wanted
-        file = wanted.file
-        try:
-            resolved = file.resolve(True)
-        except FileNotFoundError:
-            if file.is_absolute():
-                raise
-            cwd = type(self.config.rootdir)()
-            for parent in (self.config.rootdir, self.config.invocation_dir):
-                if not cwd.samefile(parent):
-                    resolved = parent / file
-                    if resolved.exists():
-                        break
-            else:
-                raise
-        wanted.file = resolved
-        return wanted
 
     if module_logger:
 

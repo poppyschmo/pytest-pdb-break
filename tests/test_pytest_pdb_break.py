@@ -3,7 +3,7 @@ import pytest
 from pathlib import Path
 from unittest.mock import Mock
 from _pytest.pytester import LineMatcher
-from pytest_pdb_break import BreakLoc, PdbBreak
+from pytest_pdb_break import BreakLoc
 from pexpect import EOF  # No importskip
 
 from conftest import prompt_re, unansi
@@ -57,23 +57,25 @@ def test_breakloc(request):
 def test_resolve_wanted(tmp_path, request):
     # tmp_path is a pathlib.Path object, which has no .chdir()
     import os
+    from unittest.mock import Mock
+
+    import py
+    from pytest_pdb_break import _resolve_wanted_file
 
     # For rootdir determination, see:
     # - _pytest.config.findpaths
     # - _pytest.config.Config._initini
     # - testing/test_config.py (pytest project)
-    import py
     invocation_dir = py.path.local()
     assert Path(invocation_dir).is_absolute()
     assert invocation_dir == Path.cwd() == request.config.invocation_dir
     assert invocation_dir.strpath == str(invocation_dir)
 
-    from unittest.mock import Mock
     rootdir = tmp_path / "rootdir"
-    inst = Mock()
-    inst.config = Mock(rootdir=py.path.local(rootdir),
-                       invocation_dir=invocation_dir)
-    _resolve_wanted = PdbBreak._resolve_wanted
+    config = Mock(
+        rootdir=py.path.local(rootdir),
+        invocation_dir=invocation_dir
+    )
 
     rootdir.mkdir()
     os.chdir(rootdir)
@@ -83,13 +85,12 @@ def test_resolve_wanted(tmp_path, request):
     file = Path(rootdir / "test_top.py")
     path = Path(file.name)
     assert not path.is_absolute()
-    wanted = BreakLoc(path, 1, None)
     with pytest.raises(FileNotFoundError):
-        _resolve_wanted(inst, wanted)
+        _resolve_wanted_file(config, path)
     file.write_text("pass")
-    result = _resolve_wanted(inst, wanted)
-    assert result.file.exists()
-    assert result.file.is_absolute()
+    result = _resolve_wanted_file(config, path)
+    assert result.exists()
+    assert result.is_absolute()
 
     # Relative, subdir
     subdir = rootdir / "subdir"
@@ -97,17 +98,16 @@ def test_resolve_wanted(tmp_path, request):
     file = subdir / "test_sub.py"
     path = file.relative_to(rootdir)
     assert not path.is_absolute()
-    wanted = BreakLoc(path, 1, None)
     #
     file.write_text("pass")
-    result = _resolve_wanted(inst, wanted)
-    assert result.file.exists()
-    assert result.file.is_absolute()
+    result = _resolve_wanted_file(config, path)
+    assert result.exists()
+    assert result.is_absolute()
     #
     os.chdir(subdir)
-    result = _resolve_wanted(inst, wanted)
-    assert result.file.exists()
-    assert result.file.is_absolute()
+    result = _resolve_wanted_file(config, path)
+    assert result.exists()
+    assert result.is_absolute()
 
 
 def test_get_node_at_pos():

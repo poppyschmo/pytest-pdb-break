@@ -52,6 +52,7 @@ def get_collected(*args):
     return [attr.asdict(ItemLocation.from_pytest_item(i)) for i in items]
 
 
+# FIXME replace this w. simple func returning Dict[...]
 def _get_item_location_cls():
     import attr
     from pathlib import Path
