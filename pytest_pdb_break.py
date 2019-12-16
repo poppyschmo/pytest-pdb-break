@@ -61,9 +61,9 @@ class BreakLoc:
     py_obj_kind = attr.ib(default=None, repr=False, eq=False, kw_only=True)
     class_name = attr.ib(default=None, repr=False, eq=False, kw_only=True)
     func_name = attr.ib(default=None, repr=False, eq=False, kw_only=True)
+    func_lnum = attr.ib(default=None, repr=False, eq=False, kw_only=True)
     param_id = attr.ib(default=None, repr=False, eq=False, kw_only=True)
     arg_name = attr.ib(default=None, repr=False, eq=False, kw_only=True)
-    func_key = attr.ib(default=None, repr=False, eq=False, kw_only=True)
     inner = attr.ib(default=None, repr=False, eq=False, kw_only=True)
 
     def equals(self, other):
@@ -72,8 +72,9 @@ class BreakLoc:
         leaves room for the likely addition of extraneous attrs.
         """
         relevant = (
-            "py_obj_kind", "class_name", "func_name",
-            "param_id", "arg_name", "func_key"
+            "py_obj_kind", "class_name",
+            "func_name", "func_lnum",
+            "param_id", "arg_name",
         )
         return self == other and all(
             getattr(self, a) == getattr(other, a) for a in relevant
@@ -100,6 +101,7 @@ class BreakLoc:
         kwargs = {}
         # TODO see if OK to save reference to item instead of just constants
         kwargs["func_name"] = item.function.__name__
+        kwargs["func_lnum"] = item.function.__code__.co_firstlineno
         if item.cls:
             kwargs["class_name"] = item.cls.__name__
         if item.originalname:
@@ -297,7 +299,9 @@ class PdbBreak:
         self.wanted = fortified
 
         if self.wanted.py_obj_kind == "item":
-            self.targets = func_items[self.wanted.func_key]
+            self.targets = func_items[
+                (self.wanted.func_name, self.wanted.func_lnum)
+            ]
             self._l and self._l.pspore("targets")
         else:
             assert self.wanted.py_obj_kind == "fixture"
@@ -581,6 +585,8 @@ def fortify_location(
 
     funcs = {o.function if kind == "item" else o.func for o in targets}
     assert len(funcs) == 1
+    func_name, func_lnum = _get_func_key(funcs.pop())
+    assert outer.name == func_name
 
     return BreakLoc(
         file=filename,
@@ -588,10 +594,10 @@ def fortify_location(
         name=None,
         py_obj_kind=kind,
         class_name=cls.name if cls else None,
-        func_name=outer.name,
+        func_name=func_name,
+        func_lnum=func_lnum,
         param_id=None,
         arg_name=arg_name if kind == "fixture" else None,
-        func_key=_get_func_key(funcs.pop()),
         inner=inner.name if inner else None,
     )
 

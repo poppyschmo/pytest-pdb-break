@@ -1,7 +1,7 @@
 import pytest
 
 from pathlib import Path
-from unittest.mock import patch, Mock
+from unittest.mock import Mock, MagicMock
 from _pytest.pytester import LineMatcher
 from pytest_pdb_break import BreakLoc, PdbBreak
 from pexpect import EOF  # No importskip
@@ -54,29 +54,32 @@ def test_breakloc(request):
         assert BreakLoc.from_arg_spec("a:b:c")
 
     # From pytest item
-    with patch("_pytest.nodes.Item") as mI, \
-            patch("_pytest.python.Function") as mF:
-        item = mF("test_loc_1", parent=mI("some_module"))
-        rootdir = request.config.rootdir
-        item.config.rootdir = rootdir
-        item.fspath = rootdir.join("test_loc.py")
-        # nodes.Item.location is a property
-        #
-        item.location = ("test_loc.py", 1, "test_loc_1")
-        item.function.__name__ = "test_loc.py"
-        item.cls = None
-        expected = BreakLoc(rootdir / "test_loc.py", 2, "test_loc_1")
-        assert BreakLoc.from_pytest_item(item) == expected
-        #
-        item.location = ("test_loc.py", 1, None)
-        item.function.__name__ = "test_loc.py"
-        item.cls = None
-        expected = BreakLoc(rootdir / "test_loc.py", 2, "None")
-        assert BreakLoc.from_pytest_item(item) == expected
-        #
-        item.location = ("/tmp/test_loc.py", 1, "test_loc_1")
-        with pytest.raises(AssertionError):
-            BreakLoc.from_pytest_item(item)
+    item = Mock(request.node)
+    rootdir = request.config.rootdir
+    item.config.rootdir = rootdir
+    item.fspath = rootdir.join("test_loc.py")
+    #
+    assert request.node.originalname is None
+    item.originalname = None  # else looks for callspec, which is absent
+    item.location = ("test_loc.py", 1, "test_loc_1")
+    item.function.__name__ = "test_loc.py"
+    item.function.__code__ = MagicMock()
+    item.function.__code__.co_firstlineno = 42
+    item.cls = None
+    expected = BreakLoc(rootdir / "test_loc.py", 2, "test_loc_1")
+    assert BreakLoc.from_pytest_item(item) == expected
+    #
+    item.originalname = None
+    item.location = ("test_loc.py", 1, None)
+    item.function.__name__ = "test_loc.py"
+    item.function.__code__.co_firstlineno = 42
+    item.cls = None
+    expected = BreakLoc(rootdir / "test_loc.py", 2, "None")
+    assert BreakLoc.from_pytest_item(item) == expected
+    #
+    item.location = ("/tmp/test_loc.py", 1, "test_loc_1")
+    with pytest.raises(AssertionError):
+        BreakLoc.from_pytest_item(item)
 
 
 def test_resolve_wanted(tmp_path, request):
@@ -191,7 +194,7 @@ def test_fortify_location(testdir, fix_defs):
             py_obj_kind="item",
             class_name="TestClass",
             func_name="test_foo",
-            func_key=cfkey,
+            func_lnum=cfkey[1],
         )
     )
     assert rv.inner == "inner"
@@ -210,7 +213,7 @@ def test_fortify_location(testdir, fix_defs):
             None,
             py_obj_kind="item",
             func_name="test_bar",
-            func_key=barkey,
+            func_lnum=barkey[1],
         )
     )
     assert rv.inner is None
@@ -223,8 +226,8 @@ def test_fortify_location(testdir, fix_defs):
             None,
             py_obj_kind="fixture",
             func_name="baz",
+            func_lnum=bazkey[1],
             arg_name="baz",
-            func_key=bazkey,
         )
     )
 
@@ -236,7 +239,7 @@ def test_fortify_location(testdir, fix_defs):
             None,
             py_obj_kind="item",
             func_name="test_foo",
-            func_key=fookey,
+            func_lnum=fookey[1],
         )
     )
     assert rv.arg_name is None
@@ -268,7 +271,7 @@ def test_fortify_location_aio(testdir, fix_defs):
             py_obj_kind="item",
             class_name="TestClass",
             func_name="test_foo",
-            func_key=cfkey,
+            func_lnum=cfkey[1],
         )
     )
     assert rv.inner == "inner"
