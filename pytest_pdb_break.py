@@ -473,7 +473,11 @@ def _get_node_at_pos(line_no, node, parent=None):
 
 def fortify_location(filename, line_no):
     """Try to flesh out location with more specific info.
+
     On success, return new BreakLoc object. Otherwise, return None.
+    The returned object's func_name must refer to a collected
+    item or fixture. The ``inner`` field must be the innermost
+    enclosing function (of line_no) if different from the item.
     """
     try:
         root = ast.parse(Path(filename).read_text(), filename=filename)
@@ -492,15 +496,15 @@ def fortify_location(filename, line_no):
     if func is None:
         return None
 
-    cand = func
+    outer = func
     inner = None
     # Fails when inner func is named test_*
-    while cand and not cand.name.startswith("test_"):
-        cand = find(cand.parent, (ast.FunctionDef,))
-    if cand:
-        if cand is not func:
+    while outer and not outer.name.startswith("test_"):
+        outer = find(outer.parent, (ast.FunctionDef, ast.AsyncFunctionDef))
+    if outer:
+        if outer is not func:
             inner = func.name
-        func = cand
+        func = outer
     elif type(func) is ast.AsyncFunctionDef and not func.name.startswith(
         "test_"
     ):
