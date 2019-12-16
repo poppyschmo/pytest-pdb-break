@@ -471,7 +471,7 @@ def _get_node_at_pos(line_no, node, parent=None):
                 return rv
 
 
-def fortify_location(filename, line_no):
+def fortify_location(filename, line_no, async_plugin=False):
     """Try to flesh out location with more specific info.
 
     On success, return new BreakLoc object. Otherwise, return None.
@@ -505,9 +505,8 @@ def fortify_location(filename, line_no):
         if outer is not func:
             inner = func.name
         func = outer
-    elif type(func) is ast.AsyncFunctionDef and not func.name.startswith(
-        "test_"
-    ):
+
+    if type(func) is ast.AsyncFunctionDef and not async_plugin:
         # Pytest can't run top-level async def test_* funcs, right?
         return None
 

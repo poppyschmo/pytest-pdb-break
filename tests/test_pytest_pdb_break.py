@@ -178,11 +178,17 @@ def test_fortify_location_aio(testdir):
 
     filename = testdir.copy_example("fortify/async.py")
     assert filename.exists()
-    # No top-level, test_* prefixed asyncio functions allowed
+
     assert fortify_location(filename, 2) is None
+    assert fortify_location(filename, 15) is None
+    assert fortify_location(filename, 21) is None
+
     rv = fortify_location(filename, 9)
-    assert rv.equals(BreakLoc(filename, 9, None,
-                              class_name="TestClass", func_name="test_foo"))
+    assert rv.equals(
+        BreakLoc(
+            filename, 9, None, class_name="TestClass", func_name="test_foo"
+        )
+    )
     assert rv.inner == "inner"
 
 

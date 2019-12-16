@@ -10,3 +10,14 @@ class TestClass:               # <- line 4
 
         import asyncio
         assert asyncio.run(somevar)
+
+    async def test_bar(self):  # <- line 14
+        nothervar = True
+        return nothervar
+
+    async def test_baz(self):
+
+        async def inner(x):    # <- line 20
+            return not x
+
+        return await inner(True)
