@@ -29,3 +29,6 @@ import pytest
 def baz():                     # <- line 29
     spam = 1
     return spam
+
+def test_foo(baz):             # <- line 33
+    assert 1

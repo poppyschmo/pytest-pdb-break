@@ -151,9 +151,10 @@ def get_mod_pdb():
 def fix_defs(request):
     from unittest.mock import Mock
     # Mock version of get_fix_names_to_fix_defs()
+    from pytest_pdb_break import _get_func_key
     fixes = {}
     for fix_list in request.session._fixturemanager._arg2fixturedefs.values():
         for fix in fix_list:
-            fixes.setdefault(fix.func.__name__, []).append(Mock(fix))
-    assert "monkeypatch" in fixes
+            fixes.setdefault(_get_func_key(fix.func), []).append(Mock(fix))
+    assert "monkeypatch" in (n for n, l in fixes)
     return fixes

@@ -47,6 +47,9 @@ pytestPDB = pytest.set_trace.__self__
 @attr.s
 class BreakLoc:
     """Data object holding path-like filename, line number, test name.
+
+    Some of the extra attributes are only used by the helper when prompting
+    for addtional info. All values are constants.
     """
 
     file = attr.ib(
@@ -60,8 +63,8 @@ class BreakLoc:
     func_name = attr.ib(default=None, repr=False, eq=False, kw_only=True)
     param_id = attr.ib(default=None, repr=False, eq=False, kw_only=True)
     arg_name = attr.ib(default=None, repr=False, eq=False, kw_only=True)
+    func_key = attr.ib(default=None, repr=False, eq=False, kw_only=True)
     inner = attr.ib(default=None, repr=False, eq=False, kw_only=True)
-    func = attr.ib(default=None, repr=False, eq=False, kw_only=True)
 
     def equals(self, other):
         """True if class, func, param fields are equal.
@@ -70,7 +73,7 @@ class BreakLoc:
         """
         relevant = (
             "py_obj_kind", "class_name", "func_name",
-            "param_id", "arg_name", "func"
+            "param_id", "arg_name", "func_key"
         )
         return self == other and all(
             getattr(self, a) == getattr(other, a) for a in relevant
@@ -243,7 +246,11 @@ class PdbBreak:
         else:
             self._l and self._l.pspore("rewrite")
 
-    def get_fix_names_to_fix_defs(self, session):
+    def map_func_info_to_fix_defs(self, session):
+        """Map fixture factory info to lists of FixtureDef objects
+
+        Keys are tuples of name and line number.
+        """
         result = {}
         thisfile = str(self.wanted.file)
         for fixes in session._fixturemanager._arg2fixturedefs.values():
@@ -252,10 +259,14 @@ class PdbBreak:
                     continue
                 if fix.func.__code__.co_firstlineno > self.wanted.lnum:
                     continue
-                result.setdefault(fix.func.__name__, []).append(fix)
+                result.setdefault(_get_func_key(fix.func), []).append(fix)
         return result
 
-    def get_func_names_to_func_items(self, session):
+    def map_func_info_to_items(self, session):
+        """Map function or method info to lists of Item objects
+
+        Keys are tuples of name and line number.
+        """
         result = {}
         thisfile = str(self.wanted.file)
         for item in session.items:
@@ -263,20 +274,20 @@ class PdbBreak:
                 continue
             if item.function.__code__.co_firstlineno > self.wanted.lnum:
                 continue
-            result.setdefault(item.function.__name__, []).append(item)
+            result.setdefault(_get_func_key(item.function), []).append(item)
         return result
 
     def find_targets(self, session):
         assert self.wanted.file
         from functools import partial
-        func_names = self.get_func_names_to_func_items(session)
+        func_items = self.map_func_info_to_items(session)
         self._l and self._l.pspore("top")
 
         fortified = fortify_location(
             self.wanted.file,
             self.wanted.lnum,
-            func_names=func_names,
-            fixtures_finder=partial(self.get_fix_names_to_fix_defs, session)
+            func_items=func_items,
+            fixtures_finder=partial(self.map_func_info_to_fix_defs, session)
         )
 
         self._l and self._l.pspore("fortified")
@@ -286,7 +297,7 @@ class PdbBreak:
         self.wanted = fortified
 
         if self.wanted.py_obj_kind == "item":
-            self.targets = func_names[self.wanted.func_name]
+            self.targets = func_items[self.wanted.func_key]
             self._l and self._l.pspore("targets")
         else:
             assert self.wanted.py_obj_kind == "fixture"
@@ -484,6 +495,13 @@ class PdbBreak:
             return True
 
 
+def _get_func_key(func):
+    """Return a tuple of func name, def line no"""
+    if hasattr(func, "__wrapped__"):
+        func = func.__wrapped__
+    return func.__name__, func.__code__.co_firstlineno
+
+
 def _get_node_at_pos(line_no, node, parent=None):
     """Return first ast node at line_no.
     This is ``ast.NodeVisitor.generic_visit`` with extra breadcrumb
@@ -509,7 +527,7 @@ def _get_node_at_pos(line_no, node, parent=None):
 def fortify_location(
     filename,
     line_no,
-    func_names,  # dict mapping func names to items
+    func_items,  # dict mapping func names to items
     fixtures_finder,  # callable returning map of func names to FixtureDefs
 ):
     """Resolve args into a canonical BreakLoc object and return it
@@ -536,7 +554,7 @@ def fortify_location(
 
     def resolve(scope, haystack):
         while True:
-            found = scope and haystack.get(scope.name)
+            found = scope and haystack.get((scope.name, scope.lineno))
             if not scope or found:
                 break
             scope = find(scope.parent, (ast.FunctionDef, ast.AsyncFunctionDef))
@@ -546,7 +564,7 @@ def fortify_location(
     if not inner:
         return None
 
-    outer, targets = resolve(inner, func_names)
+    outer, targets = resolve(inner, func_items)
     if outer:
         assert targets
     else:
@@ -573,8 +591,8 @@ def fortify_location(
         func_name=outer.name,
         param_id=None,
         arg_name=arg_name if kind == "fixture" else None,
+        func_key=_get_func_key(funcs.pop()),
         inner=inner.name if inner else None,
-        func=funcs.pop()
     )
 
 

@@ -148,19 +148,30 @@ def test_get_node_at_pos():
 
 
 def test_fortify_location(testdir, fix_defs):
-    from pytest_pdb_break import fortify_location
+    from pytest_pdb_break import fortify_location, _get_func_key
     from _pytest.python import Function
+    import sources.fortify.normal as exmod
+
+    cfkey = _get_func_key(exmod.TestClass.test_foo)
+    fookey = _get_func_key(exmod.test_foo)
+    barkey = _get_func_key(exmod.test_bar)
+    bazkey = _get_func_key(exmod.baz)
 
     fixes = dict(fix_defs)
-    fixes["baz"] = [fix_defs["monkeypatch"][0]]
-    fixes["baz"][0].argname = "baz"
+    fixes[bazkey] = [list(fix_defs.values())[0][0]]  # arbitrary
+    fixes[bazkey][0].argname = "baz"
+    fixes[bazkey][0].func = exmod.baz
 
     items = {
-        "test_foo": [Mock(Function), Mock(Function)],
-        "test_bar": [Mock(Function)],
+        cfkey: [Mock(Function), Mock(Function)],
+        barkey: [Mock(Function)],
+        fookey: [Mock(Function)],
     }
-    fake_func = object()
-    items["test_foo"][0].function = items["test_foo"][1].function = fake_func
+
+    items[cfkey][0].function = exmod.TestClass.test_foo
+    items[cfkey][1].function = exmod.TestClass.test_foo
+    items[barkey][0].function = exmod.test_bar
+    items[fookey][0].function = exmod.test_foo
 
     filename = testdir.copy_example("fortify/normal.py")
     assert filename.exists()
@@ -180,7 +191,7 @@ def test_fortify_location(testdir, fix_defs):
             py_obj_kind="item",
             class_name="TestClass",
             func_name="test_foo",
-            func=fake_func,
+            func_key=cfkey,
         )
     )
     assert rv.inner == "inner"
@@ -199,7 +210,7 @@ def test_fortify_location(testdir, fix_defs):
             None,
             py_obj_kind="item",
             func_name="test_bar",
-            func=items["test_bar"][0].function,
+            func_key=barkey,
         )
     )
     assert rv.inner is None
@@ -213,21 +224,35 @@ def test_fortify_location(testdir, fix_defs):
             py_obj_kind="fixture",
             func_name="baz",
             arg_name="baz",
-            func=fixes["baz"][0].func,
+            func_key=bazkey,
         )
     )
 
+    rv = fortify_location(filename, 34, items, lambda: fixes)
+    assert rv.equals(
+        BreakLoc(
+            filename,
+            34,
+            None,
+            py_obj_kind="item",
+            func_name="test_foo",
+            func_key=fookey,
+        )
+    )
+    assert rv.arg_name is None
+
 
 def test_fortify_location_aio(testdir, fix_defs):
-    from pytest_pdb_break import fortify_location
+    from pytest_pdb_break import fortify_location, _get_func_key
     from _pytest.python import Function
+    import sources.fortify.asyncio as exmod
 
-    items = {
-        "test_foo": [Mock(Function)],
-    }
+    cfkey = _get_func_key(exmod.TestClass.test_foo)
+    items = {cfkey: [Mock(Function)]}
+    items[cfkey][0].function = exmod.TestClass.test_foo
     fixes = dict(fix_defs)
 
-    filename = testdir.copy_example("fortify/async.py")
+    filename = testdir.copy_example("fortify/asyncio.py")
     assert filename.exists()
 
     assert fortify_location(filename, 2, items, lambda: fixes) is None
@@ -243,7 +268,7 @@ def test_fortify_location_aio(testdir, fix_defs):
             py_obj_kind="item",
             class_name="TestClass",
             func_name="test_foo",
-            func=items["test_foo"][0].function,
+            func_key=cfkey,
         )
     )
     assert rv.inner == "inner"
