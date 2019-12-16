@@ -2,7 +2,6 @@ import os
 import sys
 import pytest
 
-from unittest.mock import Mock
 from pexpect import EOF  # No importskip
 from _pytest.pytester import LineMatcher
 from conftest import prompt_re, unansi
@@ -56,4 +55,107 @@ def test_simple(testdir):
     befs.fnmatch_lines([
         "*warnings summary*",
         "*test_simple.py::TestClass::test_baz*",
+    ])
+
+
+def test_marked_module_class(testdir):
+    filename = testdir.copy_example("asyncio/test_marked_mod.py")
+    assert filename.exists()
+
+    pe = testdir.spawn_pytest(
+        "--break=test_marked_mod.py:16 "
+        "test_marked_mod.py::TestClass::test_bar"
+    )
+    pe.expect(prompt_re)
+    befs = LineMatcher(unansi(pe.before))
+    befs.fnmatch_lines([
+        "*>*(16)test_bar()*",
+        '*assert "asyncio" in request.keywords*'
+    ])
+    pe.sendline("c")
+    pe.expect(EOF)
+    befs = LineMatcher(unansi(pe.before))
+    befs.fnmatch_lines([
+        "*1 passed*",
+    ])
+
+
+def test_marked_module_func_nested(testdir):
+    filename = testdir.copy_example("asyncio/test_marked_mod.py")
+    assert filename.exists()
+
+    pe = testdir.spawn_pytest(
+        "--break=test_marked_mod.py:24 "
+        "test_marked_mod.py::test_baz"
+    )
+    pe.expect(prompt_re)
+    befs = LineMatcher(unansi(pe.before))
+    befs.fnmatch_lines([
+        "*>*(24)inner()*",
+        '*assert x*'
+    ])
+
+    # Ensure previous frames properly hidden
+    pe.sendline("w")
+    pe.expect(prompt_re)
+    assert b")runcall_until" not in pe.before
+    assert b"runcall_until_async" not in pe.before
+    befs = LineMatcher(unansi(pe.before))
+    befs.fnmatch_lines([
+        "*(26)test_baz()*",
+        "*->*await inner*",
+        "*(24)inner()*",
+    ])
+
+    pe.sendline("c")
+    pe.expect(EOF)
+    befs = LineMatcher(unansi(pe.before))
+    befs.fnmatch_lines([
+        "*1 passed*",
+    ])
+
+
+def test_marked_module_fixture_before(testdir):
+    filename = testdir.copy_example("asyncio/test_marked_mod.py")
+    assert filename.exists()
+
+    pe = testdir.spawn_pytest(
+        "--break=test_marked_mod.py:35 "
+        "test_marked_mod.py"
+    )
+    pe.expect(prompt_re)
+    befs = LineMatcher(unansi(pe.before))
+    befs.fnmatch_lines([
+        "*>*(35)somefix()*",
+        '*spam*'
+    ])
+
+    pe.sendline("c")
+    pe.expect(EOF)
+    befs = LineMatcher(unansi(pe.before))
+    befs.fnmatch_lines([
+        "*4 passed*",
+    ])
+
+
+def test_marked_module_fixture_after(testdir):
+    filename = testdir.copy_example("asyncio/test_marked_mod.py")
+    assert filename.exists()
+
+    pe = testdir.spawn_pytest(
+        "--break=test_marked_mod.py:38 "
+        "test_marked_mod.py::test_spam"
+    )
+    pe.expect(prompt_re)
+    befs = LineMatcher(unansi(pe.before))
+    befs.fnmatch_lines([
+        "*>*(38)somefix()*",
+        '*del spam*'
+    ])
+
+    pe.sendline("c")
+    pe.expect(EOF)
+    befs = LineMatcher(unansi(pe.before))
+    befs.fnmatch_lines([
+        "*1 passed*",
     ])
