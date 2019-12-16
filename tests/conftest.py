@@ -158,3 +158,20 @@ def fix_defs(request):
             fixes.setdefault(_get_func_key(fix.func), []).append(Mock(fix))
     assert "monkeypatch" in (n for n, l in fixes)
     return fixes
+
+
+@pytest.fixture
+def modified_breakloc():
+    from pytest_pdb_break import BreakLoc
+
+    relevant = "py_obj_kind", "func_name", "func_lnum", "arg_name"
+
+    def equals(inst, other):
+        """True if remaining fields are equal"""
+        return inst == other and all(
+            getattr(inst, a) == getattr(other, a) for a in relevant
+        )
+
+    BreakLoc.equals = equals
+    yield BreakLoc
+    del BreakLoc.equals

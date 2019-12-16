@@ -46,7 +46,7 @@ pytestPDB = pytest.set_trace.__self__
 
 @attr.s
 class BreakLoc:
-    """Data object holding path-like filename, line number, test name.
+    """Object holding path-like filename, line number, and maybe more
 
     All values are constants.
     """
@@ -55,20 +55,12 @@ class BreakLoc:
         converter=attr.converters.optional(lambda v: Path(v) if v else None)
     )
     lnum = attr.ib(validator=attr.validators.instance_of(int))
-    name = attr.ib()
 
     py_obj_kind = attr.ib(default=None, repr=False, eq=False, kw_only=True)
     func_name = attr.ib(default=None, repr=False, eq=False, kw_only=True)
     func_lnum = attr.ib(default=None, repr=False, eq=False, kw_only=True)
     arg_name = attr.ib(default=None, repr=False, eq=False, kw_only=True)
     inner = attr.ib(default=None, repr=False, eq=False, kw_only=True)
-
-    def equals(self, other):
-        """True if remaining fields are equal"""
-        relevant = "py_obj_kind", "func_name", "func_lnum", "arg_name"
-        return self == other and all(
-            getattr(self, a) == getattr(other, a) for a in relevant
-        )
 
     @classmethod
     def from_arg_spec(cls, string):
@@ -78,7 +70,7 @@ class BreakLoc:
         if file:
             # $TMPHOME/foo may be ~/.local/tmp/foo, so expand envvars first
             file = os.path.expanduser(os.path.expandvars(file))
-        return cls(file if file else None, int(lnum), None)
+        return cls(file if file else None, int(lnum))
 
 
 def pytest_addoption(parser):
@@ -566,7 +558,6 @@ def fortify_location(
     return BreakLoc(
         file=filename,
         lnum=line_no,
-        name=None,
         py_obj_kind=kind,
         func_name=func_name,
         func_lnum=func_lnum,
