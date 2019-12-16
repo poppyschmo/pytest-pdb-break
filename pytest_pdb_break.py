@@ -44,12 +44,19 @@ __version__ = "0.0.6"
 pytestPDB = pytest.set_trace.__self__
 
 
+def _get_modpath_from_pytest_item(item):
+    file, *_ = item.location
+    assert not Path(file).is_absolute(), file
+    file = item.config.rootdir.join(file)
+    assert item.fspath == file
+    return Path(file)
+
+
 @attr.s
 class BreakLoc:
     """Data object holding path-like filename, line number, test name.
 
-    Some of the extra attributes are only used by the helper when prompting
-    for addtional info. All values are constants.
+    All values are constants.
     """
 
     file = attr.ib(
@@ -79,34 +86,6 @@ class BreakLoc:
         return self == other and all(
             getattr(self, a) == getattr(other, a) for a in relevant
         )
-
-    @classmethod
-    def from_pytest_item(cls, item):
-        """Return a BreakLoc instance from a pytest Function item.
-
-        Notes:
-        1. ``pytest.Item.location`` line numbers are zero-indexed, but pdb
-           breakpoints aren't, and neither are linecache's
-        2. ``lnum`` may be ``-1``, as returned by ``.reportinfo()``
-        3. ``name`` may be "Class.func[id]", with "id" accessible at
-           ``.callspec.id`` and the rest at ``.originalname``
-        4. ``name`` is presently unused
-        """
-        file, lnum, name = item.location
-        # Comment in ``Config.cwd_relative_nodeid`` says "nodeid's are relative
-        # to the rootpath." Seems this also applies to .location names.
-        assert not Path(file).is_absolute(), file
-        file = item.config.rootdir.join(file)
-        assert item.fspath == file
-        kwargs = {}
-        # TODO see if OK to save reference to item instead of just constants
-        kwargs["func_name"] = item.function.__name__
-        kwargs["func_lnum"] = item.function.__code__.co_firstlineno
-        if item.cls:
-            kwargs["class_name"] = item.cls.__name__
-        if item.originalname:
-            kwargs["param_id"] = item.callspec.id
-        return cls(file, lnum + 1, str(name), **kwargs)
 
     @classmethod
     def from_arg_spec(cls, string):
@@ -241,7 +220,7 @@ class PdbBreak:
             return
         try:
             assert len(session.items) == 1
-            self.wanted.file = BreakLoc.from_pytest_item(session.items[0]).file
+            self.wanted.file = _get_modpath_from_pytest_item(session.items[0])
         except Exception:
             msg = "unable to determine breakpoint file"
             raise RuntimeError(msg)

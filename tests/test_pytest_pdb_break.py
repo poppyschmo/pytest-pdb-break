@@ -1,7 +1,7 @@
 import pytest
 
 from pathlib import Path
-from unittest.mock import Mock, MagicMock
+from unittest.mock import Mock
 from _pytest.pytester import LineMatcher
 from pytest_pdb_break import BreakLoc, PdbBreak
 from pexpect import EOF  # No importskip
@@ -52,34 +52,6 @@ def test_breakloc(request):
         assert BreakLoc.from_arg_spec("")
     with pytest.raises(ValueError):
         assert BreakLoc.from_arg_spec("a:b:c")
-
-    # From pytest item
-    item = Mock(request.node)
-    rootdir = request.config.rootdir
-    item.config.rootdir = rootdir
-    item.fspath = rootdir.join("test_loc.py")
-    #
-    assert request.node.originalname is None
-    item.originalname = None  # else looks for callspec, which is absent
-    item.location = ("test_loc.py", 1, "test_loc_1")
-    item.function.__name__ = "test_loc.py"
-    item.function.__code__ = MagicMock()
-    item.function.__code__.co_firstlineno = 42
-    item.cls = None
-    expected = BreakLoc(rootdir / "test_loc.py", 2, "test_loc_1")
-    assert BreakLoc.from_pytest_item(item) == expected
-    #
-    item.originalname = None
-    item.location = ("test_loc.py", 1, None)
-    item.function.__name__ = "test_loc.py"
-    item.function.__code__.co_firstlineno = 42
-    item.cls = None
-    expected = BreakLoc(rootdir / "test_loc.py", 2, "None")
-    assert BreakLoc.from_pytest_item(item) == expected
-    #
-    item.location = ("/tmp/test_loc.py", 1, "test_loc_1")
-    with pytest.raises(AssertionError):
-        BreakLoc.from_pytest_item(item)
 
 
 def test_resolve_wanted(tmp_path, request):

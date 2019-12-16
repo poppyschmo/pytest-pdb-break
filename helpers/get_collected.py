@@ -46,9 +46,56 @@ def get_locations(*args):
 
 def get_collected(*args):
     """Return a list of test-item location info as dicts"""
-    from pytest_pdb_break import BreakLoc
+    import attr
     items = _get_items(args)
-    locs = ((BreakLoc.from_pytest_item(i), i.nodeid) for i in items)
-    return [dict(file=str(l.file), lnum=l.lnum, name=l.name,
-                 class_name=l.class_name, func_name=l.func_name,
-                 param_id=l.param_id, nodeid=n) for l, n in locs]
+    ItemLocation = _get_item_location_cls()
+    return [attr.asdict(ItemLocation.from_pytest_item(i)) for i in items]
+
+
+def _get_item_location_cls():
+    import attr
+    from pathlib import Path
+
+    @attr.s
+    class ItemLocation:
+        """Object to store relevant test item info"""
+        file = attr.ib(validator=attr.validators.instance_of(str))
+        lnum = attr.ib(validator=attr.validators.instance_of(int))
+        name = attr.ib(validator=attr.validators.instance_of(str))
+
+        nodeid = attr.ib(validator=attr.validators.instance_of(str))
+        func_name = attr.ib(validator=attr.validators.instance_of(str))
+
+        class_name = attr.ib(default=None)
+        param_id = attr.ib(default=None)
+
+        @classmethod
+        def from_pytest_item(cls, item):
+            """Return a BreakLoc instance from a pytest Function item.
+
+            Notes:
+            1. ``pytest.Item.location`` line numbers are zero-indexed, but pdb
+               breakpoints aren't, and neither are linecache's
+            2. ``lnum`` may be ``-1``, as returned by ``.reportinfo()``
+            3. ``name`` may be "Class.func[id]", with "id" accessible at
+               ``.callspec.id`` and the rest at ``.originalname``
+            4. ``name`` is presently unused
+            """
+            file, lnum, name = item.location
+            # Comment in ``Config.cwd_relative_nodeid`` says "nodeid's are
+            # relative to the rootpath." Seems this also applies to .location
+            # names.
+            assert not Path(file).is_absolute(), file
+            file = item.config.rootdir.join(file)
+            assert item.fspath.strpath == file.strpath
+            return cls(
+                file=str(file),
+                lnum=lnum + 1,
+                name=str(name),
+                nodeid=item.nodeid,
+                func_name=item.function.__name__,
+                class_name=item.cls.__name__ if item.cls else None,
+                param_id=item.callspec.id if item.originalname else None,
+            )
+
+    return ItemLocation
