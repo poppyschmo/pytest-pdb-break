@@ -135,8 +135,9 @@ def test_resolve_wanted(tmp_path, request):
     assert result.file.is_absolute()
 
 
-def test_get_node_at_pos(source_ast):
+def test_get_node_at_pos():
     from pytest_pdb_break import _get_node_at_pos
+    from conftest import source_ast
     import ast
     root = ast.parse(source_ast)
     node = _get_node_at_pos(6, root)
@@ -146,9 +147,11 @@ def test_get_node_at_pos(source_ast):
     assert node.parent.parent.name == "C"
 
 
-def test_fortify_location(testdir_ast):
+def test_fortify_location(testdir):
     from pytest_pdb_break import fortify_location
-    filename = Path(testdir_ast.tmpdir / "test_fortify_location.py")
+    from conftest import source_ast
+
+    filename = testdir.makepyfile(source_ast)
     assert filename.exists()
     rv = fortify_location(filename, 2)
     assert rv.equals(BreakLoc(filename, 2, None,
@@ -171,9 +174,11 @@ def test_fortify_location(testdir_ast):
     assert type(rv.ast_obj) is FunctionDef
 
 
-def test_fortify_location_aio(testdir_ast_aio):
+def test_fortify_location_aio(testdir):
     from pytest_pdb_break import fortify_location
-    filename = Path(testdir_ast_aio.tmpdir / "test_fortify_location_aio.py")
+    from conftest import source_ast_aio
+
+    filename = testdir.makepyfile(test_a=source_ast_aio)
     assert filename.exists()
     # No top-level, test_* prefixed asyncio functions allowed
     assert fortify_location(filename, 2) is None

@@ -73,8 +73,8 @@ def testdir_setup(testdir):
 
 
 def extend_conftest(td, rest):
-    # TD is a testdir intance
     from textwrap import dedent
+    # TD is a testdir intance
     conftest = td.tmpdir.join("conftest.py")
     data = dedent(rest).strip()
     conftest.write(data="\n{}".format(data), mode="a")
@@ -115,69 +115,48 @@ def testdir_class(testdir_setup):
     return testdir_setup
 
 
-@pytest.fixture
-def source_ast():
-    from textwrap import dedent
-    source = dedent("""
-        def somefunc():                # <- line 1
-            print("somefunc")
+source_ast = """
+def somefunc():                # <- line 1
+    print("somefunc")
 
-        class C:                       # <- line 4
-            def f(self):
-                return True
+class C:                       # <- line 4
+    def f(self):
+        return True
 
-        class TestClass:               # <- line 8
-            def test_foo(self):
-                somevar = False
+class TestClass:               # <- line 8
+    def test_foo(self):
+        somevar = False
 
-                def inner(x):          # <- line 12
-                    return not x
+        def inner(x):          # <- line 12
+            return not x
 
-                assert inner(somevar)
+        assert inner(somevar)
 
-        SOME_GLOBAL = "test"
+SOME_GLOBAL = "test"
 
-        @wrapper.attr                  # <- line 19
-        def wrapped():
-            print("wrapped")
+@wrapper.attr                  # <- line 19
+def wrapped():
+    print("wrapped")
 
-        if __name__ == "__main__":     # <- line 23
-            pass
-    """).strip()
-    return source
+if __name__ == "__main__":     # <- line 23
+    pass
+""".strip()
 
 
-@pytest.fixture
-def testdir_ast(testdir_setup, source_ast):
-    testdir_setup.makepyfile(source_ast)
-    return testdir_setup
+source_ast_aio = """
+async def somefunc():          # <- line 1
+    print("somefunc")
 
+class TestClass:               # <- line 4
+    def test_foo(self):
+        somevar = False
 
-@pytest.fixture
-def source_ast_aio():
-    from textwrap import dedent
-    source = dedent("""
-        async def somefunc():          # <- line 1
-            print("somefunc")
+        async def inner(x):    # <- line 8
+            return not x
 
-        class TestClass:               # <- line 4
-            def test_foo(self):
-                somevar = False
-
-                async def inner(x):    # <- line 8
-                    return not x
-
-                import asyncio
-                assert asyncio.run(somevar)
-
-    """).strip()
-    return source
-
-
-@pytest.fixture
-def testdir_ast_aio(testdir_setup, source_ast_aio):
-    testdir_setup.makepyfile(source_ast_aio)
-    return testdir_setup
+        import asyncio
+        assert asyncio.run(somevar)
+""".strip()
 
 
 @pytest.fixture
