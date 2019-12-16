@@ -154,6 +154,7 @@ def test_fortify_location(testdir, fix_defs):
 
     fixes = dict(fix_defs)
     fixes["baz"] = [fix_defs["monkeypatch"][0]]
+    fixes["baz"][0].argname = "baz"
 
     items = {
         "test_foo": [Mock(Function), Mock(Function)],
@@ -214,6 +215,7 @@ def test_fortify_location(testdir, fix_defs):
             None,
             py_obj_kind="fixture",
             func_name="baz",
+            arg_name="baz",
             func=fixes["baz"][0].func,
         )
     )

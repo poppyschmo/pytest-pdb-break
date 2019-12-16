@@ -59,6 +59,7 @@ class BreakLoc:
     class_name = attr.ib(default=None, repr=False, eq=False, kw_only=True)
     func_name = attr.ib(default=None, repr=False, eq=False, kw_only=True)
     param_id = attr.ib(default=None, repr=False, eq=False, kw_only=True)
+    arg_name = attr.ib(default=None, repr=False, eq=False, kw_only=True)
     ast_obj = attr.ib(default=None, repr=False, eq=False, kw_only=True)
     inner = attr.ib(default=None, repr=False, eq=False, kw_only=True)
     func = attr.ib(default=None, repr=False, eq=False, kw_only=True)
@@ -69,7 +70,8 @@ class BreakLoc:
         leaves room for the likely addition of extraneous attrs.
         """
         relevant = (
-            "py_obj_kind", "class_name", "func_name", "param_id", "func"
+            "py_obj_kind", "class_name", "func_name",
+            "param_id", "arg_name", "func"
         )
         return self == other and all(
             getattr(self, a) == getattr(other, a) for a in relevant
@@ -288,12 +290,12 @@ class PdbBreak:
             self.targets = func_names[self.wanted.func_name]
             self._l and self._l.pspore("targets")
         else:
-            # FIXME func name might not match "arg name" for fixture
             assert self.wanted.py_obj_kind == "fixture"
+            assert self.wanted.arg_name
             self.elsewhere = [
-                i  # in *any* discovered file
+                i  # item *any* discovered module
                 for i in session.items
-                if self.wanted.func_name in i.fixturenames
+                if self.wanted.arg_name in i.fixturenames
             ]
 
     def pytest_runtestloop(self, session):
@@ -553,6 +555,7 @@ def fortify_location(
         outer, targets = resolve(inner, fixtures_finder())
         if not targets:
             return None
+        arg_name = {t.argname for t in targets}.pop()
 
     if not outer or outer is inner:
         outer, inner = inner, None
@@ -570,6 +573,7 @@ def fortify_location(
         class_name=cls.name if cls else None,
         func_name=outer.name,
         param_id=None,
+        arg_name=arg_name if kind == "fixture" else None,
         ast_obj=outer,
         inner=inner.name if inner else None,
         func=funcs.pop()
