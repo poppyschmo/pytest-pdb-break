@@ -150,7 +150,6 @@ def test_get_node_at_pos():
 def test_fortify_location(testdir, fix_defs):
     from pytest_pdb_break import fortify_location
     from _pytest.python import Function
-    from ast import FunctionDef
 
     fixes = dict(fix_defs)
     fixes["baz"] = [fix_defs["monkeypatch"][0]]
@@ -185,7 +184,6 @@ def test_fortify_location(testdir, fix_defs):
         )
     )
     assert rv.inner == "inner"
-    assert type(rv.ast_obj) is FunctionDef
 
     rv = fortify_location(filename, 17, items, lambda: fixes)
     assert rv is None
@@ -205,7 +203,6 @@ def test_fortify_location(testdir, fix_defs):
         )
     )
     assert rv.inner is None
-    assert type(rv.ast_obj) is FunctionDef
 
     rv = fortify_location(filename, 30, items, lambda: fixes)
     assert rv.equals(

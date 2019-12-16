@@ -60,7 +60,6 @@ class BreakLoc:
     func_name = attr.ib(default=None, repr=False, eq=False, kw_only=True)
     param_id = attr.ib(default=None, repr=False, eq=False, kw_only=True)
     arg_name = attr.ib(default=None, repr=False, eq=False, kw_only=True)
-    ast_obj = attr.ib(default=None, repr=False, eq=False, kw_only=True)
     inner = attr.ib(default=None, repr=False, eq=False, kw_only=True)
     func = attr.ib(default=None, repr=False, eq=False, kw_only=True)
 
@@ -574,7 +573,6 @@ def fortify_location(
         func_name=outer.name,
         param_id=None,
         arg_name=arg_name if kind == "fixture" else None,
-        ast_obj=outer,
         inner=inner.name if inner else None,
         func=funcs.pop()
     )
