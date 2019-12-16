@@ -2,12 +2,16 @@ import os
 import sys
 import pytest
 
-plugin_installed = False  # WIP
-# plugin_installed = (
-#     os.getenv("TOXENV") in ("py38-asyncio", "py37-asyncio")
-#     or
-#     sys.modules.get("pytest_asyncio")
-# )
+from unittest.mock import Mock
+from pexpect import EOF  # No importskip
+from _pytest.pytester import LineMatcher
+from conftest import prompt_re, unansi
+
+plugin_installed = (
+    os.getenv("TOXENV") in ("py38-asyncio", "py37-asyncio")
+    or
+    sys.modules.get("pytest_asyncio")
+)
 pytestmark = pytest.mark.skipif(
     not plugin_installed, reason="Integration dependency missing"
 )
@@ -17,35 +21,39 @@ def test__meta__plugin_installed(request):
     assert request.config.pluginmanager.hasplugin("asyncio")
 
 
-def test_fortify_location_plugin_present(testdir):
-    from pytest_pdb_break import fortify_location, BreakLoc
+def test__meta__upstream_facts():
+    from pytest_asyncio.plugin import _markers_2_fixtures
+    assert _markers_2_fixtures == {"asyncio": "event_loop"}
 
-    filename = testdir.copy_example("fortify/async.py")
+
+def test_simple_unknown(testdir):
+    filename = testdir.copy_example("asyncio/test_simple.py")
     assert filename.exists()
 
-    rv = fortify_location(filename, 2, True)
-    assert rv.equals(BreakLoc(filename, 2, None, func_name="somefunc"))
+    pe = testdir.spawn_pytest("--break=test_simple.py:4")
+    pe.expect(EOF)
+    befs = LineMatcher(unansi(pe.before))
+    befs.fnmatch_lines([
+        "*unable to determine breakpoint*",
+    ])
 
-    rv = fortify_location(filename, 9, True)
-    assert rv.equals(
-        BreakLoc(
-            filename, 9, None, class_name="TestClass", func_name="test_foo"
-        )
-    )
-    assert rv.inner == "inner"
 
-    rv = fortify_location(filename, 15, True)
-    assert rv.equals(
-        BreakLoc(
-            filename, 15, None, class_name="TestClass", func_name="test_bar"
-        )
-    )
-    assert rv.inner is None
+def test_simple(testdir):
+    filename = testdir.copy_example("asyncio/test_simple.py")
+    assert filename.exists()
 
-    rv = fortify_location(filename, 21, True)
-    assert rv.equals(
-        BreakLoc(
-            filename, 21, None, class_name="TestClass", func_name="test_baz"
-        )
-    )
-    assert rv.inner == "inner"
+    pe = testdir.spawn_pytest("-vvv --break=test_simple.py:19")
+    pe.expect(prompt_re)
+    befs = LineMatcher(unansi(pe.before))
+    befs.fnmatch_lines([
+        "*>*(19)test_bar()*",
+        '*assert "asyncio" in request.keywords*'
+    ])
+    pe.sendline("c")
+    pe.expect(EOF)
+    befs = LineMatcher(unansi(pe.before))
+    # Baz not registered as asyncio test
+    befs.fnmatch_lines([
+        "*warnings summary*",
+        "*test_simple.py::TestClass::test_baz*",
+    ])

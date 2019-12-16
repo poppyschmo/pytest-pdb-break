@@ -14,10 +14,13 @@
 import os
 import sys
 import ast
+import asyncio
 
-import pytest
 import attr
+import pytest
+
 from pathlib import Path
+
 from _pytest.runner import runtestprotocol
 
 try:
@@ -171,6 +174,7 @@ class PdbBreak:
 
     def __init__(self, wanted, config):
         self.bt_all = config.getoption("pdb_break_bt_all")
+        self.pt_aio = config.pluginmanager.hasplugin("asyncio")
         self.config = config
         self.wanted = wanted
         if module_logger:
@@ -232,8 +236,9 @@ class PdbBreak:
         return result
 
     def find_targets(self, session):
-        assert self.wanted.file
         from functools import partial
+
+        assert self.wanted.file
         func_items = self.map_func_info_to_items(session)
         self._l and self._l.pspore("top")
 
@@ -397,11 +402,12 @@ class PdbBreak:
 
         from bdb import BdbQuit
 
+        nofin = sys._getframe(1).f_code is self.runcall_until_async.__code__
         inst.reset()
         self._l and self._l.pspell("post_capfix")
         sys.settrace(self.trace_handoff)
         try:
-            func(**testargs)
+            return func(**testargs)
         except BdbQuit:
             pass
         except Exception as exc:
@@ -412,11 +418,21 @@ class PdbBreak:
                 raise
         finally:
             # FIXME should unwind f_trace when --bt-all passed
-            inst.quitting = True
+            if not nofin:
+                inst.quitting = True
+                sys.settrace(None)
+                self.last_pdb = None
+
+    async def runcall_until_async(self, func, **testargs):
+        """Async wrapper for runcall_until"""
+        try:
+            await self.runcall_until(func, **testargs)
+        finally:
+            self.last_pdb.quitting = True
             sys.settrace(None)
             self.last_pdb = None
 
-    @pytest.hookimpl(tryfirst=True)
+    @pytest.mark.tryfirst
     def pytest_runtest_call(self, item):
         if (
             hasattr(item, "startTest")
@@ -431,7 +447,7 @@ class PdbBreak:
 
             item.runtest = _runtest.__get__(item)
 
-    # TODO if function is bound, ensure class name is correct
+    @pytest.mark.tryfirst
     def pytest_pyfunc_call(self, pyfuncitem):
         if self._l:
             self._l.sertall(1)
@@ -442,7 +458,14 @@ class PdbBreak:
                 arg: pyfuncitem.funcargs[arg]
                 for arg in pyfuncitem._fixtureinfo.argnames
             }
-            self.runcall_until(pyfuncitem.obj, **testargs)
+            if self.pt_aio and "asyncio" in pyfuncitem.keywords:
+                event_loop = pyfuncitem.funcargs["event_loop"]
+                coro = self.runcall_until_async(pyfuncitem.obj, **testargs)
+                event_loop.run_until_complete(
+                    asyncio.ensure_future(coro, loop=event_loop)
+                )
+            else:
+                self.runcall_until(pyfuncitem.obj, **testargs)
             #
             if self.targets:
                 self.targets.pop(0)
