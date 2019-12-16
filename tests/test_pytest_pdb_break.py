@@ -8,48 +8,41 @@ from pexpect import EOF  # No importskip
 from conftest import prompt_re, unansi
 
 
-def test_breakloc(request, modified_breakloc):
-    BreakLoc = modified_breakloc
+def test_breakloc(request):
+    from pytest_pdb_break import BreakLocation
+    BreakLocation
     with pytest.raises(TypeError):
-        BreakLoc(file="test_loc.py", lnum="1", name="test_loc_1")
-    loc = BreakLoc(file="", lnum=1)
+        BreakLocation(file="test_loc.py", lnum="1")
+
+    loc = BreakLocation(file="", lnum=1)
     assert loc.file is None
-    loc = BreakLoc(file=None, lnum=1)
+
+    loc = BreakLocation(file=None, lnum=1)
     assert loc.file is None
-    loc = BreakLoc(file="test_loc.py", lnum=1)
+
+    loc = BreakLocation(file="test_loc.py", lnum=1)
     assert isinstance(loc.file, Path)
     assert not loc.file.is_absolute()
     assert not loc.file.exists()
 
-    # Equality
-    assert BreakLoc("fake.py", 1) \
-        == BreakLoc("fake.py", 1, func_name="test_fake")
-    assert BreakLoc("fake.py", 1, func_name="test_fake") \
-        == BreakLoc("fake.py", 1, func_name="test_foo")
-
-    # Equals method
-    loc = BreakLoc("fake.py", 1, func_name="test_fake")
-    assert loc.equals(BreakLoc("fake.py", 1, func_name="test_fake"))
-    assert not loc.equals(BreakLoc("fake.py", 1))
-
     # From arg spec
-    assert BreakLoc.from_arg_spec("test_loc.py:1") \
-        == BreakLoc(file="test_loc.py", lnum=1)
-    assert BreakLoc.from_arg_spec(":1") \
-        == BreakLoc.from_arg_spec("1") \
-        == BreakLoc(file=None, lnum=1)
-    assert BreakLoc.from_arg_spec("foo:bar:1") \
-        == BreakLoc(file="foo:bar", lnum=1)
-    assert BreakLoc.from_arg_spec("foo:bar::1") \
-        == BreakLoc(file="foo:bar:", lnum=1)
+    assert BreakLocation.from_arg_spec("test_loc.py:1") \
+        == BreakLocation(file="test_loc.py", lnum=1)
+    assert BreakLocation.from_arg_spec(":1") \
+        == BreakLocation.from_arg_spec("1") \
+        == BreakLocation(file=None, lnum=1)
+    assert BreakLocation.from_arg_spec("foo:bar:1") \
+        == BreakLocation(file="foo:bar", lnum=1)
+    assert BreakLocation.from_arg_spec("foo:bar::1") \
+        == BreakLocation(file="foo:bar:", lnum=1)
     with pytest.raises(ValueError):
-        assert BreakLoc.from_arg_spec("test_loc.py:")
+        assert BreakLocation.from_arg_spec("test_loc.py:")
     with pytest.raises(ValueError):
-        assert BreakLoc.from_arg_spec("test_loc.py")
+        assert BreakLocation.from_arg_spec("test_loc.py")
     with pytest.raises(ValueError):
-        assert BreakLoc.from_arg_spec("")
+        assert BreakLocation.from_arg_spec("")
     with pytest.raises(ValueError):
-        assert BreakLoc.from_arg_spec("a:b:c")
+        assert BreakLocation.from_arg_spec("a:b:c")
 
 
 def test_resolve_wanted(tmp_path, request):
@@ -120,12 +113,10 @@ def test_get_node_at_pos():
     assert node.parent.parent.name == "C"
 
 
-def test_fortify_location(testdir, fix_defs, modified_breakloc):
-    from pytest_pdb_break import fortify_location, _get_func_key
+def test_fortify_location(testdir, fix_defs):
+    from pytest_pdb_break import fortify_location, _get_func_key, TargetInfo
     from _pytest.python import Function
     import sources.fortify.normal as exmod
-
-    BreakLoc = modified_breakloc
 
     cfkey = _get_func_key(exmod.TestClass.test_foo)
     fookey = _get_func_key(exmod.test_foo)
@@ -160,16 +151,12 @@ def test_fortify_location(testdir, fix_defs, modified_breakloc):
     assert rv is None
 
     rv = fortify_location(filename, 13, items, lambda: fixes)
-    assert rv.equals(
-        BreakLoc(
-            filename,
-            13,
-            py_obj_kind="item",
-            func_name="test_foo",
-            func_lnum=cfkey[1],
-        )
+    assert rv == TargetInfo(
+        py_obj_kind="item",
+        func_name="test_foo",
+        func_lnum=cfkey[1],
+        inner="inner",
     )
-    assert rv.inner == "inner"
 
     rv = fortify_location(filename, 17, items, lambda: fixes)
     assert rv is None
@@ -178,48 +165,32 @@ def test_fortify_location(testdir, fix_defs, modified_breakloc):
     assert rv is None
 
     rv = fortify_location(filename, 24, items, lambda: fixes)
-    assert rv.equals(
-        BreakLoc(
-            filename,
-            24,
-            py_obj_kind="item",
-            func_name="test_bar",
-            func_lnum=barkey[1],
-        )
+    assert rv == TargetInfo(
+        py_obj_kind="item", func_name="test_bar", func_lnum=barkey[1],
     )
     assert rv.inner is None
 
     rv = fortify_location(filename, 30, items, lambda: fixes)
-    assert rv.equals(
-        BreakLoc(
-            filename,
-            30,
-            py_obj_kind="fixture",
-            func_name="baz",
-            func_lnum=bazkey[1],
-            arg_name="baz",
-        )
+    assert rv == TargetInfo(
+        py_obj_kind="fixture",
+        func_name="baz",
+        func_lnum=bazkey[1],
+        arg_name="baz",
     )
 
     rv = fortify_location(filename, 34, items, lambda: fixes)
-    assert rv.equals(
-        BreakLoc(
-            filename,
-            34,
-            py_obj_kind="item",
-            func_name="test_foo",
-            func_lnum=fookey[1],
-        )
+    assert rv == TargetInfo(
+        py_obj_kind="item",
+        func_name="test_foo",
+        func_lnum=fookey[1],
     )
     assert rv.arg_name is None
 
 
-def test_fortify_location_aio(testdir, fix_defs, modified_breakloc):
-    from pytest_pdb_break import fortify_location, _get_func_key
+def test_fortify_location_aio(testdir, fix_defs):
+    from pytest_pdb_break import fortify_location, _get_func_key, TargetInfo
     from _pytest.python import Function
     import sources.fortify.asyncio as exmod
-
-    BreakLoc = modified_breakloc
 
     cfkey = _get_func_key(exmod.TestClass.test_foo)
     items = {cfkey: [Mock(Function)]}
@@ -235,16 +206,12 @@ def test_fortify_location_aio(testdir, fix_defs, modified_breakloc):
     assert fortify_location(filename, 21, items, lambda: fixes) is None
 
     rv = fortify_location(filename, 9, items, lambda: fixes)
-    assert rv.equals(
-        BreakLoc(
-            filename,
-            9,
-            py_obj_kind="item",
-            func_name="test_foo",
-            func_lnum=cfkey[1],
-        )
+    assert rv == TargetInfo(
+        py_obj_kind="item",
+        func_name="test_foo",
+        func_lnum=cfkey[1],
+        inner="inner",
     )
-    assert rv.inner == "inner"
 
 
 def test_invalid_arg(testdir_setup):

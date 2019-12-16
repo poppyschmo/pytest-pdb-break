@@ -45,22 +45,13 @@ pytestPDB = pytest.set_trace.__self__
 
 
 @attr.s
-class BreakLoc:
-    """Object holding path-like filename, line number, and maybe more
-
-    All values are constants.
-    """
+class BreakLocation:
+    """Object holding path-like filename, line number"""
 
     file = attr.ib(
         converter=attr.converters.optional(lambda v: Path(v) if v else None)
     )
     lnum = attr.ib(validator=attr.validators.instance_of(int))
-
-    py_obj_kind = attr.ib(default=None, repr=False, eq=False, kw_only=True)
-    func_name = attr.ib(default=None, repr=False, eq=False, kw_only=True)
-    func_lnum = attr.ib(default=None, repr=False, eq=False, kw_only=True)
-    arg_name = attr.ib(default=None, repr=False, eq=False, kw_only=True)
-    inner = attr.ib(default=None, repr=False, eq=False, kw_only=True)
 
     @classmethod
     def from_arg_spec(cls, string):
@@ -75,16 +66,12 @@ class BreakLoc:
 
 def pytest_addoption(parser):
     group = parser.getgroup("pdb")
-    # TODO consider using str() instead of passing constructor, which was done
-    # initially so invalid args would trigger the usage/help msg.  However,
-    # most errors involve file validation, which must happen later, once we
-    # have access to the fully initialized config object.
     group.addoption(
         "--break",
         action="store",
         metavar="[FILE:]LINE-NO",
         dest="pdb_break",
-        type=BreakLoc.from_arg_spec,
+        type=BreakLocation.from_arg_spec,
         help="run the test enclosing LINE-NO and break there; "
         "FILE may be omitted if obvious",
     )
@@ -176,19 +163,19 @@ class PdbBreak:
     .. _module:
        https://pluggy.readthedocs.io/en/latest/#define-and-collect-hooks
     """
+    _l = None
+    tinfo = None
+    targets = None
+    last_pdb = None
+    elsewhere = None
 
     def __init__(self, wanted, config):
-        if module_logger:
-            self._l = module_logger.helper.get_logger("PdbBreak")
-        else:
-            self._l = None
         self.bt_all = config.getoption("pdb_break_bt_all")
         self.config = config
         self.wanted = wanted
-        self.targets = None
-        self.elsewhere = None
-        self.last_pdb = None
-        self._l and self._l.pspell("bottom")
+        if module_logger:
+            self._l = module_logger.helper.get_logger("PdbBreak")
+            self._l.pspell("bottom")
 
     if module_logger:
 
@@ -261,20 +248,20 @@ class PdbBreak:
         if not fortified:
             msg = "unable to determine breakpoint location"
             raise RuntimeError(msg)
-        self.wanted = fortified
+        self.tinfo = fortified
 
-        if self.wanted.py_obj_kind == "item":
+        if self.tinfo.py_obj_kind == "item":
             self.targets = func_items[
-                (self.wanted.func_name, self.wanted.func_lnum)
+                (self.tinfo.func_name, self.tinfo.func_lnum)
             ]
             self._l and self._l.pspore("targets")
         else:
-            assert self.wanted.py_obj_kind == "fixture"
-            assert self.wanted.arg_name
+            assert self.tinfo.py_obj_kind == "fixture"
+            assert self.tinfo.arg_name
             self.elsewhere = [
                 i  # item *any* discovered module
                 for i in session.items
-                if self.wanted.arg_name in i.fixturenames
+                if self.tinfo.arg_name in i.fixturenames
             ]
 
     def pytest_runtestloop(self, session):
@@ -320,25 +307,25 @@ class PdbBreak:
             event != "line"
             or frame.f_lineno < self.wanted.lnum
             or (
-                self.wanted.inner and frame.f_code.co_name != self.wanted.inner
+                self.tinfo.inner and frame.f_code.co_name != self.tinfo.inner
             )
             or (
-                not self.wanted.inner
-                and frame.f_code.co_name != self.wanted.func_name
+                not self.tinfo.inner
+                and frame.f_code.co_name != self.tinfo.func_name
             )
         ):
             return self.trace_handoff
 
         inst = self.last_pdb
 
-        if self.bt_all or self.wanted.inner:
+        if self.bt_all or self.tinfo.inner:
             bot = frame
             while bot.f_back:
                 bot.f_trace = inst.trace_dispatch
                 bot = bot.f_back
                 if (
                     not self.bt_all
-                    and bot.f_code.co_name == self.wanted.func_name
+                    and bot.f_code.co_name == self.tinfo.func_name
                 ):
                     break
             inst.botframe = bot
@@ -471,6 +458,18 @@ def _get_func_key(func):
     return func.__name__, func.__code__.co_firstlineno
 
 
+@attr.s
+class TargetInfo:
+    """Info about target function corresponding to pytest item or fixture
+    """
+    py_obj_kind = attr.ib()
+    func_name = attr.ib()
+    func_lnum = attr.ib()
+
+    arg_name = attr.ib(default=None, repr=False, kw_only=True)
+    inner = attr.ib(default=None, repr=False, kw_only=True)
+
+
 def _get_node_at_pos(line_no, node, parent=None):
     """Return first ast node at line_no.
     This is ``ast.NodeVisitor.generic_visit`` with extra breadcrumb
@@ -499,11 +498,11 @@ def fortify_location(
     func_items,  # dict mapping func names to items
     fixtures_finder,  # callable returning map of func names to FixtureDefs
 ):
-    """Resolve args into a canonical BreakLoc object and return it
+    """Resolve args into a TargetInfo object and return it
 
-    'Canonical' meaning the ``BreakLoc.func`` attribute must be taken
-    from a ``Item.function`` or ``FixtureDef.func``.  On failure, return
-    None.  If relevant, the ``inner`` field must be set to the innermost
+    The ``TargetInfo.func`` attribute must be taken from a
+    ``Item.function`` or ``FixtureDef.func``.  On failure, return None.
+    If relevant, the ``inner`` field must be set to the innermost
     enclosing function of arg ``line_no``.
     """
     try:
@@ -555,9 +554,7 @@ def fortify_location(
     func_name, func_lnum = _get_func_key(funcs.pop())
     assert outer.name == func_name
 
-    return BreakLoc(
-        file=filename,
-        lnum=line_no,
+    return TargetInfo(
         py_obj_kind=kind,
         func_name=func_name,
         func_lnum=func_lnum,
