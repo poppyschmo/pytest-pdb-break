@@ -250,63 +250,6 @@ def test_fortify_location_aio(testdir, fix_defs):
     assert rv.inner == "inner"
 
 
-@pytest.mark.skip
-def test_is_fixture(testdir_setup):
-    from pytest_pdb_break import fortify_location, is_fixture
-    testdir_setup.makepyfile(test_file="""
-        @wrapper.attr
-        def a():
-            print("a")                 # <- line 3
-
-        @wrapper.attr
-        def b():
-            def inner():
-                return True            # <- line 8
-            print("b")
-
-        @wrapper.attr
-        def c():
-            class C:
-                def inner(self):
-                    return True        # <- line 15
-            print("c")
-
-        def d():
-            print("d")                 # <- line 19
-    """)
-    filename = Path(testdir_setup.tmpdir.join("test_file.py"))
-
-    wanted = fortify_location(filename, 3)
-    assert wanted.func_name == "a"
-    assert is_fixture(wanted, ["x", "a", "y", "z"]) is True
-    assert wanted.func_name == "a"
-    assert wanted.inner is None
-
-    wanted = fortify_location(filename, 8)
-    assert wanted.func_name == "inner"
-    assert is_fixture(wanted, ["x", "b", "y", "z"]) is True
-    assert wanted.func_name == "b"
-    assert wanted.inner == "inner"
-
-    wanted = fortify_location(filename, 15)
-    assert wanted.func_name == "inner"
-    assert is_fixture(wanted, ["x", "c", "y", "z"]) is True
-    assert wanted.func_name == "c"
-    assert wanted.inner == "inner"
-
-    wanted = fortify_location(filename, 15)
-    assert wanted.func_name == "inner"
-    assert is_fixture(wanted, ["x", "y", "z"]) is False
-    assert wanted.func_name == "inner"
-    assert wanted.inner is None
-
-    wanted = fortify_location(filename, 19)  # no deco
-    assert wanted.func_name == "d"
-    assert is_fixture(wanted, ["x", "d", "y", "z"]) is False
-    assert wanted.func_name == "d"
-    assert wanted.inner is None
-
-
 def test_invalid_arg(testdir_setup):
     td = testdir_setup
     td.makepyfile("""
