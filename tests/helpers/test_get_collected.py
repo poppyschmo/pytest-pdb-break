@@ -80,56 +80,6 @@ def test_get_locations(repo):
                   ("test_ut.py", 3, "TestU.test_x")]
 
 
-def test_item_location(request):  # no i/o
-    # From pytest item
-    from unittest.mock import Mock, MagicMock
-    from helpers.get_collected import _get_item_location_cls
-    ItemLocation = _get_item_location_cls()
-
-    item = Mock(request.node)
-    rootdir = request.config.rootdir
-    item.config.rootdir = rootdir
-    item.fspath = rootdir.join("test_loc.py")
-    #
-    assert request.node.originalname is None
-    item.originalname = None  # else looks for callspec, which is absent
-    assert item.nodeid
-    item.nodeid = "test_loc.py::test_loc_1"
-    item.location = ("test_loc.py", 1, "test_loc_1")
-    item.function.__name__ = "test_loc_1"
-    item.function.__code__ = MagicMock()
-    item.function.__code__.co_firstlineno = 42
-    item.cls = None
-    ItemLocation.from_pytest_item(item) == ItemLocation(
-        str(rootdir / "test_loc.py"),
-        2,
-        "test_loc_1",
-        "test_loc.py::test_loc_1",
-        "test_loc_1",
-    )
-    #
-    item.originalname = "test_loc_1"
-    item.nodeid = "test_loc.py::TestClass::test_loc_1[True]"
-    item.cls = Mock()
-    item.cls.__name__ = "TestClass"
-    item.callspec = Mock()
-    item.callspec.id = "True"
-    expected = ItemLocation(
-        str(rootdir / "test_loc.py"),
-        2,
-        "test_loc_1",
-        "test_loc.py::TestClass::test_loc_1[True]",
-        "test_loc_1",
-        "TestClass",
-        "True",
-    )
-    assert ItemLocation.from_pytest_item(item) == expected
-    #
-    item.location = ("/tmp/test_loc.py", 1, "test_loc_1")
-    with pytest.raises(AssertionError):
-        ItemLocation.from_pytest_item(item)
-
-
 def test_get_collected(repo):
     import sys
     if sys.version_info < (3, 6):
