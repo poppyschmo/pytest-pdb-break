@@ -7,6 +7,38 @@ from pathlib import Path
 from subprocess import check_output
 
 
+def test_lineno(testdir):
+    """
+    Relevance: ``pytest.Item.location`` line numbers are zero-indexed, but
+    Python's are (all?) one-indexed.
+
+    Definitely 1-indexed:
+
+    - ``types.CodeType.co_firstlineno``
+
+    - ``types.FrameType.f_lineno`` (based on ``co_lnotab``)
+
+    - pdb breakpoints
+
+    - linecache
+
+    See docstrings and comments in inspect module.
+
+    """
+    testdir.makepyfile(test_foo="""
+    def f():                               # <- line 1
+        import sys
+        return sys._getframe().f_lineno    # <- line 3
+
+    def test_foo():
+        assert f.__code__.co_firstlineno == 1
+        assert f() == 3
+    """)
+
+    result = testdir.runpytest("test_foo.py")
+    result.assert_outcomes(passed=1)
+
+
 def test_popen_env_replaces():
     """subprocess.Popen env dict replaces instead of updates
     """

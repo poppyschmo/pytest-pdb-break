@@ -24,12 +24,13 @@ from pathlib import Path
 from _pytest.runner import runtestprotocol
 
 try:
-    # May have a short g-sha as 4th component
+    # TODO see if ini option for min pytest version already does this
     _pytest_version = tuple(int(s) for s in pytest.__version__.split(".")[:3])
     if _pytest_version < (5, 0):
         raise RuntimeError("Requires at least pytest 5.0")
 except ValueError:
-    # Assume something non-standard like devNN+gdeadbeef
+    # Assume failed because something like +g1234abcd present (see PEP 440)
+    # Maybe also try distutils.version's parser, if normally available
     _pytest_version = None
 
 module_logger = None
