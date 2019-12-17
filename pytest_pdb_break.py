@@ -33,18 +33,19 @@ except ValueError:
     # Maybe also try distutils.version's parser, if normally available
     _pytest_version = None
 
-module_logger = None
-try:
-    from knotty_logger import LoggingHelper
-
-    _logging_helper = LoggingHelper.from_logdefs("PDBBRK_LOGYAML")
-    if _logging_helper:
-        module_logger = _logging_helper.get_logger(__name__)
-except Exception:
-    module_logger = None
-
-
 __version__ = "0.0.6"
+
+module_logger = None
+# try:
+#     __version__ += "+local"
+#     from knotty_logger import LoggingHelper
+#     _logging_helper = LoggingHelper.from_logdefs("PDBBRK_LOGYAML")
+#     if _logging_helper:
+#         module_logger = _logging_helper.get_logger(__name__)
+# except Exception:
+#     module_logger = None
+
+
 pytestPDB = pytest.set_trace.__self__
 
 

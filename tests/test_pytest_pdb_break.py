@@ -1,3 +1,4 @@
+import os
 import pytest
 
 from pathlib import Path
@@ -6,6 +7,12 @@ from _pytest.pytester import LineMatcher
 from pexpect import EOF  # No importskip
 
 from conftest import prompt_re, unansi
+
+
+@pytest.mark.skipif(not os.getenv("TRAVIS"), reason="CI only")
+def test__meta__ensure_no_logger():
+    import pytest_pdb_break
+    assert "local" not in pytest_pdb_break.__version__
 
 
 def test_breakloc(request):

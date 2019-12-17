@@ -1,5 +1,4 @@
 ---
-# Logger was removed in 0.0.4; now at https://github.com/poppyschmo/knotty-logger
 ? !!python/name:knotty_logger.LoggingHelper
 :
   init:
@@ -13,12 +12,16 @@
         exp: >
           dict(file=v_.f_code.co_filename, line=v_.f_lineno, name=v_.f_code.co_name)
       bl:
-        type: BreakLoc
+        type: BreakLocation
+        exp: >
+          non_none(attr.asdict(v_))
+      tinfo:
+        type: TargetInfo
         exp: >
           non_none(attr.asdict(v_))
       bls:
         type: list
-        cond: all(isinstance(i, BreakLoc) for i in v_)
+        cond: all(isinstance(i, BreakLocation) for i in v_)
         exp: >
           [non_none(attr.asdict(i)) for i in v_]
       syscap:
@@ -65,7 +68,7 @@ _ensure_wanted:
 find_targets:
   top:
     args:
-      - func_names
+      - func_items
   fortified:
     args:
       - fortified
@@ -108,8 +111,7 @@ pytest_pyfunc_call:
       - pyfuncitem.location
       - pyfuncitem.funcargs
     kwargs:
-      "loc equals target": >
-        self.targets and BreakLoc.from_pytest_item(pyfuncitem) == self.targets[0]
+      "is target?": pyfuncitem is self.targets[0] if self.targets else False
   2:
     args:
       - self.targets
