@@ -398,9 +398,9 @@ def test_two_funcs_comment(testdir_two_funcs):
     pe.expect(EOF)
 
 
-def test_two_funcs_gap(testdir_two_funcs):
+def test_two_funcs_gap_fail(testdir_two_funcs):
     # Between two functions fails
-    pe = testdir_two_funcs.spawn_pytest("--break=test_two_funcs_gap.py:5")
+    pe = testdir_two_funcs.spawn_pytest("--break=test_two_funcs_gap_fail.py:5")
     pe.expect(EOF)
     befs = LineMatcher(unansi(pe.before))
     befs.fnmatch_lines(["*INTERNALERROR*", "*no tests ran*"])
@@ -459,6 +459,29 @@ def test_mark_param(testdir_setup):
     assert "two" in befs
     pe.sendline("c")
     pe.expect(EOF)
+
+
+def test_mark_param_quit(testdir_setup):
+    # TODO note regression date range or commit span whenabouts this broke
+    testdir_setup.makepyfile(test_foo="""
+        import pytest
+
+        @pytest.mark.parametrize("name", ["one", "two"])
+        @pytest.mark.parametrize("value", [1, 2])
+        def test_number(name, value):
+            # comment
+            assert len(name) > value     # line 6
+    """)
+    pe = testdir_setup.spawn_pytest("--break=test_foo.py:7")
+    pe.expect(prompt_re)
+    pe.sendline("name")
+    pe.expect(prompt_re)
+    befs = unansi(pe.before)
+    assert "'one'" in befs
+    pe.sendline("q")
+    pe.expect(EOF)
+    befs = LineMatcher(unansi(pe.before))
+    befs.fnmatch_lines(["*4 passed*"])
 
 
 @pytest.mark.parametrize("cap_method", ["fd", "sys"])

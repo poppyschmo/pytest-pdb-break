@@ -403,22 +403,26 @@ class PdbBreak:
 
         self._handle_capture(func, testargs, inst)
 
-        from bdb import BdbQuit
-
         nofin = sys._getframe(1).f_code is self.runcall_until_async.__code__
         inst.reset()
         self._l and self._l.pspell("post_capfix")
         sys.settrace(self.trace_handoff)
         try:
             return func(**testargs)
-        except BdbQuit:
-            pass
         except Exception as exc:
             from _pytest.outcomes import Exit
 
             if not isinstance(exc, Exit) or exc.msg != "Quitting debugger":
-                self._l and self._l.printback()
+                if self._l:
+                    self._l.printback()
+                    from bdb import BdbQuit
+                    assert not isinstance(exc, BdbQuit)
                 raise
+
+            if self.tinfo.arg_name:
+                self.elsewhere.clear()
+            else:
+                self.targets.clear()
         finally:
             # FIXME should unwind f_trace when --bt-all passed
             if not nofin:
