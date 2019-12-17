@@ -840,10 +840,10 @@ def test_outer():
          (should (equal `(:file ,(concat default-directory "test_s0.py")
                                 :lnum 2
                                 :name "test_foo"
-                                :class_name nil
+                                :nodeid "test_s0.py::test_foo"
                                 :func_name "test_foo"
-                                :param_id nil
-                                :nodeid "test_s0.py::test_foo")
+                                :class_name nil
+                                :param_id nil)
                         (nth 0 data))))))
    (ert-info ("Call get_node_ids, pytest error")
      (should-not (get-buffer pytest-pdb-break--errors-buffer-name))
