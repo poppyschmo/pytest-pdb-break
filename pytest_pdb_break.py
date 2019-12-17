@@ -270,6 +270,7 @@ class PdbBreak:
                 for i in session.items
                 if self.tinfo.arg_name in i.fixturenames
             ]
+            self._l and self._l.pspore("elsewhere")
 
     def pytest_runtestloop(self, session):
         """Find a suitable target or raise RuntimeError

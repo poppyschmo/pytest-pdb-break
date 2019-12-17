@@ -75,6 +75,9 @@ find_targets:
   targets:
     args:
       - self.targets
+  elsewhere:
+    args:
+      - self.elsewhere
 
 _handle_capture:
   cap_top:

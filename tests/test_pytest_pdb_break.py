@@ -702,6 +702,71 @@ def test_elsewhere_fixture_nested_simple(testdir_setup):
     befs.fnmatch_lines("*1 passed*")
 
 
+def test_elsewhere_fixture_double(testdir_setup):
+    testdir_setup.makepyfile(test_file="""
+        import pytest
+
+        @pytest.fixture
+        def fixie():
+            return True        # <- line 5
+
+        def test_foo(fixie):
+            assert fixie
+
+        def test_bar(fixie):
+            assert fixie
+    """)
+    pe = testdir_setup.spawn_pytest("--break=test_file.py:5")
+    pe.expect(prompt_re)
+    befs = LineMatcher(unansi(pe.before))
+    befs.fnmatch_lines(["*>*/test_file.py(5)fixie()", "->*# <- line 5"])
+    pe.sendline("c")
+
+    pe.expect(prompt_re)
+    befs = LineMatcher(unansi(pe.before))
+    befs.fnmatch_lines(["*>*/test_file.py(5)fixie()", "->*# <- line 5"])
+    pe.sendline("c")
+
+    pe.expect(EOF)
+    befs = LineMatcher(unansi(pe.before))
+    befs.fnmatch_lines("*2 passed*")
+
+
+def test_elsewhere_fixture_parametrize(testdir_setup):
+    # TODO try hard-coding coordinates to show ordering is predictable
+    testdir_setup.makepyfile(test_file="""
+        import pytest
+
+        @pytest.fixture(params=["a", "b"])
+        def fixie(request):
+            spam = request.param  # <- line 5
+            yield spam.upper()
+            del spam
+
+        def test_foo(fixie):
+            assert fixie in "AB"
+
+        def test_bar(fixie):
+            assert fixie in "AB"
+    """)
+    pe = testdir_setup.spawn_pytest("--break=test_file.py:5")
+
+    pairs = [("foo", "a"), ("foo", "b"), ("bar", "a"), ("bar", "b")]
+    for word, letter in pairs:
+        pe.expect(prompt_re)
+        befs = LineMatcher(unansi(pe.before))
+        befs.fnmatch_lines(["*>*/test_file.py(5)fixie()", "->*# <- line 5"])
+        pe.sendline("request.node.name, request.param")
+        pe.expect(prompt_re)
+        befs = LineMatcher(unansi(pe.before))
+        befs.fnmatch_lines([f"*test_{word}*{letter}*{letter}*"])
+        pe.sendline("c")
+
+    pe.expect(EOF)
+    befs = LineMatcher(unansi(pe.before))
+    befs.fnmatch_lines("*4 passed*")
+
+
 @pytest.mark.parametrize("lnum", [5, 7])
 def test_elsewhere_fixture_with_yield(testdir_setup, lnum):
     testdir_setup.makepyfile(test_file="""
