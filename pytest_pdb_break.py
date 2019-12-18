@@ -488,6 +488,18 @@ def _get_func_key(func):
     return func.__name__, func.__code__.co_firstlineno
 
 
+def _get_func_key_from_node(node):
+    """ Given an ast node, return a lookup key
+
+    Key is a tuple of func name, code-obj line number.
+    """
+    # Addresses undocumented change in Python 3.8+ (bug?)
+    return (
+        node.name,
+        node.decorator_list[0].lineno if node.decorator_list else node.lineno
+    )
+
+
 @attr.s
 class TargetInfo:
     """Info about target function corresponding to pytest item or fixture
@@ -542,6 +554,7 @@ def fortify_location(
     leaf = _get_node_at_pos(line_no, root, None)
     kind = "item"
     targets = None
+    py38 = sys.version_info >= (3, 8)
 
     def find(node, tipo):
         while node and type(node) not in tipo:
@@ -552,7 +565,10 @@ def fortify_location(
 
     def resolve(scope, haystack):
         while True:
-            found = scope and haystack.get((scope.name, scope.lineno))
+            found = scope and haystack.get(
+                _get_func_key_from_node(scope) if py38 else
+                (scope.name, scope.lineno)
+            )
             if not scope or found:
                 break
             scope = find(scope.parent, (ast.FunctionDef, ast.AsyncFunctionDef))

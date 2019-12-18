@@ -150,7 +150,9 @@ def get_mod_pdb():
 @pytest.fixture
 def fix_defs(request):
     from unittest.mock import Mock
-    # Mock version of get_fix_names_to_fix_defs()
+    # XXX this is actually not a mock version of get_fix_names_to_fix_defs()
+    # because that one DROPS any funcs not defined in the same file (wanted)
+    # whereas this currently keeps them all
     from pytest_pdb_break import _get_func_key
     fixes = {}
     for fix_list in request.session._fixturemanager._arg2fixturedefs.values():

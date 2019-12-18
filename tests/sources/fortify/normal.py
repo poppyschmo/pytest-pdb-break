@@ -16,8 +16,8 @@ class TestClass:               # <- line 8
 
 wrapper = lambda x: x
 
-@wrapper                       # <- line 19
-def wrapped():
+@wrapper
+def wrapped():                 # <- line 20
     print("wrapped")
 
 def test_bar():                # <- line 23
