@@ -484,6 +484,15 @@ def test_mark_param_quit(testdir_setup):
     befs.fnmatch_lines(["*4 passed*"])
 
 
+def test_upstream_capfix_names():
+    from pytest_pdb_break import capfix_names
+    try:
+        from _pytest.capture import map_fixname_class as upstream
+    except ImportError:
+        from _pytest.capture import capture_fixtures as upstream
+    assert capfix_names & upstream.keys() == capfix_names
+
+
 @pytest.mark.parametrize("cap_method", ["fd", "sys"])
 def test_capsys(testdir_setup, cap_method):
     testdir_setup.makepyfile(r"""

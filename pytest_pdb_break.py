@@ -48,6 +48,8 @@ module_logger = None
 
 pytestPDB = pytest.set_trace.__self__
 
+capfix_names = {"capfd", "capfdbinary", "capsys", "capsysbinary"}
+
 
 @attr.s
 class BreakLocation:
@@ -348,12 +350,9 @@ class PdbBreak:
 
     def _handle_capture(self, func, testargs, inst):
         # XXX this is currently a mess; assumes a lot, e.g., no rcLines
-        from _pytest.capture import capture_fixtures
-
         capman = self.config.pluginmanager.getplugin("capturemanager")
         self._l and self._l.pspore("cap_top")
-
-        common = testargs.keys() & capture_fixtures
+        common = testargs.keys() & capfix_names
         capfix = common.pop() if common else None
         if capfix:
             if capfix == "capsys" and not capman.is_globally_capturing():
