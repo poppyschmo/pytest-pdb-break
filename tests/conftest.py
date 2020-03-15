@@ -61,7 +61,7 @@ def testdir_setup(testdir):
     """
     testdir.makeini("""
         [pytest]
-        addopts = --no-print-logs
+        addopts = --show-capture stdout
     """)
     if not installed:
         testdir.makeconftest("""

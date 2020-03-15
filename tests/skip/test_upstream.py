@@ -11,9 +11,9 @@ def test_debugger_quit_msg(tmpdir):
             patch("_pytest.config.create_terminal_writer"), \
             patch("_pytest.outcomes.exit") as m_exit:
         cls = pytestPDB
-        inst = cls._init_pdb()
+        inst = cls._init_pdb("foo")
         inst.botframe = Mock()
-        inst.set_quit()
+        inst.do_quit("")
         m_exit.assert_called_with("Quitting debugger")
 
 
@@ -84,3 +84,28 @@ def test_pytest_configure_hook_cwd(testdir):
 
     testdir.maketxtfile(log="\n".join(result.outlines))
     result.assert_outcomes(passed=1)
+
+
+def test_show_capture(testdir):
+    from pexpect import EOF
+
+    testdir.makepyfile("""
+        def test_foo(request):
+            capopt = (
+                request.config.getoption('showcapture')
+                or request.config.getini('showcapture')
+            )
+            print('something')
+            print('capopt', capopt)
+            from logging import getLogger
+            logger = getLogger('test_show_capture.test_foo')
+            logger.error('some error')
+            assert False
+    """)
+    child = testdir.spawn_pytest("test_show_capture.py")
+    child.expect(r"[Cc]aptured.*stdout")
+    child.expect(r"something")
+    child.expect(r"capopt all")
+    child.expect(r"[Cc]aptured.*log")
+    child.expect(r"some error")
+    child.expect(EOF)

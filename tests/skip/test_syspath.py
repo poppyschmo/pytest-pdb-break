@@ -151,8 +151,8 @@ def plugged(testdir, module_tmpdir, request):
         elif variant == "-p import":
             env["PYTHONPATH"] = project.strpath
         kw["env"] = env
-        popen = subprocess.Popen(cmdargs, stdin=subprocess.PIPE,
-                                 stdout=stdout, stderr=stderr, **kw)
+        kw.update(stdin=subprocess.PIPE, stdout=stdout, stderr=stderr)
+        popen = subprocess.Popen(cmdargs, **kw)
         popen.stdin.close()
         return popen
 
