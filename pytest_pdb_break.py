@@ -35,17 +35,6 @@ except ValueError:
 
 __version__ = "0.0.7"
 
-module_logger = None
-# try:
-#     __version__ += "+local"
-#     from knotty_logger import LoggingHelper
-#     _logging_helper = LoggingHelper.from_logdefs("PDBBRK_LOGYAML")
-#     if _logging_helper:
-#         module_logger = _logging_helper.get_logger(__name__)
-# except Exception:
-#     module_logger = None
-
-
 pytestPDB = pytest.set_trace.__self__
 
 capfix_names = {"capfd", "capfdbinary", "capsys", "capsysbinary"}
@@ -181,14 +170,6 @@ class PdbBreak:
         self.pt_aio = config.pluginmanager.hasplugin("asyncio")
         self.config = config
         self.wanted = wanted
-        if module_logger:
-            self._l = module_logger.helper.get_logger("PdbBreak")
-            self._l.pspell("bottom")
-
-    if module_logger:
-
-        def pytest_internalerror(self, excrepr, excinfo):
-            self._l.pspell(1)
 
     if not hasattr(pytestPDB, "_init_pdb"):
 
@@ -205,8 +186,6 @@ class PdbBreak:
         except Exception:
             msg = "unable to determine breakpoint file"
             raise RuntimeError(msg)
-        else:
-            self._l and self._l.pspore("rewrite")
 
     def map_func_info_to_fix_defs(self, session):
         """Map fixture factory info to lists of FixtureDef objects
@@ -244,7 +223,6 @@ class PdbBreak:
 
         assert self.wanted.file
         func_items = self.map_func_info_to_items(session)
-        self._l and self._l.pspore("top")
 
         fortified = fortify_location(
             self.wanted.file,
@@ -253,7 +231,6 @@ class PdbBreak:
             fixtures_finder=partial(self.map_func_info_to_fix_defs, session)
         )
 
-        self._l and self._l.pspore("fortified")
         if not fortified:
             msg = "unable to determine breakpoint location"
             raise RuntimeError(msg)
@@ -263,7 +240,6 @@ class PdbBreak:
             self.targets = func_items[
                 (self.tinfo.func_name, self.tinfo.func_lnum)
             ]
-            self._l and self._l.pspore("targets")
         else:
             assert self.tinfo.py_obj_kind == "fixture"
             assert self.tinfo.arg_name
@@ -272,7 +248,6 @@ class PdbBreak:
                 for i in session.items
                 if self.tinfo.arg_name in i.fixturenames
             ]
-            self._l and self._l.pspore("elsewhere")
 
     def pytest_runtestloop(self, session):
         """Find a suitable target or raise RuntimeError
@@ -310,8 +285,6 @@ class PdbBreak:
         if frame.f_code.co_filename != str(self.wanted.file):
             # This ~~~~~^ may be a description, e.g., <string>
             return self.trace_handoff
-
-        self._l and self._l.prinspect(event=event, frame=frame)
 
         if (
             event != "line"
@@ -351,7 +324,6 @@ class PdbBreak:
     def _handle_capture(self, func, testargs, inst):
         # XXX this is currently a mess; assumes a lot, e.g., no rcLines
         capman = self.config.pluginmanager.getplugin("capturemanager")
-        self._l and self._l.pspore("cap_top")
         common = testargs.keys() & capfix_names
         capfix = common.pop() if common else None
         if capfix:
@@ -383,7 +355,6 @@ class PdbBreak:
         # TODO add test showing that fixture may be suspended; we need it
         # to continue capturing till handoff
         capfix and capfix._resume()
-        self._l and self._l.pspore("cap_bot")
 
     def runcall_until(self, func, **testargs):
         """Run test with testargs, stopping at location.
@@ -394,17 +365,14 @@ class PdbBreak:
         """
         if hasattr(self, "pytest_enter_pdb"):
             pytestPDB.set_trace(set_break=False)
-            self._l and self._l.sertall("with_enter_pdb")
             inst = self.last_pdb
         else:
             inst = self.last_pdb = pytestPDB._init_pdb("runcall_until")
-        self._l and self._l.pspore("pre_capfix")
 
         self._handle_capture(func, testargs, inst)
 
         nofin = sys._getframe(1).f_code is self.runcall_until_async.__code__
         inst.reset()
-        self._l and self._l.pspell("post_capfix")
         sys.settrace(self.trace_handoff)
         try:
             return func(**testargs)
@@ -412,10 +380,6 @@ class PdbBreak:
             from _pytest.outcomes import Exit
 
             if not isinstance(exc, Exit) or exc.msg != "Quitting debugger":
-                if self._l:
-                    self._l.printback()
-                    from bdb import BdbQuit
-                    assert not isinstance(exc, BdbQuit)
                 raise
 
             if self.tinfo.arg_name:
@@ -455,9 +419,6 @@ class PdbBreak:
 
     @pytest.mark.tryfirst
     def pytest_pyfunc_call(self, pyfuncitem):
-        if self._l:
-            self._l.sertall(1)
-            self._l.pspell(1)
         if self.targets and pyfuncitem is self.targets[0]:
             # Mimic primary hookimpl in _pytest/python.py
             testargs = {
@@ -475,7 +436,6 @@ class PdbBreak:
             #
             if self.targets:
                 self.targets.pop(0)
-            self._l and self._l.pspell(2)
             # Skip primary hookimpl for this pyfuncitem
             return True
 
@@ -622,7 +582,6 @@ def add_completion(config):
     the first element ``[0]`` is ``None``, which is case when pytest was
     not invoked with ``--pdbcls``.
     """
-    module_logger and module_logger.sertall(1)
     usepdb_cls, wrapped = pytestPDB._wrapped_pdb_cls
 
     def restore():
@@ -645,9 +604,6 @@ def add_completion(config):
     class PdbComplete(wrapped):
         def __init__(self, *args, **kwargs):
             super().__init__(*args, **kwargs)
-            self._l = module_logger and module_logger.helper.get_logger(
-                "PdbComplete"
-            )
 
         def complete(self, text, state):
             """Dispense object and command matches.
@@ -673,15 +629,11 @@ def add_completion(config):
                         rest = takewhile(bool, (cp(text, m) for m in count()))
                         dif = filterfalse(self._completions.__contains__, rest)
                         self._completions.extend(dif)
-                    self._l and self._l.prinspect(
-                        text=text, icon=icon, size=len(self._completions)
-                    )
                 try:
                     return self._completions[state]
                 except IndexError:
                     return None
             except Exception:
-                self._l and self._l.printback()
                 return None
 
     pytestPDB._wrapped_pdb_cls = usepdb_cls, PdbComplete
