@@ -4,7 +4,7 @@
 
 ;; Author: Jane Soko <poppyschmo@protonmail.com>
 ;; URL: https://github.com/poppyschmo/pytest-pdb-break
-;; Version: 0.0.8
+;; Version: 0.0.9
 ;; Keywords: languages, tools
 ;; Package-Requires: ((emacs "25"))
 
