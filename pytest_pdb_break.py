@@ -167,7 +167,7 @@ class PdbBreak:
 
     def __init__(self, wanted, config):
         self.bt_all = config.getoption("pdb_break_bt_all")
-        self.pt_aio = config.pluginmanager.hasplugin("asyncio")
+        self.pt_aio = config.pluginmanager.getplugin("asyncio")
         self.config = config
         self.wanted = wanted
 
@@ -426,11 +426,16 @@ class PdbBreak:
                 for arg in pyfuncitem._fixtureinfo.argnames
             }
             if self.pt_aio and "asyncio" in pyfuncitem.keywords:
-                event_loop = pyfuncitem.funcargs["event_loop"]
-                coro = self.runcall_until_async(pyfuncitem.obj, **testargs)
-                event_loop.run_until_complete(
-                    asyncio.ensure_future(coro, loop=event_loop)
-                )
+                if hasattr(self.pt_aio, "_markers_2_fixtures"):
+                    event_loop = pyfuncitem.funcargs["event_loop"]
+                    coro = self.runcall_until_async(pyfuncitem.obj, **testargs)
+                    event_loop.run_until_complete(
+                        asyncio.ensure_future(coro, loop=event_loop)
+                    )
+                else:  # 0.11+
+                    pyfuncitem.obj = self.runcall_until(
+                        pyfuncitem.obj, **testargs
+                    )
             else:
                 self.runcall_until(pyfuncitem.obj, **testargs)
             #

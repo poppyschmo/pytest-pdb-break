@@ -20,9 +20,30 @@ def test__meta__plugin_installed(request):
     assert request.config.pluginmanager.hasplugin("asyncio")
 
 
-def test__meta__upstream_facts():
-    from pytest_asyncio.plugin import _markers_2_fixtures
-    assert _markers_2_fixtures == {"asyncio": "event_loop"}
+def test__meta__upstream_facts(testdir):
+    from pytest_asyncio import __version__
+
+    # Feature test for auto-wrapping of coroutine functions
+    v = tuple(int(p) for p in __version__.split(".") if p.isdigit())
+    mod = testdir.request.config.pluginmanager.getplugin("asyncio")
+    elevenplus = v >= (0, 11)
+    hasmarkmap = "_markers_2_fixtures" in mod.__dict__
+    assert hasmarkmap != elevenplus
+
+    testdir.makepyfile(test_loop="""
+    import pytest
+    import asyncio
+
+    @pytest.mark.asyncio
+    async def test_foo(request):
+        loop = asyncio.get_event_loop()
+        assert "event_loop" in request.fixturenames
+        assert request.getfixturevalue("event_loop") is loop
+    """)
+    child = testdir.spawn_pytest("test_loop.py")
+    child.expect(EOF)
+    befs = LineMatcher(unansi(child.before))
+    befs.fnmatch_lines(["*1 passed*"])
 
 
 def test_simple_unknown(testdir):
