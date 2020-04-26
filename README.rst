@@ -3,27 +3,38 @@ pytest-pdb-break
 ================
 
 This is an aid to help **traditional text editors** (Vim and Emacs) fire up the
-debugger and fast-forward to the point of interest. If you already have a solid
-workflow with ``breakpoint()`` snippets and/or the ``--trace`` and ``--pdb``
-options, there's nothing to see here.
+debugger and fast-forward to the point of interest. [#f1]_ If you already have
+a solid workflow with ``breakpoint()`` snippets and/or the ``--trace`` and
+``--pdb`` options, there's nothing to see here.
 
     This basically does ...
 
     .. code:: console
 
-        $ pytest --trace spam.py::test_foo
-        ...
-        (pdb) until 42
+       $ pytest --trace test_spam.py::test_foo
+       ...
+       (pdb) until 42
 
     or ...
 
     .. code:: python
 
-        def test_foo():
-            ...
-            pytest.set_trace(header="line 42")
+       def test_foo():
+           ...
+           pytest.set_trace(header="line 42")
 
     with a few minor conveniences sprinkled in
+
+
+Before you try
+    Check out the newer ptvsd_/`DAP`_/`pydevd`_-based extensions for Vim and
+    Emacs. They definitely have the potential to work seamlessly with pytest,
+    as VS-Code seems to. This plugin merely launches PDB, the built-in
+    GDB-style debugger.
+
+.. _ptvsd: https://github.com/microsoft/ptvsd
+.. _pydevd: https://github.com/fabioz/PyDev.Debugger
+.. _DAP: https://microsoft.github.io/debug-adapter-protocol/implementors/adapters
 
 
 Simpatico check
@@ -41,20 +52,9 @@ Simpatico check
 .. _pytest-asyncio: https://pypi.org/project/pytest-asyncio
 
 
-Before you try
-    Check out the newer ptvsd_/`DAP`_/`pydevd`_-based extensions for Vim and
-    Emacs. They definitely have the potential to work seamlessly with pytest,
-    as VS-Code seems to. This plugin merely launches PDB, the built-in
-    GDB-style debugger.
-
-.. _ptvsd: https://github.com/microsoft/ptvsd
-.. _pydevd: https://github.com/fabioz/PyDev.Debugger
-.. _DAP: https://microsoft.github.io/debug-adapter-protocol/implementors/adapters
-
-
 Don't install
     Unlike proper pytest plugins, this isn't meant to be installed as a Python
-    package. The editor will instead inject an isolated installation via
+    package. [#f2]_ The editor will instead inject an isolated installation via
     ``PYTHONPATH``, but only while in use (no internet connection required).
 
 
@@ -69,6 +69,10 @@ TODOs
     #. Support arbitrary test names via the |pyfunc|_ and ``python_classes``
        options
 
+    #. Ensure proper breaking in overridden fixtures
+
+    #. Add helpers for running tests in containers
+
     #. Support FreeBSD
 
 
@@ -78,34 +82,11 @@ Notes/caveats
     #. It mainly exists for its author to learn about pytest, a decent
        understanding of which continues to evade
 
-    #. It does not support the ``-m pytest`` style of invocation, meaning
-       working directories are not implicitly prepended to ``sys.path``
 
-    #. If ever hacking on the main pytest plugin, disregard the above and
-       *do install*:
+.. [#f1] It can also be used as a command-line option, e.g.
+   ``pytest --break=test_file.py:42``
 
-       .. code:: console
-
-           (.venv)repo@master$ pip install -e .
-
-       Some extra pains may be required to control how changes get reloaded.
-       For example:
-
-       - Disabling "isolated-lib" creation via one of the documented options
-
-       - Manually managing the editor plugin (or making it play nice with your
-         manager)
-
-       Otherwise, the usual rules apply, like ensuring the right exec path and
-       env vars have precedence when summoning pytest:
-
-       .. code:: javascript
-
-           const pytest = pty.spawn(
-               'pytest', ['--break=spam.py:42', nodeid],
-               { cwd: rootdir, env: Object.assign({}, process.env, modified) }
-           );  // or whatever
-
+.. [#f2] ... unless used as a standalone command-line option
 
 .. |pyfunc| replace:: ``"python_functions"``
 .. _pyfunc: https://docs.pytest.org/en/latest/reference.html#confval-python_functions

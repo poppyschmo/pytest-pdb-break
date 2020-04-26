@@ -1,3 +1,30 @@
+"""
+If hacking on the main pytest plugin while it's in use by the editor doing the
+hacking, you may need to install it as an editable Python package.
+
+.. code:: console
+
+    (.venv)repo@master$ pip install -e .
+
+Some extra pains may also be required to control how changes get reloaded.  For
+example:
+
+- Disabling "isolated-lib" creation via one of the documented options
+
+- Manually managing the editor plugin (or making it play nice with your
+  manager)
+
+Otherwise, the usual rules apply, like ensuring the right exec path and
+env vars have precedence when summoning pytest:
+
+.. code:: javascript
+
+    const pytest = pty.spawn(
+        'pytest', ['--break=spam.py:42', nodeid],
+        { cwd: rootdir, env: {...process.env, ...modified} }
+    );  // or whatever
+
+"""
 import sys
 import pytest
 from pathlib import Path
