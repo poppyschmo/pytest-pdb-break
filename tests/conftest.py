@@ -1,8 +1,10 @@
-import re
 import sys
 import pytest
 from pathlib import Path
 from contextlib import contextmanager
+
+from _pytest.logging import _remove_ansi_escape_sequences
+
 
 # When True, don't inject this repo's root into the sys.path of testdir
 # subprocesses (as is otherwise done via mini conftest)
@@ -41,12 +43,11 @@ else:
 
 
 prompt_re = r"\(Pdb[+]*\)\s?"
-unansi_pat = re.compile("\x1b\\[[\\d;]+m")
 
 
 def unansi(byte_string, as_list=True):
     """Remove ANSI escape sequences from pexpect output."""
-    out = unansi_pat.sub("", byte_string.decode().strip())  # why strip?
+    out = _remove_ansi_escape_sequences(byte_string.decode())
     if as_list:
         return out.split("\r\n")
     out
