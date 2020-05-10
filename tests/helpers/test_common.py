@@ -84,7 +84,6 @@ def test_install_plugin(tmp_path, func):
     assert (targ / "pytest_pdb_break.py").exists()
     targ_egg = next(targ.glob("*-info"))  # dist- (wheel) or egg-
     assert targ_egg.exists()
-    assert next(proj.glob("*-info"), None) is None
 
 
 @pytest.mark.parametrize("wants_symlink", [True, False])
