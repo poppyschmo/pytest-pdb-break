@@ -33,7 +33,7 @@ except ValueError:
     # Maybe also try distutils.version's parser, if normally available
     _pytest_version = None
 
-__version__ = "0.0.9"
+__version__ = "0.0.10"
 
 pytestPDB = pytest.set_trace.__self__
 
