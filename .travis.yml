@@ -13,7 +13,7 @@ notifications:
 jobs:
   include:
     - name: tox
-      python: 3.5
+      python: 3.6
       install:
         - |
           archive_url=https://storage.googleapis.com/travis-ci-language-archives
@@ -30,8 +30,7 @@ jobs:
         - python3.8 --version
         - python3.7 --version
         - python3.6 --version
-        - python3.5 --version
-        - python3.5 -mpip -V
+        - python3.6 -mpip -V
         - pip install tox
       script: tox
     - &test-emacs
