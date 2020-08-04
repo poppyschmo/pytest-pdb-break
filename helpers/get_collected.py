@@ -39,7 +39,7 @@ def get_locations(*args):
     for item in items:
         filename, lnum, name = item.location
         lnum += 1
-        if item.originalname:
+        if item.originalname and hasattr(item, "callspec"):
             name = name.replace("[{}]".format(item.callspec.id), "")
         modules.add((str(filename), lnum, name))
     return sorted(modules)
@@ -80,5 +80,8 @@ def _make_item_location(item):
         nodeid=item.nodeid,
         func_name=item.function.__name__,
         class_name=item.cls.__name__ if item.cls else None,
-        param_id=item.callspec.id if item.originalname else None,
+        param_id=(
+            item.callspec.id
+            if item.originalname and hasattr(item, "callspec") else None
+        ),
     )
