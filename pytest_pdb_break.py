@@ -26,8 +26,8 @@ from _pytest.runner import runtestprotocol
 try:
     # TODO see if ini option for min pytest version already does this
     _pytest_version = tuple(int(s) for s in pytest.__version__.split(".")[:3])
-    if _pytest_version < (5, 0):
-        raise RuntimeError("Requires at least pytest 5.0")
+    if _pytest_version < (6, 0):
+        raise RuntimeError("Requires at least pytest 6.0")
 except ValueError:
     # Assume failed because something like +g1234abcd present (see PEP 440)
     # Maybe also try distutils.version's parser, if normally available
@@ -168,12 +168,6 @@ class PdbBreak:
         self.pt_aio = config.pluginmanager.getplugin("asyncio")
         self.config = config
         self.wanted = wanted
-
-    if not hasattr(pytestPDB, "_init_pdb"):
-
-        def pytest_enter_pdb(self, config, pdb):
-            """Stash pytest-wrapped pdb instance."""
-            self.last_pdb = pdb
 
     def _ensure_wanted(self, session):
         if self.wanted.file:
@@ -390,11 +384,7 @@ class PdbBreak:
         failures. For testing, this means report output is sent to stdout
         rather than stderr (INTERNALERROR).
         """
-        if hasattr(self, "pytest_enter_pdb"):
-            pytestPDB.set_trace(set_break=False)
-            inst = self.last_pdb
-        else:
-            inst = self.last_pdb = pytestPDB._init_pdb("runcall_until")
+        inst = self.last_pdb = pytestPDB._init_pdb("runcall_until")
 
         self._handle_capture(func, testargs, inst)
 
