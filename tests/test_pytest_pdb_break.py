@@ -484,38 +484,30 @@ def test_mark_param_quit(testdir_setup):
     befs.fnmatch_lines(["*4 passed*"])
 
 
-def test_upstream_capfix_names():
-    from pytest_pdb_break import capfix_names
-    try:
-        from _pytest.capture import map_fixname_class as upstream
-    except ImportError:
-        from _pytest.capture import capture_fixtures as upstream
-    assert capfix_names & upstream.keys() == capfix_names
-
-
-@pytest.mark.parametrize("cap_method", ["fd", "sys"])
-def test_capsys(testdir_setup, cap_method):
+@pytest.mark.parametrize("global_cap_method", ["fd", "tee-sys", "sys"])
+def test_capsys(testdir_setup, global_cap_method):
     testdir_setup.makepyfile(r"""
         def test_print(capsys):
-            print("foo")
-            capped = capsys.readouterr()
-            assert capped.out == "foo\n"
-            assert True                  # line 5
-            print("bar")
-            capped = capsys.readouterr()
-            assert capped.out == "bar\n"
+            import sys
+            print("a:out")
+            print("a:err", file=sys.stderr)
+            assert list(capsys.readouterr()) == ["a:out\n", "a:err\n"]
+            assert True                                                # line 6
+            print("b:out", flush=True)
+            print("b:err", flush=True, file=sys.stderr)
+            assert list(capsys.readouterr()) == ["b:out\n", "b:err\n"]
     """)  # raw string \n
-    pe = testdir_setup.spawn_pytest("--break=test_capsys.py:5 "
-                                    "--capture=%s" % cap_method)
+    pe = testdir_setup.spawn_pytest("--break=test_capsys.py:6 "
+                                    "--capture=%s" % global_cap_method)
     pe.expect(prompt_re)
     befs = unansi(pe.before)
-    assert "foo" not in befs
+    assert "a:out" not in befs
     lbefs = LineMatcher(befs)
-    lbefs.fnmatch_lines(("*>*/test_capsys.py(5)test_print()", "->*# line 5"))
+    lbefs.fnmatch_lines(("*>*/test_capsys.py(6)test_print()", "->*# line 6"))
     pe.sendline("c")
     pe.expect(EOF)
     befs = unansi(pe.before)
-    assert "bar" not in befs
+    assert "b:out" not in befs
     lbefs = LineMatcher(befs)
     lbefs.fnmatch_lines(["*[[]100%[]]*", "*1 passed*"])
 

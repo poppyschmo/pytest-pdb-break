@@ -37,8 +37,6 @@ __version__ = "0.0.9"
 
 pytestPDB = pytest.set_trace.__self__
 
-capfix_names = {"capfd", "capfdbinary", "capsys", "capsysbinary"}
-
 
 @attr.s
 class BreakLocation:
@@ -324,37 +322,66 @@ class PdbBreak:
     def _handle_capture(self, func, testargs, inst):
         # XXX this is currently a mess; assumes a lot, e.g., no rcLines
         capman = self.config.pluginmanager.getplugin("capturemanager")
-        common = testargs.keys() & capfix_names
-        capfix = common.pop() if common else None
+        assert capman is inst._pytest_capman
+        capfix = capman._capture_fixture
+
         if capfix:
-            if capfix == "capsys" and not capman.is_globally_capturing():
+            name = capfix.request.fixturename
+            known = {"capfd", "capfdbinary", "capsys", "capsysbinary"}
+            if len(known & testargs.keys()) != 1:  # set_fixture() already does
+                raise RuntimeError("Can't handle fixture %s" % name)
+            assert testargs[name] is capfix
+
+            if name == "capsys" and not capman.is_globally_capturing():  # "no"
                 raise RuntimeError(
                     "Cannot break inside tests using capsys"
                     " while global capturing is disabled"
                 )
-            capfix = testargs[capfix]
         elif func is not runtestprotocol:
             return
 
+        # For debugging, use print(..., file=_inst.stdout, flush=True)
         def preloop(_inst):
-            # TODO figure out why suspend from pytest's pdb.setup() gets
-            # undone. This usually runs soon afterwards.
+            # pytest pdb.setup() suspends when inst._continue is on
             super((type(_inst)), _inst).preloop()
-            capman._global_capturing.pop_outerr_to_orig()
+            if not capfix:
+                capman._global_capturing.pop_outerr_to_orig()
+            else:
+                assert capman._global_capturing.out._state == "suspended"
+                assert sys.stdout is capfix._capture.out.tmpfile
+            # Bounce global capture
+            capman.resume_global_capture()
             capman.suspend_global_capture(in_=True)
+            if capfix:
+                assert sys.stdout is not capfix._capture.out.tmpfile
+            if capman._method == "fd":
+                global_out_fd = capman._global_capturing.out.targetfd
+                assert _inst.stdout.fileno() == global_out_fd
 
-        def postloop(_inst):
-            # Runs after do_* cmds that return 1, like next, step,
-            # continue, until (but not jump)
-            super((type(_inst)), _inst).postloop()
-            capfix and capfix._resume()
+        def assert_state(state):
+            cap = capfix._capture
+            assert cap.out._state == cap.err._state == state
+
+        def postcmd(_inst, stop, line):
+            # Runs after do_* cmds, stop is 1 for next, step, continue, until
+            super((type(_inst)), _inst).postcmd(stop, line)
+            # Bounce capture fixture
+            assert_state("started")
+            capman.suspend_fixture()
+            assert_state("suspended")
+            capman.resume_fixture()
+            assert_state("started")
+            if stop:
+                inst.__dict__.pop("preloop") and inst.__dict__.pop("postcmd")
+            return stop
 
         inst.__dict__["preloop"] = preloop.__get__(inst)
-        inst.__dict__["postloop"] = postloop.__get__(inst)
+        if capfix:
+            inst.__dict__["postcmd"] = postcmd.__get__(inst)
 
         # TODO add test showing that fixture may be suspended; we need it
         # to continue capturing till handoff
-        capfix and capfix._resume()
+        capman.resume_fixture()
 
     def runcall_until(self, func, **testargs):
         """Run test with testargs, stopping at location.
