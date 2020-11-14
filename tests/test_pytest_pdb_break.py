@@ -371,7 +371,7 @@ def test_collect_only(testdir_setup):
     # Arg parse still runs, but fake file means our init isn't called
     result = testdir_setup.runpytest_subprocess("--break=fake.py:2",
                                                 "--collectonly")
-    result.stdout.fnmatch_lines(["*collected*", "*no tests ran*"])
+    result.stdout.fnmatch_lines(["*collected*"])
 
 
 def test_two_funcs_simple(testdir_two_funcs):
