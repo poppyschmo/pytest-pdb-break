@@ -1,8 +1,8 @@
 ---
 sudo: false
-dist: xenial
+dist: bionic
 language: python
-python: 3.8
+python: 3.9
 before_install: deactivate
 notifications:
   email:
@@ -13,24 +13,19 @@ notifications:
 jobs:
   include:
     - name: tox
-      python: 3.6
       install:
         - |
-          archive_url=https://storage.googleapis.com/travis-ci-language-archives
-          archive_url+=/python/binaries/ubuntu/16.04/x86_64/python-3.8.tar.bz2
-          curl -sSf --retry 5 -o python-3.8.tar.bz2 $archive_url
-          sudo tar xjf python-3.8.tar.bz2 --directory /
-          sudo chown -R travis:travis /opt/python
           ls -alh /opt/python
           versions=$(cd /opt/python; ls -1 | sort -Vr )
           versions=$(echo $versions)
           declare -p versions
           pyenv rehash
           pyenv shell $versions
+        - python3.9 --version
         - python3.8 --version
         - python3.7 --version
         - python3.6 --version
-        - python3.6 -mpip -V
+        - python3.9 -mpip -V
         - pip install tox
       script: tox
     - &test-emacs
@@ -59,7 +54,7 @@ jobs:
         - EMACS_PY35=1
     - name: vim8
       install:
-        - pyenv shell 3.8
+        - pyenv shell 3.9
         - sudo add-apt-repository -y ppa:jonathonf/vim
         - sudo apt-get update -q
         - sudo apt-get install -y vim
@@ -67,7 +62,7 @@ jobs:
       script: cd vim && make vim8
     - name: neovim
       install:
-        - pyenv shell 3.8
+        - pyenv shell 3.9
         - |
           export TRAVIS_BUILD_DIR=/opt
           url=https://raw.githubusercontent.com/neovim/bot-ci
@@ -75,18 +70,3 @@ jobs:
           eval "$(curl -Ss $url) nightly-x64"
         - nvim --version
       script: cd vim && make neovim
-    - stage: deploy
-      name: PyPI
-      before_install: skip
-      script: skip
-      deploy:
-        provider: pypi
-        distributions: sdist bdist_wheel
-        skip_upload_docs: true
-        user: poppyschmo
-        password:
-          secure: "gz/YHqvK9MPb9rI5fcUR1igwb2XlAIcQhPxtGLcf2PXHtCq1aVXjBH7uWtOyxwpp2j2EboLepY18u31ZS0AbXqLHzjH/omcDqAmLlMm4Aqd1lHpXu/s908PaxjCH6/ph1f8vSQ5J4J5K/g3kkqSNJgjY54VzLZk4DZBGloMQyAfGjOHd5Zbj89959qCvxtJqpG1+Vk50qMynjJn/ViidMZ3CpJ/nt4YjX9hMY1EwR2b4jUyJk/6V4iLOVJha1QD9nL2X56aC+QOUpUuc+gIlPA5k0WZX1XgVydz/waW+3uHEqsUcAiIEiYT7Z08XclV3iO0g68jUYdbCb+ZFwQqXhFXRd3/fG39S9GMBWoChUl8qn72WPvdQ1TRug6YJqF3qzOksChjqd4BKDvh20twLDwAfIXJmDK5Szqiaijz7PJOyaBBKUA8KFyyz27Yuo92P5mSQP9/QRPFteISZbI/FXWrAQOlrCrmAehumPxxtPZueLgAzi6SkXrXSzHur2IRhf5Z4ORQQdYbrkjPV9bfvCgCQvQUvU37WzeW2cnw2k1fsi2m/pTO8UFmAOgFiVWjO+NWtUc0ML7guoP/WoElW06BmexSqkte1xH7Klu/CI0PIuFV5kGtEnRkeFsHqp236o5cJSnLwlflmSBhK7AXVSK5O2+rv2LtzbF/D5L3TUCw="
-        on:
-          repo: poppyschmo/pytest-pdb-break
-          tags: true
-
